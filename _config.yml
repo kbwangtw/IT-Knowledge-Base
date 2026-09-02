@@ -1,8 +1,9 @@
 title: IT Knowledge Base
-description: PVE、PBS、ProxCenter、Ceph、Synology 與網路維運知識庫
+description: PVE、PBS、ProxCenter、Ceph、Synology、硬體與網路維運知識庫
 lang: zh-TW
 theme: minima
 markdown: kramdown
 permalink: pretty
 exclude:
   - README.md
+
