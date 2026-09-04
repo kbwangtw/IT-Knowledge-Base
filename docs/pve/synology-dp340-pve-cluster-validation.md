@@ -10,6 +10,10 @@ categories: [PVE, Synology, Backup, Recovery, DR, Ceph]
 .kb-hero{padding:2rem;border-radius:18px;background:linear-gradient(135deg,#15324a,#245f73);color:#fff;margin:1rem 0 1.5rem}.kb-hero h1{margin:0 0 .75rem;color:#fff;line-height:1.25}.kb-hero p{margin:.4rem 0;max-width:58rem}.kb-badges{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem}.kb-badge{padding:.3rem .65rem;border:1px solid rgba(255,255,255,.35);border-radius:999px;background:rgba(255,255,255,.1);font-size:.85rem}.kb-alert{border-left:5px solid #d97706;background:#fff7ed;padding:1rem 1.1rem;border-radius:8px;margin:1.25rem 0}.kb-info{border-left:5px solid #2563eb;background:#eff6ff;padding:1rem 1.1rem;border-radius:8px;margin:1.25rem 0}.kb-toc{background:#f5f7f8;border:1px solid #d8e0e5;border-radius:14px;padding:1rem 1.25rem;margin:1.5rem 0}.kb-toc ol{columns:2}.kb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin:1rem 0}.kb-card{border:1px solid #d8e0e5;border-radius:14px;padding:1rem;background:#fff}.kb-card h3{margin-top:0;color:#15324a}.test-card{border:1px solid #d8e0e5;border-radius:16px;margin:1.35rem 0;overflow:hidden}.test-head{display:flex;align-items:center;gap:.8rem;background:#15324a;color:#fff;padding:1rem 1.2rem}.test-num{display:grid;place-items:center;min-width:2.2rem;height:2.2rem;border-radius:50%;background:#fff;color:#15324a;font-weight:700}.test-body{padding:1.1rem 1.25rem}.verify-tag{display:inline-block;background:#fff3cd;color:#664d03;border:1px solid #ffecb5;border-radius:6px;padding:.25rem .5rem;font-size:.85rem;font-weight:600}.result-table{display:block;overflow-x:auto;white-space:nowrap}.kb-signoff{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:1.5rem}.kb-signoff>div{border-bottom:1px solid #666;padding:1.2rem .25rem .25rem}.print-only{display:none}@media(max-width:760px){.kb-grid,.kb-signoff{grid-template-columns:1fr}.kb-toc ol{columns:1}.kb-hero{padding:1.35rem}.result-table{font-size:.88rem}}@media print{.site-header,.site-footer,.kb-toc{display:none!important}.wrapper{max-width:none!important}.kb-hero{background:none!important;color:#000;border:2px solid #333;padding:1rem}.kb-hero h1{color:#000}.kb-card,.test-card{break-inside:avoid}.test-head{background:#eee!important;color:#000}.print-only{display:block}.result-table{white-space:normal;font-size:9pt}}
 </style>
 
+<style>
+.video-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin:1rem 0}.video-card{border:1px solid #d8e0e5;border-radius:14px;overflow:hidden;background:#fff}.video-card h3,.video-card p{margin:.85rem 1rem}.video-frame{position:relative;padding-top:56.25%;background:#111}.video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}@media(max-width:760px){.video-grid{grid-template-columns:1fr}}@media print{.video-frame{display:none!important}.video-card{break-inside:avoid}}
+</style>
+
 <div class="kb-hero">
 <h1>Synology DP340 × PVE Cluster<br>備份與原機／異機還原演練計畫</h1>
 <p>適用於 Proxmox VE 9.2.11 三節點叢集、Ceph VM_Pool，以及 Synology DP340 ActiveProtect Manager 2.0-88101。涵蓋容器與 Guest OS 的備份、原節點還原、跨節點還原及全程錄影。</p>
@@ -112,6 +116,23 @@ YYYYMMDD_DP340-PVE_<CASE-ID>_<SOURCE>_<TARGET>_part01.mp4
 YYYYMMDD_DP340-PVE_validation-report.pdf
 YYYYMMDD_DP340-PVE_evidence-checksums.txt
 ~~~
+
+### 已提供的演練影片
+
+<div class="video-grid">
+<article class="video-card">
+<div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/N4TgeOz_Oz4" title="Synology DP340 備份 PVE Cluster 演練影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div>
+<h3>備份演練</h3>
+<p><a href="https://youtu.be/N4TgeOz_Oz4" target="_blank" rel="noopener noreferrer">在 YouTube 開啟備份影片</a></p>
+</article>
+<article class="video-card">
+<div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/6kksyT5lLUw" title="Synology DP340 還原 PVE Cluster 演練影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div>
+<h3>還原演練</h3>
+<p><a href="https://youtu.be/6kksyT5lLUw" target="_blank" rel="noopener noreferrer">在 YouTube 開啟還原影片</a></p>
+</article>
+</div>
+
+<div class="kb-alert"><strong>證據判讀：</strong>影片是演練佐證，仍須配合 APM／PVE job log、還原點、RPO／RTO、Corosync／Ceph 前後狀態及測試資料 checksum，才能完成 Pass／Fail 簽核。</div>
 
 <h2 id="prepare">5. 演練前置準備</h2>
 
@@ -217,6 +238,8 @@ pvesm status
 | 證據 | 檔名／位置 | SHA-256／Job ID |
 |---|---|---|
 | 全程錄影 |  |  |
+| 備份演練影片 | https://youtu.be/N4TgeOz_Oz4 | YouTube ID：N4TgeOz_Oz4 |
+| 還原演練影片 | https://youtu.be/6kksyT5lLUw | YouTube ID：6kksyT5lLUw |
 | APM 備份紀錄 |  |  |
 | APM 原機還原紀錄 |  |  |
 | APM 異機還原紀錄 |  |  |
