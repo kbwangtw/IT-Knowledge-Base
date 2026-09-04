@@ -2,6 +2,7 @@
 layout: default
 title: "Synology DP340 備份還原 PVE Cluster：SOP 驗證計畫"
 date: 2026-09-02
+last_updated: 2026-09-04
 categories: [PVE, Synology, Backup, DR]
 ---
 
@@ -12,10 +13,10 @@ categories: [PVE, Synology, Backup, DR]
 <div class="kb-hero">
   <h1>Synology DP340 備份還原 PVE Cluster<br>SOP 驗證計畫</h1>
   <p>適用於 3-Node Proxmox VE Cluster；每個 Node 配置 2 張 2.5GbE，其中 Service／Management 獨立，Backup Data 與 Corosync 共用另一張介面。</p>
-  <div class="kb-badges"><span class="kb-badge">Backup & Recovery</span><span class="kb-badge">Network Isolation</span><span class="kb-badge">HA / DR Drill</span><span class="kb-badge">Ransomware Readiness</span></div>
+  <div class="kb-badges"><span class="kb-badge">APM 2.0</span><span class="kb-badge">Backup & Recovery</span><span class="kb-badge">Network Isolation</span><span class="kb-badge">HA / DR Drill</span><span class="kb-badge">Ransomware Readiness</span></div>
 </div>
 
-<div class="kb-alert"><strong>文件定位：</strong>本頁是上線前驗證計畫，不是產品功能保證。畫面名稱、支援的 Proxmox VE 版本、API 權限、CBT／去重、Instant Restore 傳輸協定、背景回遷、不可變備份與管理員刪除限制，均需依 <strong>Synology ActiveProtect / Proxmox VE 實際版本驗證</strong>，並以當版官方文件與實機 PoC 為準。</div>
+<div class="kb-alert"><strong>文件定位：</strong>現場 ActiveProtect Manager 主版本為 <strong>APM 2.0</strong>。本頁是上線前驗證計畫，不是產品功能保證。畫面名稱、支援的 Proxmox VE 版本、API 權限、CBT／去重、Instant Restore 傳輸協定、背景回遷、不可變備份與管理員刪除限制，均需依 <strong>APM 2.0 實際 build、DP340 韌體與 Proxmox VE 版本驗證</strong>，並以相應版本官方文件與實機 PoC 為準。</div>
 
 <nav class="kb-toc" aria-label="章節導覽">
 <strong>章節導覽</strong>
@@ -37,7 +38,7 @@ categories: [PVE, Synology, Backup, DR]
 |---|---|
 | PVE Cluster | 3 節點 online、`pvecm status` 顯示 quorate、無既存 Corosync 告警 |
 | 儲存與網路 | 目標 storage 健康；兩張 2.5GbE 的 VLAN／路由／ACL、共享介面的 QoS 與速率限制已記錄 |
-| DP340 / APM | 韌體、APM 版本、授權與 Proxmox VE 相容性已確認 |
+| DP340 / APM | ActiveProtect Manager `2.0`；執行前補記完整 build／更新層級、DP340 韌體與授權，並確認 Proxmox VE 相容性 |
 | 回復點 | 3 台測試 VM 均已標記；含 Windows／Linux，且無正式服務依賴 |
 | 安全與稽核 | Token Secret 不進入文件；已啟用時間同步、工作與系統日誌 |
 | 回復方案 | 刪除／關機演練具有回復步驟、停止條件、聯絡人與維護窗口 |
@@ -82,7 +83,7 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 5. 將角色套用在最小必要路徑，並確認「Privilege Separation」設定是否影響 Token 權限繼承。
 6. 先以唯讀／探索操作測試，再執行備份。若缺權限，只補足錯誤訊息所證實的必要權限，不直接授予 Administrator。
 
-<span class="verify-tag">需依 Synology ActiveProtect / Proxmox VE 實際版本驗證</span> DP340 所需的精確權限集合、是否支援 API Token、Token 格式與叢集探索行為。
+<span class="verify-tag">需依 APM 2.0 / DP340 韌體 / Proxmox VE 實際版本驗證</span> DP340 所需的精確權限集合、是否支援 API Token、Token 格式與叢集探索行為。
 
 ### 3.2 設定 DP340 與 APM 串接
 
@@ -93,7 +94,7 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 5. 確認可探索預期的 3 個節點與測試 VM，且沒有非預期資產。
 6. 在 PVE 與交換器側確認實際 API 與資料連線使用正確介面；將截圖、時間與介面計數器納入證據。
 
-<span class="verify-tag">需依 Synology ActiveProtect / Proxmox VE 實際版本驗證</span> APM 選單名稱、Proxmox VE 保護來源支援版本、叢集自動探索方式及憑證驗證流程。
+<span class="verify-tag">需依 APM 2.0 / DP340 韌體 / Proxmox VE 實際版本驗證</span> APM 選單名稱、Proxmox VE 保護來源支援版本、叢集自動探索方式及憑證驗證流程。
 
 <h2 id="tests">4. 五個驗證測試案例</h2>
 
@@ -114,7 +115,7 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 1. 在 3 台測試 VM 寫入可校驗的新資料，記錄大小與 checksum。
 2. 觸發第二次備份，記錄執行時間、來源 Data NIC 傳輸量與 DP340 容量變化。
 3. 比較首次與第二次備份，並從 APM 擷取其所提供的去重／壓縮／儲存效率指標。
-<h4>判定</h4>第二次備份成功且新資料可由還原點取回；增量與容量節省比率採實測數據。<span class="verify-tag">需依 Synology ActiveProtect / Proxmox VE 實際版本驗證</span> CBT、全域去重的支援範圍、統計口徑與重設條件。
+<h4>判定</h4>第二次備份成功且新資料可由還原點取回；增量與容量節省比率採實測數據。<span class="verify-tag">需依 APM 2.0 / DP340 韌體 / Proxmox VE 實際版本驗證</span> CBT、全域去重的支援範圍、統計口徑與重設條件。
 <h4>記錄</h4>異動量、傳輸量、增量時間、儲存成長量、去重／壓縮比、checksum。
 </div></section>
 
@@ -126,7 +127,7 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 3. 分別記錄提交、VM 可啟動、OS ready、應用服務可登入的時間。
 4. 觀察資料路徑、暫存 storage、效能與後續資料落地／回遷狀態；完成後驗證資料一致性。
 <h4>判定</h4>還原 VM 在核准的 RTO 目標內提供服務，且資料校驗成功。原始草案中的「1–2 分鐘」、「以 NFS 掛載」與「自動 Live Migration 回本地」均不是預設保證。
-<h4>必要確認</h4><span class="verify-tag">需依 Synology ActiveProtect / Proxmox VE 實際版本驗證</span> 是否支援 Instant Restore、實際協定、PVE storage 呈現方式、背景回遷是否自動，以及適用的 VM／storage／版本限制。
+<h4>必要確認</h4><span class="verify-tag">需依 APM 2.0 / DP340 韌體 / Proxmox VE 實際版本驗證</span> 是否支援 Instant Restore、實際協定、PVE storage 呈現方式、背景回遷是否自動，以及適用的 VM／storage／版本限制。
 </div></section>
 
 <section class="test-card"><div class="test-head"><span class="test-num">04</span><strong>跨節點完整還原</strong></div><div class="test-body">
@@ -136,7 +137,7 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 2. 以核准方式關閉或隔離 Node A；不得在未評估 fencing／HA 影響時直接斷電。
 3. 從 DP340 選擇完整還原，指定健康節點、新 VMID（建議）與目標 storage。
 4. 啟動前核對 MAC、IP、bridge 與 guest 內靜態網路；啟動後驗證 OS、服務及 checksum。
-<h4>判定</h4>完整還原成功、服務網路經人工確認後正常，資料一致性通過；記錄實際 RTO／RPO。跨節點支援矩陣與網路設定保留行為 <span class="verify-tag">需依 Synology ActiveProtect / Proxmox VE 實際版本驗證</span>。
+<h4>判定</h4>完整還原成功、服務網路經人工確認後正常，資料一致性通過；記錄實際 RTO／RPO。跨節點支援矩陣與網路設定保留行為 <span class="verify-tag">需依 APM 2.0 / DP340 韌體 / Proxmox VE 實際版本驗證</span>。
 </div></section>
 
 <section class="test-card"><div class="test-head"><span class="test-num">05</span><strong>不可變備份與權限邊界</strong></div><div class="test-body">
@@ -147,7 +148,7 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 3. 保存 UI 訊息、audit log、事件代碼、帳號角色與時間戳。
 4. 驗證遭拒後還原點仍可列出並可執行測試還原。
 <h4>判定</h4>結果必須逐角色記錄。不得僅因一般 UI 刪除被拒，就推論遭入侵的最高權限管理員、設備重設或其他控制面也無法破壞資料。
-<h4>必要確認</h4><span class="verify-tag">需依 Synology ActiveProtect / Proxmox VE 實際版本驗證</span> 不可變功能是否存在、授權／儲存限制、鎖定是否可延長或縮短、哪些角色可繞過，以及設備重設／保固維修情境的行為。
+<h4>必要確認</h4><span class="verify-tag">需依 APM 2.0 / DP340 韌體 / Proxmox VE 實際版本驗證</span> 不可變功能是否存在、授權／儲存限制、鎖定是否可延長或縮短、哪些角色可繞過，以及設備重設／保固維修情境的行為。
 </div></section>
 
 <h2 id="signoff">5. Sign-off 驗證結果表格</h2>
@@ -173,7 +174,7 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 
 <div class="kb-signoff"><div>執行人／日期</div><div>系統負責人／日期</div><div>變更核准人／日期</div></div>
 
-<p class="print-only">文件列印時間：________________　APM 版本：________________　PVE 版本：________________</p>
+<p class="print-only">文件列印時間：________________　APM 版本：2.0（Build：________________）　DP340 韌體：________________　PVE 版本：________________</p>
 
 <h2 id="operations">6. 長期維運與容量管理建議</h2>
 
@@ -201,6 +202,8 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 
 ---
 
-**文件狀態：** 待依現場 DP340、ActiveProtect Manager 與 Proxmox VE 版本完成 PoC 後簽核。  
+**版本基線：** ActiveProtect Manager 2.0；完整 build、DP340 韌體與 Proxmox VE 版本待現場補記。
+
+**文件狀態：** 待依上述完整版本組合完成 PoC 後簽核。
 **敏感資訊：** 文件與截圖不得包含 Token Secret、密碼、Private Key、完整憑證或可重用的 Session。
 
