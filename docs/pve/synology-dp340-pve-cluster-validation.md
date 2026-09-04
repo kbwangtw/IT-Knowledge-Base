@@ -12,11 +12,11 @@ categories: [PVE, Synology, Backup, Recovery, DR, Ceph]
 
 <div class="kb-hero">
 <h1>Synology DP340 × PVE Cluster<br>備份與原機／異機還原演練計畫</h1>
-<p>適用於 Proxmox VE 9.2.11 三節點叢集、Ceph VM_Pool，以及 Synology DP340 ActiveProtect Manager 2.0。涵蓋容器與 Guest OS 的備份、原節點還原、跨節點還原及全程錄影。</p>
-<div class="kb-badges"><span class="kb-badge">PVE 9.2.11</span><span class="kb-badge">APM 2.0</span><span class="kb-badge">Ceph VM_Pool</span><span class="kb-badge">Same-Node Restore</span><span class="kb-badge">Cross-Node Restore</span></div>
+<p>適用於 Proxmox VE 9.2.11 三節點叢集、Ceph VM_Pool，以及 Synology DP340 ActiveProtect Manager 2.0-88101。涵蓋容器與 Guest OS 的備份、原節點還原、跨節點還原及全程錄影。</p>
+<div class="kb-badges"><span class="kb-badge">PVE 9.2.11</span><span class="kb-badge">APM 2.0-88101</span><span class="kb-badge">Ceph VM_Pool</span><span class="kb-badge">Same-Node Restore</span><span class="kb-badge">Cross-Node Restore</span></div>
 </div>
 
-<div class="kb-alert"><strong>版本聲明：</strong>本文件是演練計畫，不是產品功能保證。DP340 對 PVE 9.2.11、LXC／VM、API Token、增量備份、Instant Restore、跨節點還原及還原後網路設定的實際支援方式，均需依 <strong>APM 2.0 完整 build、DP340 韌體及官方相容矩陣實機驗證</strong>。</div>
+<div class="kb-alert"><strong>版本聲明：</strong>本文件是演練計畫，不是產品功能保證。DP340 對 PVE 9.2.11、LXC／VM、API Token、增量備份、Instant Restore、跨節點還原及還原後網路設定的實際支援方式，均需依 <strong>APM 2.0-88101、DP340 韌體及官方相容矩陣實機驗證</strong>。</div>
 
 <nav class="kb-toc" aria-label="章節導覽"><strong>章節導覽</strong><ol>
 <li><a href="#objective">目的與標準</a></li><li><a href="#environment">環境基線</a></li><li><a href="#network">網路與資料路徑</a></li><li><a href="#recording">錄影與證據</a></li><li><a href="#prepare">前置準備</a></li><li><a href="#cases">演練案例</a></li><li><a href="#signoff">結果與簽核</a></li><li><a href="#operations">維運建議</a></li>
@@ -42,7 +42,7 @@ categories: [PVE, Synology, Backup, Recovery, DR, Ceph]
 | Ceph 資料碟 | 每節點 2 TB M.2 SSD × 1，加入 Ceph 儲存池 |
 | PVE Storage | Ceph 儲存池內的 VM_Pool，供 3 節點共同使用 |
 | 備份設備 | Synology DP340 備份一體機 |
-| DP340 作業／管理平台 | ActiveProtect Manager（APM）2.0；完整 build 待補記 |
+| DP340 作業／管理平台 | ActiveProtect Manager（APM）2.0-88101 |
 | 保護對象 | PVE Cluster 內的 LXC 容器及虛擬機 Guest OS |
 | Management / Service | 192.168.10.0/24；TL-SG108-M2（2.5G）；Node10–12 各為 2.5G，DP340 LAN 1 為 1G |
 | Data / Corosync | 172.16.10.0/24；TL-SX-1008；DP340 LAN 2 為 10G，Node10–12 各為 2.5G |
@@ -56,7 +56,7 @@ categories: [PVE, Synology, Backup, Recovery, DR, Ceph]
 | Management IP | Node10：192.168.10.10　Node11：192.168.10.11　Node12：192.168.10.12 |
 | Data / Corosync IP | Node10：172.16.10.10　Node11：172.16.10.11　Node12：172.16.10.12 |
 | DP340 LAN 1 / LAN 2 IP | Management：192.168.10.18　Data：172.16.10.18 |
-| APM build / DP340 韌體 | APM：________　韌體：________ |
+| APM build / DP340 韌體 | APM：2.0-88101　DP340 韌體：________ |
 | Ceph 參考基線 | 提供截圖顯示：3 OSD Up／In、0 Down／Out；97 PG active+clean；Node10–12 的 Monitor／Manager／Metadata Server 均呈綠色 |
 
 <div class="kb-info"><strong>Ceph 基準證據：</strong>上述狀態來自本文件更新時提供的管理畫面，只代表截圖當下。正式演練開始前仍須重新保存 <code>ceph -s</code>、<code>pvesm status</code> 與 PVE Ceph 畫面，並確認沒有 recovery、rebalance 或重大 scrub。</div>
@@ -133,20 +133,20 @@ pvesm status
 
 ### DP340 串接
 
-1. 從 Management／Service 網段連線至 DP340 LAN 1（192.168.10.18），登入 APM 2.0。
+1. 從 Management／Service 網段連線至 DP340 LAN 1（192.168.10.18），登入 APM 2.0-88101。
 2. 確認 DP340 LAN 2 為 172.16.10.18/24，且沒有非預期 default route。
 3. 使用專用 PVE 帳號／API Token；Secret 只存密碼庫，不使用日常 root 帳號。
 4. 新增 PVE 保護來源時使用節點的 Data／Corosync 位址：Node10（172.16.10.10）、Node11（172.16.10.11）或 Node12（172.16.10.12）。
 5. 確認可探索 3 節點、測試 VM／LXC 與預期 storage。
 
-<span class="verify-tag">需依 APM 2.0 / DP340 韌體 / PVE 9.2.11 實際版本驗證</span> API 權限、Token、叢集探索、LXC／VM 支援、TLS 憑證及 storage mapping。
+<span class="verify-tag">需依 APM 2.0-88101 / DP340 韌體 / PVE 9.2.11 實際版本驗證</span> API 權限、Token、叢集探索、LXC／VM 支援、TLS 憑證及 storage mapping。
 
 <h2 id="cases">6. 備份及原機／異機還原演練</h2>
 
 <section class="test-card"><div class="test-head"><span class="test-num">01</span><strong>完整備份與共網壓力基線</strong></div><div class="test-body">
 
 1. 錄製 PVE、Ceph、VM_Pool 與測試工作負載的前置狀態。
-2. 在 APM 2.0 先以單一測試對象、單一工作執行完整備份。
+2. 在 APM 2.0-88101 先以單一測試對象、單一工作執行完整備份。
 3. 記錄 job ID、來源節點、開始／結束時間、還原點、資料量及平均／峰值頻寬。
 4. 監控 PVE 2.5G 共用介面、DP340 LAN 2、TL-SX-1008 埠、Corosync、quorum 與 Ceph。
 
@@ -230,7 +230,7 @@ pvesm status
 
 <div class="kb-signoff"><div>執行人／日期</div><div>系統負責人／日期</div><div>見證／核准人／日期</div></div>
 
-<p class="print-only">演練編號：________　APM：2.0 Build ________　DP340 韌體：________　PVE：9.2.11</p>
+<p class="print-only">演練編號：________　APM：2.0-88101　DP340 韌體：________　PVE：9.2.11</p>
 
 <h2 id="operations">8. 演練後維運建議</h2>
 
@@ -245,7 +245,7 @@ pvesm status
 
 ---
 
-**目前版本基線：** ActiveProtect Manager 2.0、Proxmox VE 9.2.11；APM 完整 build 與 DP340 韌體待補記。
+**目前版本基線：** ActiveProtect Manager 2.0-88101、Proxmox VE 9.2.11；DP340 韌體版本待補記。
 
 **文件狀態：** 待完成完整備份、原機還原、異機還原及全程錄影後簽核。
 
