@@ -7,7 +7,7 @@ categories: [PVE, Synology, Backup, Recovery, DR, Ceph]
 ---
 
 <style>
-.kb-hero{padding:2rem;border-radius:18px;background:linear-gradient(135deg,#15324a,#245f73);color:#fff;margin:1rem 0 1.5rem}.kb-hero h1{margin:0 0 .75rem;color:#fff;line-height:1.25}.kb-hero p{margin:.4rem 0;max-width:58rem}.kb-badges{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem}.kb-badge{padding:.3rem .65rem;border:1px solid rgba(255,255,255,.35);border-radius:999px;background:rgba(255,255,255,.1);font-size:.85rem}.kb-alert{border-left:5px solid #d97706;background:#fff7ed;padding:1rem 1.1rem;border-radius:8px;margin:1.25rem 0}.kb-info{border-left:5px solid #2563eb;background:#eff6ff;padding:1rem 1.1rem;border-radius:8px;margin:1.25rem 0}.kb-toc{background:#f5f7f8;border:1px solid #d8e0e5;border-radius:14px;padding:1rem 1.25rem;margin:1.5rem 0}.kb-toc ol{columns:2}.kb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin:1rem 0}.kb-card{border:1px solid #d8e0e5;border-radius:14px;padding:1rem;background:#fff}.kb-card h3{margin-top:0;color:#15324a}.test-card{border:1px solid #d8e0e5;border-radius:16px;margin:1.35rem 0;overflow:hidden}.test-head{display:flex;align-items:center;gap:.8rem;background:#15324a;color:#fff;padding:1rem 1.2rem}.test-num{display:grid;place-items:center;min-width:2.2rem;height:2.2rem;border-radius:50%;background:#fff;color:#15324a;font-weight:700}.test-body{padding:1.1rem 1.25rem}.verify-tag{display:inline-block;background:#fff3cd;color:#664d03;border:1px solid #ffecb5;border-radius:6px;padding:.25rem .5rem;font-size:.85rem;font-weight:600}.result-table{display:block;overflow-x:auto;white-space:nowrap}.kb-signoff{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:1.5rem}.kb-signoff>div{border-bottom:1px solid #666;padding:1.2rem .25rem .25rem}.video-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin:1rem 0}.video-card{border:1px solid #d8e0e5;border-radius:14px;overflow:hidden;background:#fff}.video-card h3,.video-card p{margin:.85rem 1rem}.video-frame{position:relative;padding-top:56.25%;background:#111}.video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}.print-only{display:none}@media(max-width:760px){.kb-grid,.kb-signoff{grid-template-columns:1fr}.kb-toc ol{columns:1}.kb-hero{padding:1.35rem}.result-table{font-size:.88rem}.video-grid{grid-template-columns:1fr}}@media print{.site-header,.site-footer,.kb-toc,.video-frame{display:none!important}.wrapper{max-width:none!important}.kb-hero{background:none!important;color:#000;border:2px solid #333;padding:1rem}.kb-hero h1{color:#000}.kb-card,.test-card,.video-card{break-inside:avoid}.test-head{background:#eee!important;color:#000}.print-only{display:block}.result-table{white-space:normal;font-size:9pt}}
+.kb-hero{padding:2rem;border-radius:18px;background:linear-gradient(135deg,#15324a,#245f73);color:#fff;margin:1rem 0 1.5rem}.kb-hero h1{margin:0 0 .75rem;color:#fff;line-height:1.25}.kb-hero p{margin:.4rem 0;max-width:58rem}.kb-badges{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem}.kb-badge{padding:.3rem .65rem;border:1px solid rgba(255,255,255,.35);border-radius:999px;background:rgba(255,255,255,.1);font-size:.85rem}.kb-alert{border-left:5px solid #d97706;background:#fff7ed;padding:1rem 1.1rem;border-radius:8px;margin:1.25rem 0}.kb-info{border-left:5px solid #2563eb;background:#eff6ff;padding:1rem 1.1rem;border-radius:8px;margin:1.25rem 0}.kb-toc{background:#f5f7f8;border:1px solid #d8e0e5;border-radius:14px;padding:1rem 1.25rem;margin:1.5rem 0}.kb-toc ol{columns:2}.kb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin:1rem 0}.kb-card{border:1px solid #d8e0e5;border-radius:14px;padding:1rem;background:#fff}.kb-card h3{margin-top:0;color:#15324a}.kb-card p{margin:.35rem 0 0;line-height:1.7}.test-card{border:1px solid #d8e0e5;border-radius:16px;margin:1.35rem 0;overflow:hidden}.test-head{display:flex;align-items:center;gap:.8rem;background:#15324a;color:#fff;padding:1rem 1.2rem}.test-num{display:grid;place-items:center;min-width:2.2rem;height:2.2rem;border-radius:50%;background:#fff;color:#15324a;font-weight:700}.test-body{padding:1.15rem 1.35rem}.test-body ol{margin:.15rem 0 1rem;padding-left:1.65rem}.test-body li{margin:.5rem 0;line-height:1.75}.test-result{background:#f7fafc;border-left:4px solid #2563eb;border-radius:6px;padding:.8rem 1rem;margin-top:1rem}.test-note{background:#fff7ed;border-left:4px solid #d97706;border-radius:6px;padding:.8rem 1rem;margin-top:.8rem}.test-result strong,.test-note strong{display:block;margin-bottom:.25rem;color:#15324a}.verify-tag{display:inline-block;background:#fff3cd;color:#664d03;border:1px solid #ffecb5;border-radius:6px;padding:.25rem .5rem;font-size:.85rem;font-weight:600}.result-table{display:block;overflow-x:auto;white-space:nowrap}.kb-signoff{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:1.5rem}.kb-signoff>div{border-bottom:1px solid #666;padding:1.2rem .25rem .25rem}.video-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin:1rem 0}.video-card{border:1px solid #d8e0e5;border-radius:14px;overflow:hidden;background:#fff}.video-card h3,.video-card p{margin:.85rem 1rem}.video-frame{position:relative;padding-top:56.25%;background:#111}.video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}.print-only{display:none}@media(max-width:760px){.kb-grid,.kb-signoff{grid-template-columns:1fr}.kb-toc ol{columns:1}.kb-hero{padding:1.35rem}.result-table{font-size:.88rem}.video-grid{grid-template-columns:1fr}.test-head{align-items:flex-start;padding:.9rem 1rem}.test-head strong{font-size:1.05rem;line-height:1.45}.test-body{padding:1rem}.test-body ol{padding-left:1.35rem;margin-bottom:.9rem}.test-body li{margin:.7rem 0;line-height:1.8}.test-result,.test-note{padding:.8rem .9rem}.kb-card{padding:.9rem}.kb-card h3{margin-bottom:.45rem}}@media print{.site-header,.site-footer,.kb-toc,.video-frame{display:none!important}.wrapper{max-width:none!important}.kb-hero{background:none!important;color:#000;border:2px solid #333;padding:1rem}.kb-hero h1{color:#000}.kb-card,.test-card,.video-card{break-inside:avoid}.test-head{background:#eee!important;color:#000}.print-only{display:block}.result-table{white-space:normal;font-size:9pt}}
 </style>
 
 <div class="kb-hero">
@@ -20,9 +20,7 @@ categories: [PVE, Synology, Backup, Recovery, DR, Ceph]
 
 <div class="kb-alert"><strong>版本聲明：</strong>本文件是驗證計畫，不是產品功能保證。API Token、增量備份、Instant Restore、跨節點還原、storage mapping、還原後自動開機及網路設定等行為，仍須依實際 APM、DP340 韌體、PVE 版本與 Synology 官方相容矩陣驗證。</div>
 
-<nav class="kb-toc" aria-label="章節導覽"><strong>章節導覽</strong><ol>
-<li><a href="#objective">目的與成功標準</a></li><li><a href="#environment">環境基線</a></li><li><a href="#network">網路與資料路徑</a></li><li><a href="#prepare">前置準備</a></li><li><a href="#cases">演練案例</a></li><li><a href="#videos">演練影片</a></li><li><a href="#signoff">結果與簽核</a></li><li><a href="#operations">維運建議</a></li>
-</ol></nav>
+<nav class="kb-toc" aria-label="章節導覽"><strong>章節導覽</strong><ol><li><a href="#objective">目的與成功標準</a></li><li><a href="#environment">環境基線</a></li><li><a href="#network">網路與資料路徑</a></li><li><a href="#prepare">前置準備</a></li><li><a href="#cases">演練案例</a></li><li><a href="#videos">演練影片</a></li><li><a href="#signoff">結果與簽核</a></li><li><a href="#operations">維運建議</a></li></ol></nav>
 
 <h2 id="objective">1. 演練目的與成功標準</h2>
 
@@ -73,11 +71,7 @@ DP340 Data：172.16.10.18（10G）── TL-SX-1008
 三節點 Ceph ── VM_Pool ── VM
 ~~~
 
-<div class="kb-grid">
-<div class="kb-card"><h3>管理路徑</h3>192.168.10.0/24 用於 PVE／APM 管理，不承載大量備份。</div>
-<div class="kb-card"><h3>資料路徑</h3>DP340 Data 介面為 10G，但單一 PVE 節點為 2.5G，因此單節點吞吐上限仍受 PVE 端限制。</div>
-<div class="kb-card"><h3>共網風險</h3>Backup Data 與 Corosync 共用 172.16.10.0/24，應先以單一 Node、單一備份工作驗證，再逐步增加負載。</div>
-</div>
+<div class="kb-grid"><div class="kb-card"><h3>管理路徑</h3><p>192.168.10.0/24 用於 PVE／APM 管理，不承載大量備份。</p></div><div class="kb-card"><h3>資料路徑</h3><p>DP340 Data 介面為 10G，但單一 PVE 節點為 2.5G，因此單節點吞吐上限仍受 PVE 端限制。</p></div><div class="kb-card"><h3>共網風險</h3><p>Backup Data 與 Corosync 共用 172.16.10.0/24，應先以單一 Node、單一備份工作驗證，再逐步增加負載。</p></div></div>
 
 <div class="kb-alert"><strong>停止條件：</strong>如發生 quorum 改變、節點離線、Corosync 延遲／丟包、非預期 fencing／reboot、Ceph 健康惡化、VM_Pool I/O 異常或管理介面失聯，立即停止新增備份／還原工作並保存證據。</div>
 
@@ -114,75 +108,19 @@ pvesm status
 
 <h2 id="cases">5. 備份及原機／異機還原演練</h2>
 
-<section class="test-card"><div class="test-head"><span class="test-num">01</span><strong>完整備份與共網壓力基線</strong></div><div class="test-body">
+<section class="test-card"><div class="test-head"><span class="test-num">01</span><strong>完整備份與共網壓力基線</strong></div><div class="test-body"><ol><li>錄製 PVE、Ceph、VM_Pool 與測試 VM 前置狀態。</li><li>在 APM 先以單一 VM、單一工作執行完整備份。</li><li>記錄 job ID、來源節點、開始／結束時間、還原點、資料量與平均／峰值頻寬。</li><li>監控 PVE Data 介面、DP340 Data 介面、交換器埠、Corosync、quorum 與 Ceph。</li></ol><div class="test-result"><strong>Pass</strong>備份成功、還原點可選，Cluster／Corosync／Ceph 無新增異常，且大量備份流量未誤走 Management 網段。</div></div></section>
 
-1. 錄製 PVE、Ceph、VM_Pool 與測試 VM 前置狀態。
-2. 在 APM 先以單一 VM、單一工作執行完整備份。
-3. 記錄 job ID、來源節點、開始／結束時間、還原點、資料量與平均／峰值頻寬。
-4. 監控 PVE Data 介面、DP340 Data 介面、交換器埠、Corosync、quorum 與 Ceph。
+<section class="test-card"><div class="test-head"><span class="test-num">02</span><strong>增量備份與測試資料</strong></div><div class="test-body"><ol><li>在測試 VM 建立帶時間戳的檔案並記錄 SHA-256。</li><li>再次執行備份，記錄時間、邏輯異動量、實際傳輸量與 DP340 容量變化。</li><li>確認新還原點晚於測試檔案建立時間。</li></ol><div class="test-result"><strong>Pass</strong>第二次備份成功，後續還原可取得測試檔案且 checksum 相符。</div><div class="test-note"><strong>注意</strong><span class="verify-tag">需依實際版本驗證</span> CBT、增量鏈、去重／壓縮與 APM 統計口徑。</div></div></section>
 
-<h4>Pass</h4>備份成功、還原點可選，Cluster／Corosync／Ceph 無新增異常，且大量備份流量未誤走 Management 網段。
-</div></section>
+<section class="test-card"><div class="test-head"><span class="test-num">03</span><strong>原機還原（Same-Node Restore）</strong></div><div class="test-body"><ol><li>記錄來源節點、VMID、MAC、IP、VM_Pool volume 與所選還原點。</li><li>依核准流程關機並隔離、重新命名或刪除原測試 VM。</li><li>在 APM 執行原機還原；若產品支援，優先採新 VMID 並關閉還原後自動開機。</li><li>記錄提交、VM 建立完成、可開機、OS Ready 與服務可用時間。</li><li>首次開機前核對 VMID、MAC、IP、bridge、hostname、HA 與開機順序。</li><li>驗證 OS、網路、服務、測試檔案、SHA-256 與磁碟所在 storage。</li></ol><div class="test-result"><strong>Pass</strong>原節點還原成功，資料與服務正常，沒有重複 VMID／MAC／IP 或非預期 HA 動作。</div></div></section>
 
-<section class="test-card"><div class="test-head"><span class="test-num">02</span><strong>增量備份與測試資料</strong></div><div class="test-body">
+<section class="test-card"><div class="test-head"><span class="test-num">04</span><strong>異機還原（Cross-Node Restore）</strong></div><div class="test-body"><ol><li>確認目標節點 online、quorum、Ceph 與 VM_Pool 容量正常。</li><li>關機並隔離來源 VM；未評估 HA、Ceph 與 fencing 前，不建議直接拔除實體節點電源。</li><li>在 APM 選擇還原點、健康節點、新 VMID 與 VM_Pool。</li><li>還原完成後先核對 VMID、MAC、IP、bridge、hostname 與 HA，再啟動 VM。</li><li>驗證 OS、網路、服務、測試檔案與 checksum，並再次檢查 Cluster 與 Ceph。</li></ol><div class="test-result"><strong>Pass</strong>VM 在另一節點啟動並提供服務，資料完整，VM_Pool、Corosync、quorum 與 Ceph 維持正常。</div><div class="test-note"><strong>注意</strong><span class="verify-tag">需依實際版本驗證</span> 跨節點還原、VMID／MAC、storage mapping 與自動開機行為。</div></div></section>
 
-1. 在測試 VM 建立帶時間戳的檔案並記錄 SHA-256。
-2. 再次執行備份，記錄時間、邏輯異動量、實際傳輸量與 DP340 容量變化。
-3. 確認新還原點晚於測試檔案建立時間。
-
-<h4>Pass</h4>第二次備份成功，後續還原可取得測試檔案且 checksum 相符。
-<h4>注意</h4><span class="verify-tag">需依實際版本驗證</span> CBT、增量鏈、去重／壓縮與 APM 統計口徑。
-</div></section>
-
-<section class="test-card"><div class="test-head"><span class="test-num">03</span><strong>原機還原（Same-Node Restore）</strong></div><div class="test-body">
-
-1. 記錄來源節點、VMID、MAC、IP、VM_Pool volume 與所選還原點。
-2. 依核准流程關機並隔離、重新命名或刪除原測試 VM。
-3. 在 APM 執行原機還原；若產品支援，優先採新 VMID 並關閉還原後自動開機。
-4. 記錄提交、VM 建立完成、可開機、OS Ready 與服務可用時間。
-5. 首次開機前核對 VMID、MAC、IP、bridge、hostname、HA 與開機順序。
-6. 驗證 OS、網路、服務、測試檔案、SHA-256 與磁碟所在 storage。
-
-<h4>Pass</h4>原節點還原成功，資料與服務正常，沒有重複 VMID／MAC／IP 或非預期 HA 動作。
-</div></section>
-
-<section class="test-card"><div class="test-head"><span class="test-num">04</span><strong>異機還原（Cross-Node Restore）</strong></div><div class="test-body">
-
-1. 確認目標節點 online、quorum、Ceph 與 VM_Pool 容量正常。
-2. 關機並隔離來源 VM；未評估 HA、Ceph 與 fencing 前，不建議直接拔除實體節點電源。
-3. 在 APM 選擇還原點、健康節點、新 VMID 與 VM_Pool。
-4. 還原完成後先核對 VMID、MAC、IP、bridge、hostname 與 HA，再啟動 VM。
-5. 驗證 OS、網路、服務、測試檔案與 checksum，並再次檢查 Cluster 與 Ceph。
-
-<h4>Pass</h4>VM 在另一節點啟動並提供服務，資料完整，VM_Pool、Corosync、quorum 與 Ceph 維持正常。
-<h4>注意</h4><span class="verify-tag">需依實際版本驗證</span> 跨節點還原、VMID／MAC、storage mapping 與自動開機行為。
-</div></section>
-
-<section class="test-card"><div class="test-head"><span class="test-num">05</span><strong>穩定性觀察與收尾</strong></div><div class="test-body">
-
-1. 還原 VM 至少觀察 30 分鐘，記錄服務 health、CPU、RAM、磁碟 I/O 與應用 log。
-2. 執行 read-only 測試；經核准後才做可回復的寫入／讀回驗證。
-3. 確認原 VM 與還原 VM 沒有重複 IP、排程、外部連線或 production automation。
-4. 保存 APM／PVE job log、前後狀態、截圖、影片與 checksum。
-5. 依核准結果保留、關機或清理還原 VM。
-
-<h4>Pass</h4>服務穩定，Cluster／Ceph 回到基線，證據與副本處置完整。
-</div></section>
+<section class="test-card"><div class="test-head"><span class="test-num">05</span><strong>穩定性觀察與收尾</strong></div><div class="test-body"><ol><li>還原 VM 至少觀察 30 分鐘，記錄服務 health、CPU、RAM、磁碟 I/O 與應用 log。</li><li>執行 read-only 測試；經核准後才做可回復的寫入／讀回驗證。</li><li>確認原 VM 與還原 VM 沒有重複 IP、排程、外部連線或 production automation。</li><li>保存 APM／PVE job log、前後狀態、截圖、影片與 checksum。</li><li>依核准結果保留、關機或清理還原 VM。</li></ol><div class="test-result"><strong>Pass</strong>服務穩定，Cluster／Ceph 回到基線，證據與副本處置完整。</div></div></section>
 
 <h2 id="videos">6. 已提供的演練影片</h2>
 
-<div class="video-grid">
-<article class="video-card">
-<div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/N4TgeOz_Oz4" title="Synology DP340 備份 PVE Cluster 演練影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div>
-<h3>備份演練</h3>
-<p><a href="https://youtu.be/N4TgeOz_Oz4" target="_blank" rel="noopener noreferrer">在 YouTube 開啟備份影片</a></p>
-</article>
-<article class="video-card">
-<div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/6kksyT5lLUw" title="Synology DP340 還原 PVE Cluster 演練影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div>
-<h3>還原演練</h3>
-<p><a href="https://youtu.be/6kksyT5lLUw" target="_blank" rel="noopener noreferrer">在 YouTube 開啟還原影片</a></p>
-</article>
-</div>
+<div class="video-grid"><article class="video-card"><div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/N4TgeOz_Oz4" title="Synology DP340 備份 PVE Cluster 演練影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><h3>備份演練</h3><p><a href="https://youtu.be/N4TgeOz_Oz4" target="_blank" rel="noopener noreferrer">在 YouTube 開啟備份影片</a></p></article><article class="video-card"><div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/6kksyT5lLUw" title="Synology DP340 還原 PVE Cluster 演練影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><h3>還原演練</h3><p><a href="https://youtu.be/6kksyT5lLUw" target="_blank" rel="noopener noreferrer">在 YouTube 開啟還原影片</a></p></article></div>
 
 <div class="kb-info"><strong>證據判讀：</strong>影片僅是演練佐證，正式 Pass／Fail 仍須配合 APM／PVE job log、還原點、RPO／RTO、Corosync／Ceph 前後狀態與測試資料 checksum。</div>
 
@@ -204,14 +142,7 @@ pvesm status
 
 <h2 id="operations">8. 演練後維運建議</h2>
 
-<div class="kb-grid">
-<div class="kb-card"><h3>離峰備份</h3>Data 與 Corosync 共網且無 QoS；大型備份建議安排於離峰時段，先維持一次一個 Node，再依實測結果調整排程與同時工作數。</div>
-<div class="kb-card"><h3>VM 定期還原</h3>至少每季輪流對受 DP340 保護的 VM 執行原機／異機還原；重大升級後追加 smoke test。</div>
-<div class="kb-card"><h3>LXC 另行保護</h3>截至目前 APM 2.0 不支援 Proxmox VE LXC Container 備份，請以 PBS、vzdump 或其他方案建立獨立保留政策與還原演練。</div>
-<div class="kb-card"><h3>Ceph</h3>監控 VM_Pool 容量與 OSD 健康；演練不與 recovery、rebalance 或重大 scrub 同時執行。</div>
-<div class="kb-card"><h3>網路改善</h3>若 Corosync 指標惡化，評估備份限速、QoS，或新增介面／網段分離 Data 與 Corosync。</div>
-<div class="kb-card"><h3>版本與權限</h3>API Token 採專用帳號、密碼庫與輪替；每次記錄 APM、DP340 韌體、PVE、Ceph 與交換器設定。</div>
-</div>
+<div class="kb-grid"><div class="kb-card"><h3>離峰備份</h3><p>Data 與 Corosync 共網且無 QoS；大型備份建議安排於離峰時段，先維持一次一個 Node，再依實測結果調整排程與同時工作數。</p></div><div class="kb-card"><h3>VM 定期還原</h3><p>至少每季輪流對受 DP340 保護的 VM 執行原機／異機還原；重大升級後追加 smoke test。</p></div><div class="kb-card"><h3>LXC 另行保護</h3><p>截至目前 APM 2.0 不支援 Proxmox VE LXC Container 備份，請以 PBS、vzdump 或其他方案建立獨立保留政策與還原演練。</p></div><div class="kb-card"><h3>Ceph</h3><p>監控 VM_Pool 容量與 OSD 健康；演練不與 recovery、rebalance 或重大 scrub 同時執行。</p></div><div class="kb-card"><h3>網路改善</h3><p>若 Corosync 指標惡化，評估備份限速、QoS，或新增介面／網段分離 Data 與 Corosync。</p></div><div class="kb-card"><h3>版本與權限</h3><p>API Token 採專用帳號、密碼庫與輪替；每次記錄 APM、DP340 韌體、PVE、Ceph 與交換器設定。</p></div></div>
 
 ---
 
