@@ -13,7 +13,7 @@ categories: [PVE, Synology, Backup, DR]
 <div class="kb-hero">
   <h1>Synology DP340 備份還原 PVE Cluster<br>SOP 驗證計畫</h1>
   <p>適用於 3-Node Proxmox VE Cluster：DP340 LAN 1（1G）承載 Management／Service；LAN 2（10G）與各 PVE Node 的 2.5G Cluster／Corosync 介面位於同一網段並承載 Backup Data。</p>
-  <div class="kb-badges"><span class="kb-badge">APM 2.0</span><span class="kb-badge">Backup & Recovery</span><span class="kb-badge">Network Isolation</span><span class="kb-badge">HA / DR Drill</span><span class="kb-badge">Ransomware Readiness</span></div>
+  <div class="kb-badges"><span class="kb-badge">APM 2.0</span><span class="kb-badge">Backup & Recovery</span><span class="kb-badge">Shared Data / Corosync</span><span class="kb-badge">HA / DR Drill</span><span class="kb-badge">Ransomware Readiness</span></div>
 </div>
 
 <div class="kb-alert"><strong>文件定位：</strong>現場 ActiveProtect Manager 主版本為 <strong>APM 2.0</strong>。本頁是上線前驗證計畫，不是產品功能保證。畫面名稱、支援的 Proxmox VE 版本、API 權限、CBT／去重、Instant Restore 傳輸協定、背景回遷、不可變備份與管理員刪除限制，均需依 <strong>APM 2.0 實際 build、DP340 韌體與 Proxmox VE 版本驗證</strong>，並以相應版本官方文件與實機 PoC 為準。</div>
