@@ -16,7 +16,7 @@ categories: [PVE, Synology, Backup, Recovery, DR, Ceph]
 <div class="kb-badges"><span class="kb-badge">PVE 9.2.11</span><span class="kb-badge">APM 2.0-88101</span><span class="kb-badge">Ceph VM_Pool</span><span class="kb-badge">VM Backup</span><span class="kb-badge">Same-Node Restore</span><span class="kb-badge">Cross-Node Restore</span></div>
 </div>
 
-<div class="kb-alert"><strong>重要更正：</strong>Synology DP340／ActiveProtect Manager 的 Proxmox VE 保護範圍<strong>不包含 LXC Container</strong>。本文件所有 DP340 備份與還原演練均以 <strong>VM</strong> 為測試對象。LXC 請另行使用 Proxmox Backup Server（PBS）、<code>vzdump</code> 或其他相容方案保護。</div>
+<div class="kb-alert"><strong>重要限制（截至 2026-09-04）：</strong>Synology ActiveProtect Manager（APM）2.0 支援 Proxmox VE 虛擬機（VM）備份與還原，但<strong>目前不支援 Proxmox VE LXC Container 備份</strong>。本文件所有 DP340 備份與還原演練均以 <strong>VM</strong> 為測試對象。LXC 請另行使用 Proxmox Backup Server（PBS）、<code>vzdump</code> 或其他相容方案保護。後續版本支援狀態請以 Synology 官方規格為準。</div>
 
 <div class="kb-alert"><strong>版本聲明：</strong>本文件是驗證計畫，不是產品功能保證。API Token、增量備份、Instant Restore、跨節點還原、storage mapping、還原後自動開機及網路設定等行為，仍須依實際 APM、DP340 韌體、PVE 版本與 Synology 官方相容矩陣驗證。</div>
 
@@ -45,7 +45,7 @@ categories: [PVE, Synology, Backup, Recovery, DR, Ceph]
 | PVE Storage | Ceph 儲存池內的 VM_Pool，供 3 節點共同使用 |
 | 備份設備 | Synology DP340 |
 | 管理平台 | ActiveProtect Manager（APM）2.0-88101 |
-| DP340 保護對象 | **PVE 虛擬機（VM）**；LXC Container 不納入 DP340 備份範圍 |
+| APM 2.0 Proxmox 保護對象 | **PVE 虛擬機（VM）**；截至 2026-09-04 不支援 LXC Container 備份 |
 | Management / Service | 192.168.10.0/24；DP340 管理介面使用此網段 |
 | Data / Corosync | 172.16.10.0/24；DP340 10G Data 介面與 PVE Data／Corosync 共網 |
 | 流量控制 | 目前未設定 QoS、ACL 或備份速率限制 |
@@ -87,7 +87,7 @@ DP340 Data：172.16.10.18（10G）── TL-SX-1008
 
 至少選 2 台測試 VM，建議 Windows／Linux 各 1 台。記錄 VMID、名稱、來源節點、CPU、RAM、磁碟、實際使用量、MAC、IP、bridge、hostname、HA、服務 port 與 VM_Pool 位置，並建立帶時間戳的測試檔案與 SHA-256。
 
-> **LXC 不列入本次 DP340 測試。** LXC Container 請另以 PBS、vzdump 或其他相容備份機制建立獨立 SOP 與還原演練。
+> **LXC 不列入本次 DP340／APM 2.0 測試。** 截至 2026-09-04，APM 2.0 不支援 Proxmox VE LXC Container 備份；LXC 請另以 PBS、vzdump 或其他相容備份機制建立獨立 SOP 與還原演練。
 
 ### 4.2 PVE 與 Ceph 基線
 
@@ -108,7 +108,7 @@ pvesm status
 3. 使用專用 PVE 帳號／API Token；Secret 僅存密碼庫，不使用日常 root 帳號。
 4. 新增 PVE 保護來源時，優先使用 PVE 節點的 Data 網段位址。
 5. 確認 APM 可探索 3 個節點、測試 VM 與預期 storage。
-6. 若畫面中看到 LXC，仍不得將其視為 DP340 可保護工作負載；需依產品支援矩陣判斷。
+6. APM 2.0 的 Proxmox VE 保護對象以 VM 為主；LXC Container 不列入備份工作。
 
 <span class="verify-tag">需依實際版本驗證</span> API 權限、Token、TLS、叢集探索、VM 支援與 storage mapping。
 
@@ -205,9 +205,9 @@ pvesm status
 <h2 id="operations">8. 演練後維運建議</h2>
 
 <div class="kb-grid">
-<div class="kb-card"><h3>錯峰備份</h3>Data 與 Corosync 共網且無 QoS；先維持一次一個 Node 的大型備份，再依實測調整。</div>
+<div class="kb-card"><h3>離峰備份</h3>Data 與 Corosync 共網且無 QoS；大型備份建議安排於離峰時段，先維持一次一個 Node，再依實測結果調整排程與同時工作數。</div>
 <div class="kb-card"><h3>VM 定期還原</h3>至少每季輪流對受 DP340 保護的 VM 執行原機／異機還原；重大升級後追加 smoke test。</div>
-<div class="kb-card"><h3>LXC 另行保護</h3>LXC 不由 DP340 備份，請以 PBS、vzdump 或其他方案建立獨立保留政策與還原演練。</div>
+<div class="kb-card"><h3>LXC 另行保護</h3>截至目前 APM 2.0 不支援 Proxmox VE LXC Container 備份，請以 PBS、vzdump 或其他方案建立獨立保留政策與還原演練。</div>
 <div class="kb-card"><h3>Ceph</h3>監控 VM_Pool 容量與 OSD 健康；演練不與 recovery、rebalance 或重大 scrub 同時執行。</div>
 <div class="kb-card"><h3>網路改善</h3>若 Corosync 指標惡化，評估備份限速、QoS，或新增介面／網段分離 Data 與 Corosync。</div>
 <div class="kb-card"><h3>版本與權限</h3>API Token 採專用帳號、密碼庫與輪替；每次記錄 APM、DP340 韌體、PVE、Ceph 與交換器設定。</div>
@@ -217,7 +217,7 @@ pvesm status
 
 **目前版本基線：** ActiveProtect Manager 2.0-88101、Proxmox VE 9.2.11；DP340 韌體版本待補記。
 
-**重要限制：** DP340 的 Proxmox VE 保護範圍不包含 LXC Container；LXC 備份與還原需另行規劃。
+**重要限制（截至 2026-09-04）：** APM 2.0 的 Proxmox VE 備份目前不支援 LXC Container；LXC 備份與還原需另行規劃。後續版本請以 Synology 官方規格為準。
 
 **文件狀態：** 待完成完整備份、原機還原、異機還原與證據留存後簽核。
 
