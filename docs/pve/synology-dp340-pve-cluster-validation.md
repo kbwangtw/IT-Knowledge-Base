@@ -36,42 +36,46 @@ categories: [PVE, Synology, Backup, Recovery, DR, Ceph]
 
 | 元件 | 實際設定 |
 |---|---|
-| PVE Cluster | 3 個節點；Proxmox VE 9.2.11 |
+| PVE Cluster | 3 個節點：Node10、Node11、Node12；Proxmox VE 9.2.11 |
 | 每節點網路 | 2 張 2.5GbE NIC |
 | 系統碟 | 每節點 512 GB M.2 SSD × 1，安裝 PVE |
 | Ceph 資料碟 | 每節點 2 TB M.2 SSD × 1，加入 Ceph 儲存池 |
 | PVE Storage | Ceph 儲存池內的 VM_Pool，供 3 節點共同使用 |
 | 備份設備 | Synology DP340 備份一體機 |
-| 管理平台 | ActiveProtect Manager 2.0；完整 build 待補記 |
+| DP340 作業／管理平台 | ActiveProtect Manager（APM）2.0；完整 build 待補記 |
 | 保護對象 | PVE Cluster 內的 LXC 容器及虛擬機 Guest OS |
-| Management / Service | 192.168.10.0/24；TL-SG108-M2（2.5G）；DP340 LAN 1 為 1G |
-| Data / Corosync | 172.16.10.0/24；TL-SX-1008；DP340 LAN 2 為 10G，各 PVE Node 為 2.5G |
+| Management / Service | 192.168.10.0/24；TL-SG108-M2（2.5G）；Node10–12 各為 2.5G，DP340 LAN 1 為 1G |
+| Data / Corosync | 172.16.10.0/24；TL-SX-1008；DP340 LAN 2 為 10G，Node10–12 各為 2.5G |
 | 流量控制 | 未設定 QoS、ACL 或備份速率限制 |
 
 ### 演練前補記
 
 | 項目 | 實際值 |
 |---|---|
-| Node 名稱 | A：________　B：________　C：________ |
-| Management IP | A：________　B：________　C：________ |
-| Data / Corosync IP | A：________　B：________　C：________ |
-| DP340 LAN 1 / LAN 2 IP | LAN 1：________　LAN 2：________ |
+| Node 名稱 | A：Node10　B：Node11　C：Node12 |
+| Management IP | Node10：192.168.10.10　Node11：192.168.10.11　Node12：192.168.10.12 |
+| Data / Corosync IP | Node10：172.16.10.10　Node11：172.16.10.11　Node12：172.16.10.12 |
+| DP340 LAN 1 / LAN 2 IP | Management：192.168.10.18　Data：172.16.10.18 |
 | APM build / DP340 韌體 | APM：________　韌體：________ |
-| Ceph 基線 | MON：________　OSD：________　Health：________ |
+| Ceph 參考基線 | 提供截圖顯示：3 OSD Up／In、0 Down／Out；97 PG active+clean；Node10–12 的 Monitor／Manager／Metadata Server 均呈綠色 |
+
+<div class="kb-info"><strong>Ceph 基準證據：</strong>上述狀態來自本文件更新時提供的管理畫面，只代表截圖當下。正式演練開始前仍須重新保存 <code>ceph -s</code>、<code>pvesm status</code> 與 PVE Ceph 畫面，並確認沒有 recovery、rebalance 或重大 scrub。</div>
 
 <h2 id="network">3. 網路拓撲與資料路徑</h2>
 
 ~~~text
 Management / Service：192.168.10.0/24
 管理者 ── TL-SG108-M2（2.5G）
-              ├── PVE Node A / B / C Management（各 2.5G）
-              └── DP340 LAN 1（1G，APM 管理）
+              ├── Node10：192.168.10.10（2.5G）
+              ├── Node11：192.168.10.11（2.5G）
+              ├── Node12：192.168.10.12（2.5G）
+              └── DP340 LAN 1：192.168.10.18（1G，APM 管理）
 
 Data / Cluster / Corosync：172.16.10.0/24
-DP340 LAN 2（10G）── TL-SX-1008
-                          ├── PVE Node A（2.5G）
-                          ├── PVE Node B（2.5G）
-                          └── PVE Node C（2.5G）
+DP340 LAN 2：172.16.10.18（10G）── TL-SX-1008
+                          ├── Node10：172.16.10.10（2.5G）
+                          ├── Node11：172.16.10.11（2.5G）
+                          └── Node12：172.16.10.12（2.5G）
                                ├── Backup / Restore Data
                                └── Cluster / Corosync
 
@@ -129,10 +133,10 @@ pvesm status
 
 ### DP340 串接
 
-1. 從 DP340 LAN 1 的 192.168.10.0/24 登入 APM 2.0。
-2. 確認 DP340 LAN 2 位於 172.16.10.0/24，且沒有非預期 default route。
+1. 從 Management／Service 網段連線至 DP340 LAN 1（192.168.10.18），登入 APM 2.0。
+2. 確認 DP340 LAN 2 為 172.16.10.18/24，且沒有非預期 default route。
 3. 使用專用 PVE 帳號／API Token；Secret 只存密碼庫，不使用日常 root 帳號。
-4. 新增 PVE 保護來源時使用節點的 172.16.10.0/24 位址。
+4. 新增 PVE 保護來源時使用節點的 Data／Corosync 位址：Node10（172.16.10.10）、Node11（172.16.10.11）或 Node12（172.16.10.12）。
 5. 確認可探索 3 節點、測試 VM／LXC 與預期 storage。
 
 <span class="verify-tag">需依 APM 2.0 / DP340 韌體 / PVE 9.2.11 實際版本驗證</span> API 權限、Token、叢集探索、LXC／VM 支援、TLS 憑證及 storage mapping。
