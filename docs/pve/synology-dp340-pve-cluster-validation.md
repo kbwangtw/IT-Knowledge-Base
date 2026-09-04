@@ -12,7 +12,7 @@ categories: [PVE, Synology, Backup, DR]
 
 <div class="kb-hero">
   <h1>Synology DP340 備份還原 PVE Cluster<br>SOP 驗證計畫</h1>
-  <p>適用於 3-Node Proxmox VE Cluster；每個 Node 配置 2 張 2.5GbE，其中 Service／Management 獨立，Backup Data 與 Corosync 共用另一張介面。</p>
+  <p>適用於 3-Node Proxmox VE Cluster：DP340 LAN 1（1G）承載 Management／Service；LAN 2（10G）與各 PVE Node 的 2.5G Cluster／Corosync 介面位於同一網段並承載 Backup Data。</p>
   <div class="kb-badges"><span class="kb-badge">APM 2.0</span><span class="kb-badge">Backup & Recovery</span><span class="kb-badge">Network Isolation</span><span class="kb-badge">HA / DR Drill</span><span class="kb-badge">Ransomware Readiness</span></div>
 </div>
 
@@ -22,7 +22,7 @@ categories: [PVE, Synology, Backup, DR]
 <strong>章節導覽</strong>
 <ol>
   <li><a href="#scope">驗證範圍與準入條件</a></li>
-  <li><a href="#network">雙介面拓撲與邏輯分流</a></li>
+  <li><a href="#network">實際雙網段拓撲</a></li>
   <li><a href="#prepare">前置準備與串接 SOP</a></li>
   <li><a href="#tests">五個驗證測試案例</a></li>
   <li><a href="#signoff">Sign-off 驗證結果</a></li>
@@ -32,45 +32,50 @@ categories: [PVE, Synology, Backup, DR]
 
 <h2 id="scope">1. 驗證範圍與準入條件</h2>
 
-本計畫驗證「Service／Management 使用獨立 2.5GbE，Backup Data 與 Corosync 共用另一張 2.5GbE」的設計，並量測共享介面壅塞時的叢集穩定性、備份、增量、還原與防勒索控制。執行破壞性測試前，須取得變更核准並確認測試 VM 可刪除／可中斷。
+本計畫驗證 DP340 LAN 1 走 1G Management／Service 網段，以及 DP340 LAN 2 透過 10G 交換器連至 PVE 各節點 2.5G 介面；該網段同時承載 Backup Data 與 Cluster／Corosync。測試重點是量測大量備份流量下的叢集穩定性、備份、增量、還原與防勒索控制。執行破壞性測試前，須取得變更核准並確認測試 VM 可刪除／可中斷。
 
 | 準入檢查 | 通過條件 |
 |---|---|
 | PVE Cluster | 3 節點 online、`pvecm status` 顯示 quorate、無既存 Corosync 告警 |
-| 儲存與網路 | 目標 storage 健康；兩張 2.5GbE 的 VLAN／路由／ACL、共享介面的 QoS 與速率限制已記錄 |
+| 儲存與網路 | 目標 storage 健康；Management／Service 網段及共用 Data／Corosync 網段的位址、路由、ACL、QoS 與備份速率限制已記錄 |
 | DP340 / APM | ActiveProtect Manager `2.0`；執行前補記完整 build／更新層級、DP340 韌體與授權，並確認 Proxmox VE 相容性 |
 | 回復點 | 3 台測試 VM 均已標記；含 Windows／Linux，且無正式服務依賴 |
 | 安全與稽核 | Token Secret 不進入文件；已啟用時間同步、工作與系統日誌 |
 | 回復方案 | 刪除／關機演練具有回復步驟、停止條件、聯絡人與維護窗口 |
 
-<h2 id="network">2. 雙 2.5GbE 拓撲與 Data／Corosync 邏輯分流</h2>
+<h2 id="network">2. 實際雙網段拓撲：Data 與 Corosync 同網段</h2>
 
-<div class="kb-alert"><strong>架構重點：</strong>PVE Node 的第二張網卡雖接到 10G 交換器，但網卡本身只有 2.5GbE，因此單一 Node 的實際線速上限仍約為 2.5Gbps，且 Backup Data 與 Corosync 會競爭同一條實體連線。此架構沒有 Data／Corosync 的實體隔離，必須用 VLAN、QoS、備份速率限制與錯峰排程保護叢集心跳。</div>
+<div class="kb-alert"><strong>架構重點：</strong>DP340 LAN 2 是 10G，但各 PVE Node 的對端網卡只有 2.5GbE，因此單一 Node 的實際線速上限仍約為 2.5Gbps。更重要的是，Backup Data 與 Cluster／Corosync 不只共用實體介面，也位於同一網段，沒有 VLAN 或子網隔離。大量備份可能直接增加 Corosync 的延遲與丟包風險，必須使用交換器 QoS、備份限速、低並行度與錯峰排程保護叢集心跳。</div>
 
 <div class="kb-flow">
-  <div><strong>NIC 1 — Service / Management</strong><br>PVE 2.5GbE 接 2.5G 交換器；承載 VM Service、PVE 管理與一般維運流量。</div>
-  <div><strong>NIC 2 — Backup Data</strong><br>PVE 2.5GbE 接 10G 交換器；以 Data VLAN／IP 連接 DP340。Node 端上限仍為 2.5Gbps。</div>
-  <div><strong>NIC 2 — Corosync</strong><br>與 Backup Data 共用實體介面及上行，但使用獨立 VLAN／子網；需以 QoS 優先保障心跳。</div>
+  <div><strong>DP340 LAN 1 — Management / Service</strong><br>1GbE；提供 APM 管理登入、DNS／NTP、監控與告警，不承載大量備份資料。</div>
+  <div><strong>DP340 LAN 2 — Backup Data</strong><br>10GbE 接 10G 交換器；使用與 PVE Cluster／Corosync 相同的網段。</div>
+  <div><strong>PVE Node — Data / Corosync</strong><br>各節點以 2.5GbE 接同一台 10G 交換器；Backup Data 與 Corosync 共用介面、交換器及 IP 網段。</div>
 </div>
 
 ```text
-每個 PVE Node
-  ├─ NIC 1：2.5GbE ── 2.5G Switch ── Service / Management VLAN
-  └─ NIC 2：2.5GbE ── 10G Switch
-                         ├─ Backup Data VLAN ── DP340 10G 介面
-                         └─ Corosync VLAN ───── PVE Cluster 心跳
+管理者 / 監控 / 告警
+        │ Management / Service 網段
+        └──────── DP340 LAN 1（1G）
 
-注意：交換器側是 10G，不會把 PVE 的 2.5GbE NIC 變成 10Gbps。
-Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻寬。
+DP340 LAN 2（10G）
+        │
+        └──── 10G Switch ──── 同一個 Data / Cluster / Corosync 網段
+                  ├── PVE Node A（2.5G）
+                  ├── PVE Node B（2.5G）
+                  └── PVE Node C（2.5G）
+
+注意：PVE Node 端仍受 2.5GbE 限制；Backup Data 與 Corosync
+共用同一介面及同一 IP 網段，沒有 VLAN／子網隔離。
 ```
 
 <div class="kb-grid">
-  <div class="kb-card"><h3>VLAN 與路由</h3>Data 與 Corosync 使用不同 VLAN／子網；NIC 2 不設定非預期 default route。以路由表、VLAN tag 與實際連線來源驗證。</div>
-  <div class="kb-card"><h3>QoS 與限速</h3>在交換器與可用的主機／備份端設定 Corosync 高優先級；備份先以低於 2.5Gbps 的保守上限測試，再逐步提高。</div>
+  <div class="kb-card"><h3>同網段風險</h3>Data 與 Corosync 無 VLAN／子網隔離；需記錄 IP、路由、MTU、交換器埠與廣播／多播行為，避免誤認為已分流。</div>
+  <div class="kb-card"><h3>QoS 與限速</h3>在交換器可辨識的流量條件下優先保障 Corosync；備份先採單一 Node、低並行度及低於 2.5Gbps 的保守上限，再逐步提高。</div>
   <div class="kb-card"><h3>Corosync 基線</h3>備份前後比對 latency、retransmit、packet loss 與 quorum；發生節點不穩或仲裁異常立即停止並降低備份並行度／頻寬。</div>
 </div>
 
-> 「備份走 Data VLAN」須以介面流量、VLAN、連線來源／目的位址與路由紀錄共同證明；僅在 APM 輸入 Data IP 不足以作為證據。VLAN 可分隔廣播域與政策，但無法消除共用 NIC 的頻寬競爭。
+> 本架構無法驗證 Data 與 Corosync 的網路隔離，因兩者實際位於同一網段。測試應改為證明備份流量使用指定的共用介面，並找出不會使 Corosync 延遲、丟包或 quorum 異常的安全備份上限。
 
 <h2 id="prepare">3. 前置準備與串接 SOP</h2>
 
@@ -87,9 +92,9 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 
 ### 3.2 設定 DP340 與 APM 串接
 
-1. 從 Service／Management 網路登入 ActiveProtect Manager。
-2. 在 DP340 的 10G 介面配置 Data 網段靜態 IP；檢查 MTU、DNS、NTP、路由與防火牆。PVE Node 端仍以 2.5GbE 連線。
-3. 在保護來源新增 Proxmox VE；輸入 PVE 節點的 **Data 網段 IP** 與專用 Token。
+1. 從 DP340 LAN 1 所在的 1G Management／Service 網路登入 ActiveProtect Manager。
+2. 為 DP340 LAN 2（10G）配置與 PVE Cluster／Corosync 相同網段的靜態 IP；確認 LAN 1、LAN 2 的路由優先順序，避免 LAN 2 建立非預期 default route。
+3. 在保護來源新增 Proxmox VE；輸入 PVE 節點在共用 Data／Corosync 網段的 2.5G IP 與專用 Token。
 4. 驗證 TLS 憑證／指紋，不以永久關閉驗證作為正式方案。
 5. 確認可探索預期的 3 個節點與測試 VM，且沒有非預期資產。
 6. 在 PVE 與交換器側確認實際 API 與資料連線使用正確介面；將截圖、時間與介面計數器納入證據。
@@ -99,13 +104,13 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 <h2 id="tests">4. 五個驗證測試案例</h2>
 
 <section class="test-card"><div class="test-head"><span class="test-num">01</span><strong>2.5G 首次全備份與共享 Corosync 壓力測試</strong></div><div class="test-body">
-<h4>目的</h4>證明備份資料使用 NIC 2 的 Data VLAN，並確認與其共用實體介面的 Corosync 在備份負載下仍穩定。
+<h4>目的</h4>證明備份資料使用 PVE 的 2.5G Data／Corosync 共用介面，並確認同網段的 Corosync 在備份負載下仍穩定。
 <h4>步驟</h4>
 1. 從每個節點選 1 台測試 VM；Windows 若採應用程式一致性，先確認 VSS 狀態與產品支援方式。
 2. 記錄備份前 `pvecm status`、Corosync 延遲／丟包、介面計數器及 storage I/O。
-3. 先限制單一備份工作與保守頻寬，手動執行首次備份；同時監看 PVE 共用 NIC、Data／Corosync VLAN、DP340 10G NIC 與交換器埠。穩定後才逐步增加負載。
+3. 先以單一 Node、單一備份工作及保守頻寬執行首次備份；同時監看 PVE 共用 2.5G NIC、DP340 LAN 2、交換器埠與 Corosync 狀態。穩定後才逐步增加負載。
 4. 完成後再取一次叢集、介面、備份工作與容量證據。
-<h4>判定</h4>備份成功；主要流量出現在 Data VLAN；Corosync 無新增告警、quorum 變化或可歸因於測試的延遲／丟包。吞吐量以 2.5GbE Node 端、協定開銷與 storage 實測解釋，不以 10G 交換器線速作為目標。
+<h4>判定</h4>備份成功；主要流量出現在指定的共用介面；Corosync 無新增告警、quorum 變化或可歸因於測試的延遲／丟包。吞吐量以 2.5GbE Node 端、協定開銷與 storage 實測解釋，不以 DP340 LAN 2 或交換器的 10G 線速作為單一 Node 目標。
 <h4>記錄</h4>邏輯資料量、實際傳輸量、開始／結束時間、平均／峰值 Gbps、DP340 寫入量、Corosync latency／loss、工作 ID。
 </div></section>
 
@@ -157,7 +162,7 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 
 | ID | 測試項目 | 驗收基準 | 實際結果／證據 | 數據記錄 | 判定 |
 |---|---|---|---|---|---|
-| 01 | 首次全備份／網路隔離 | 備份成功；流量走 Data；Corosync 穩定 | __________________ | 容量 ___ GB；時間 ___ min；平均／峰值 ___ / ___ Gbps；loss ___ | ☐ Pass ☐ Fail |
+| 01 | 首次全備份／共享網段壓力 | 備份成功；流量走指定共用介面；Corosync 穩定 | __________________ | 容量 ___ GB；時間 ___ min；平均／峰值 ___ / ___ Gbps；loss ___ | ☐ Pass ☐ Fail |
 | 02 | 增量／去重 | 新資料可還原；效率以實測呈現 | __________________ | 異動 ___ GB；傳輸 ___ GB；節省比 ___；時間 ___ min | ☐ Pass ☐ Fail |
 | 03 | 即時／快速還原 | 服務與資料驗證成功；RTO 符合核准目標 | __________________ | VM boot ___ sec；service RTO ___ sec；RPO ___ | ☐ Pass ☐ Fail |
 | 04 | 跨節點完整還原 | B／C 節點啟動；網路與 checksum 正常 | __________________ | 還原 ___ min；資料 ___ GB；checksum ______ | ☐ Pass ☐ Fail |
@@ -179,7 +184,7 @@ Data 與 Corosync 雖使用不同 VLAN，仍共用同一張 NIC 與 2.5Gbps 頻�
 <h2 id="operations">6. 長期維運與容量管理建議</h2>
 
 <div class="kb-grid">
-  <div class="kb-card"><h3>錯開備份窗口</h3>Data 與 Corosync 共用 2.5GbE，預設一次只跑一個 Node 的大型備份。可先以 Node A 01:00、B 02:30、C 04:00 為假設，再依 Corosync 與吞吐實測調整。</div>
+  <div class="kb-card"><h3>錯開備份窗口</h3>Data 與 Corosync 共用 2.5GbE 介面及同一網段，預設一次只跑一個 Node 的大型備份。可先以 Node A 01:00、B 02:30、C 04:00 為假設，再依 Corosync 與吞吐實測調整。</div>
   <div class="kb-card"><h3>容量水位</h3>建立 70% 預警、80% 處置、90% 升級機制。容量門檻與可用容量不可硬套固定 14.5 TB，應依實際型號、RAID、保留政策與當版官方規格計算。</div>
   <div class="kb-card"><h3>定期還原</h3>備份成功不等於可還原。至少每季抽測 VM boot、應用服務與 checksum；重大升級後追加測試。</div>
   <div class="kb-card"><h3>權限與憑證</h3>Token 放密碼庫、限制來源、定期輪替；每季檢視角色與稽核紀錄。離職／職務異動立即撤銷。</div>
