@@ -7,7 +7,7 @@ title: IT Knowledge Base
 
 ## 最新技術紀錄
 
-- [HPE ProLiant ML30 Gen11：硬體擴充、NVMe UEFI 驗證與儲存規劃](docs/hardware/hpe/ml30-gen11/)
+- [HPE ProLiant ML30 Gen11：硬體擴充與 Windows Server 2025 實機驗證](docs/hardware/hpe/ml30-gen11/)
 - [Synology DP340 備份還原 PVE Cluster：SOP 驗證計畫](docs/pve/synology-dp340-pve-cluster-validation/)
 - [Proxmox VE / Proxmox Backup Server 繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification/)
 - [ProxCenter + PBS Restore／DR SOP：LXC 實戰紀錄](docs/pve/proxcenter-pbs-restore-dr-runbook/)
@@ -21,7 +21,6 @@ title: IT Knowledge Base
 - **Ceph**：健康狀態、OSD、維護旗標與復原
 - **Synology**：[DP340 × PVE Cluster 備份還原驗證](docs/pve/synology-dp340-pve-cluster-validation/)、儲存、快照、備份與網路服務
 - **Network**：VLAN、路由、防火牆、DNS 與監控
-- **Hardware / HPE**：[ProLiant ML30 Gen11 硬體擴充、NVMe UEFI 驗證與儲存規劃](docs/hardware/hpe/ml30-gen11/)
+- **Hardware / HPE**：[ProLiant ML30 Gen11 硬體擴充與 Windows Server 2025 實機驗證](docs/hardware/hpe/ml30-gen11/)
 
 > 所有範例均應去敏感化；請勿提交密碼、Private Key、Token Secret、完整憑證或設備序號。
-
