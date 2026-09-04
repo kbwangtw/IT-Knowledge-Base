@@ -12,7 +12,7 @@ categories: [PVE, Synology, Backup, DR]
 
 <div class="kb-hero">
   <h1>Synology DP340 備份還原 PVE Cluster<br>SOP 驗證計畫</h1>
-  <p>適用於 Proxmox VE 9.2.11 三節點叢集：DP340 LAN 1（1G）位於 192.168.10.0 Management／Service 網段；LAN 2（10G）與各 PVE Node 的 2.5G Cluster／Corosync 介面位於 172.16.10.0 網段並承載 Backup Data。</p>
+  <p>適用於 Proxmox VE 9.2.11 三節點叢集：DP340 LAN 1（1G）位於 192.168.10.0/24 Management／Service 網段；LAN 2（10G）與各 PVE Node 的 2.5G Cluster／Corosync 介面位於 172.16.10.0/24 網段並承載 Backup Data。</p>
   <div class="kb-badges"><span class="kb-badge">APM 2.0</span><span class="kb-badge">Backup & Recovery</span><span class="kb-badge">Shared Data / Corosync</span><span class="kb-badge">HA / DR Drill</span><span class="kb-badge">Ransomware Readiness</span></div>
 </div>
 
@@ -38,8 +38,8 @@ categories: [PVE, Synology, Backup, DR]
 |---|---|
 | Storage | 狀態健康；目標儲存可用且容量足夠 |
 | PVE Cluster | Proxmox VE `9.2.11`；3 節點 online、`pvecm status` 顯示 quorate、無既存 Corosync 告警 |
-| Management / Service 網路 | `192.168.10.0`（prefix length 待確認）；端點速率 1G～2.5G；交換器 `TKL-SG108-M2 V2` |
-| Data / Corosync 網路 | `172.16.10.0`（prefix length 待確認）；DP340 端 10G、各 PVE Node 端 2.5G；交換器 `TL-SX1008`；目前未設定 QoS、ACL 或備份速率限制 |
+| Management / Service 網路 | `192.168.10.0/24`（`255.255.255.0`）；端點速率 1G～2.5G；交換器 `TKL-SG108-M2 V2` |
+| Data / Corosync 網路 | `172.16.10.0/24`（`255.255.255.0`）；DP340 端 10G、各 PVE Node 端 2.5G；交換器 `TL-SX1008`；目前未設定 QoS、ACL 或備份速率限制 |
 | DP340 / APM | ActiveProtect Manager `2.0`；執行前補記完整 build／更新層級、DP340 韌體與授權，並確認 Proxmox VE 相容性 |
 | 回復點 | 3 台測試 VM 均已標記；含 Windows／Linux，且無正式服務依賴 |
 | 安全與稽核 | Token Secret 不進入文件；已啟用時間同步、工作與系統日誌 |
@@ -47,22 +47,22 @@ categories: [PVE, Synology, Backup, DR]
 
 <h2 id="network">2. 實際雙網段拓撲：Data 與 Corosync 同網段</h2>
 
-<div class="kb-alert"><strong>架構重點：</strong>DP340 LAN 2 是 10G，但各 PVE Node 的對端網卡只有 2.5GbE，因此單一 Node 的實際線速上限仍約為 2.5Gbps。Backup Data 與 Cluster／Corosync 共用 `172.16.10.0` 網段，目前沒有 QoS、ACL 或備份速率限制。大量備份可能直接增加 Corosync 的延遲與丟包風險；驗證初期應採單一 Node、低並行度與錯峰排程，並以實測決定是否需要新增 QoS 或限速。</div>
+<div class="kb-alert"><strong>架構重點：</strong>DP340 LAN 2 是 10G，但各 PVE Node 的對端網卡只有 2.5GbE，因此單一 Node 的實際線速上限仍約為 2.5Gbps。Backup Data 與 Cluster／Corosync 共用 `172.16.10.0/24` 網段，目前沒有 QoS、ACL 或備份速率限制。大量備份可能直接增加 Corosync 的延遲與丟包風險；驗證初期應採單一 Node、低並行度與錯峰排程，並以實測決定是否需要新增 QoS 或限速。</div>
 
 <div class="kb-flow">
-  <div><strong>DP340 LAN 1 — Management / Service</strong><br>`192.168.10.0`；DP340 端 1G，網段端點最高 2.5G；交換器 `TKL-SG108-M2 V2`。</div>
-  <div><strong>DP340 LAN 2 — Backup Data</strong><br>`172.16.10.0`；DP340 端 10G；交換器 `TL-SX1008`。</div>
-  <div><strong>PVE Node — Data / Corosync</strong><br>`172.16.10.0`；各節點 2.5G。Backup Data 與 Corosync 共用介面、交換器及 IP 網段。</div>
+  <div><strong>DP340 LAN 1 — Management / Service</strong><br>`192.168.10.0/24`；DP340 端 1G，網段端點最高 2.5G；交換器 `TKL-SG108-M2 V2`。</div>
+  <div><strong>DP340 LAN 2 — Backup Data</strong><br>`172.16.10.0/24`；DP340 端 10G；交換器 `TL-SX1008`。</div>
+  <div><strong>PVE Node — Data / Corosync</strong><br>`172.16.10.0/24`；各節點 2.5G。Backup Data 與 Corosync 共用介面、交換器及 IP 網段。</div>
 </div>
 
 ```text
 管理者 / 監控 / 告警
-        │ Management / Service：192.168.10.0（1G～2.5G）
+        │ Management / Service：192.168.10.0/24（1G～2.5G）
         └──────── TKL-SG108-M2 V2 ──── DP340 LAN 1（1G）
 
 DP340 LAN 2（10G）
         │
-        └──── TL-SX1008 ───── Data / Cluster / Corosync：172.16.10.0
+        └──── TL-SX1008 ───── Data / Cluster / Corosync：172.16.10.0/24
                   ├── PVE Node A（2.5G）
                   ├── PVE Node B（2.5G）
                   └── PVE Node C（2.5G）
@@ -72,7 +72,7 @@ DP340 LAN 2（10G）
 ```
 
 <div class="kb-grid">
-  <div class="kb-card"><h3>同網段風險</h3>Data 與 Corosync 均在 `172.16.10.0`；需記錄 IP、prefix length、路由、MTU、交換器埠與廣播／多播行為，避免誤認為已分流。</div>
+  <div class="kb-card"><h3>同網段風險</h3>Data 與 Corosync 均在 `172.16.10.0/24`；需記錄 IP、路由、MTU、交換器埠與廣播／多播行為，避免誤認為已分流。</div>
   <div class="kb-card"><h3>目前無流量控制</h3>現場尚未設定 QoS、ACL 或備份速率限制。首次測試採單一 Node、低並行度；若 Corosync 指標惡化，立即停止並評估 QoS／限速。</div>
   <div class="kb-card"><h3>Corosync 基線</h3>備份前後比對 latency、retransmit、packet loss 與 quorum；發生節點不穩或仲裁異常立即停止並降低備份並行度／頻寬。</div>
 </div>
@@ -95,8 +95,8 @@ DP340 LAN 2（10G）
 ### 3.2 設定 DP340 與 APM 串接
 
 1. 從 DP340 LAN 1 所在的 1G Management／Service 網路登入 ActiveProtect Manager。
-2. 為 DP340 LAN 2（10G）配置 `172.16.10.0` 網段的靜態 IP；確認 LAN 1、LAN 2 的路由優先順序，避免 LAN 2 建立非預期 default route。
-3. 在保護來源新增 Proxmox VE；輸入 PVE 節點在 `172.16.10.0` Data／Corosync 共用網段的 2.5G IP 與專用 Token。
+2. 為 DP340 LAN 2（10G）配置 `172.16.10.0/24` 網段的靜態 IP；確認 LAN 1、LAN 2 的路由優先順序，避免 LAN 2 建立非預期 default route。
+3. 在保護來源新增 Proxmox VE；輸入 PVE 節點在 `172.16.10.0/24` Data／Corosync 共用網段的 2.5G IP 與專用 Token。
 4. 驗證 TLS 憑證／指紋，不以永久關閉驗證作為正式方案。
 5. 確認可探索預期的 3 個節點與測試 VM，且沒有非預期資產。
 6. 在 PVE 與交換器側確認實際 API 與資料連線使用正確介面；將截圖、時間與介面計數器納入證據。
