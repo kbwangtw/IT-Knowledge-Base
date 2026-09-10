@@ -5,7 +5,11 @@ date: 2026-08-28
 categories: [PVE, PBS, ProxCenter, DR]
 ---
 
-# ProxCenter + PBS Restore／DR SOP：LXC 實戰紀錄
+<div class="kb-hero">
+<h1>ProxCenter + PBS Restore／DR SOP：LXC 實戰紀錄</h1>
+<p>透過 ProxCenter 將 PBS 上的正式 LXC 備份，以新 VMID 還原至另一節點，完整記錄一次應用程式層級的 DR 演練與三項實際卡關問題的排除過程。</p>
+<div class="kb-badges"><span class="kb-badge">PVE</span><span class="kb-badge">PBS</span><span class="kb-badge">ProxCenter</span><span class="kb-badge">DR</span></div>
+</div>
 
 ## 摘要
 

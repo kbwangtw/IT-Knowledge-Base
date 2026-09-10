@@ -5,7 +5,11 @@ date: 2026-09-04
 categories: [Hardware, HPE, ML30 Gen11]
 ---
 
-# HPE ProLiant ML30 Gen11：硬體擴充與 Windows Server 2025 實機驗證
+<div class="kb-hero">
+<h1>HPE ProLiant ML30 Gen11：硬體擴充與 Windows Server 2025 實機驗證</h1>
+<p>記錄一台 HPE ProLiant ML30 Gen11 的完整實機擴充與安裝結果，涵蓋 iLO/M.2/COM Port Kit、Slimline ODD、Intel VROC SATA RAID 1，以及 Windows Server 2025 Standard English 實機安裝驗證。</p>
+<div class="kb-badges"><span class="kb-badge">Hardware</span><span class="kb-badge">HPE</span><span class="kb-badge">ML30 Gen11</span></div>
+</div>
 
 ## 摘要與驗證結論
 
