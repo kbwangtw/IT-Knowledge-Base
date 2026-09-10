@@ -1,3 +1,9 @@
+---
+layout: default
+title: "DP340 + APM 2.0 Google Workspace 備份 SOP"
+categories: [Synology, APM, Google Workspace, Backup]
+---
+
 # DP340 + APM 2.0 Google Workspace 備份 SOP
 
 > **文件狀態**:草稿,commit 前請依「敏感資訊去敏感化規範」章節檢查一次
