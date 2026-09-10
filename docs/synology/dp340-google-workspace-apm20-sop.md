@@ -4,13 +4,15 @@ title: "DP340 + APM 2.0 Google Workspace 備份與還原演練計畫"
 categories: [Synology, APM, Google Workspace, Backup]
 ---
 
-# DP340 + APM 2.0 Google Workspace 備份與還原演練計畫
+<div class="kb-hero">
+<h1>DP340 + APM 2.0 Google Workspace 備份與還原演練計畫</h1>
+<p>透過 ActiveProtect Manager 2.0 的 Google Workspace 連線精靈，建置 Gmail、日曆、聯絡人與雲端硬碟的每日備份，並記錄實際還原測試結果。</p>
+<div class="kb-badges"><span class="kb-badge">Synology DP340</span><span class="kb-badge">APM 2.0</span><span class="kb-badge">Google Workspace</span><span class="kb-badge">Backup</span></div>
+</div>
 
-> **文件狀態**:草稿,commit 前請依「敏感資訊去敏感化規範」章節檢查一次
-> **適用版本**:Synology ActiveProtect Manager (APM) 2.0(2026/9/4 發布,新增 Google Workspace 支援)
-> **維護單位**:Infra Team
-> **最後更新**:請填入實際日期
-> **備註**:Google Workspace protection 是 APM 2.0 才新增的功能,官方文件與 UI 措辭仍可能持續調整,若後續版本 UI 有變動,請同步更新本文件對應章節。
+<div class="kb-alert"><strong>文件狀態：</strong>草稿，commit 前請依「敏感資訊去敏感化規範」章節檢查一次。<strong>適用版本：</strong>Synology ActiveProtect Manager (APM) 2.0（2026/9/4 發布，新增 Google Workspace 支援）。<strong>維護單位：</strong>Infra Team。<strong>最後更新：</strong>請填入實際日期。</div>
+
+<div class="kb-info"><strong>備註：</strong>Google Workspace protection 是 APM 2.0 才新增的功能，官方文件與 UI 措辭仍可能持續調整，若後續版本 UI 有變動，請同步更新本文件對應章節。</div>
 
 ---
 
@@ -161,9 +163,7 @@ APM 會要求建立/取得 Service Account 相關資訊。
 
 ### 操作影片參考
 
-<div style="position:relative;padding-top:56.25%;max-width:100%;margin:1rem 0;"><iframe src="https://www.youtube-nocookie.com/embed/SZIe91ktVag" title="DP340 + APM 2.0 Google Workspace 備份建置操作影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen style="position:absolute;inset:0;width:100%;height:100%;border:0;"></iframe></div>
-
-[在 YouTube 開啟原始影片](https://youtu.be/SZIe91ktVag)
+<div class="video-grid"><article class="video-card"><div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/SZIe91ktVag" title="DP340 + APM 2.0 Google Workspace 備份建置操作影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><h3>建置操作影片</h3><p><a href="https://youtu.be/SZIe91ktVag" target="_blank" rel="noopener noreferrer">在 YouTube 開啟原始影片</a></p></article></div>
 
 > 本影片為 Step 1–10 建置流程的操作紀錄；若後續 APM UI 有變動，請以官方畫面為準，並同步更新本文件對應章節。
 
@@ -261,9 +261,7 @@ APM 會要求建立/取得 Service Account 相關資訊。
 
 > **待釐清**:Gmail 未成功備份的原因尚未確認,可能與 OAuth Scope 是否涵蓋 Gmail API、Domain-wide Delegation 設定範圍,或該帳號 Gmail 服務啟用狀態有關。下次測試建議依第 8 章 Troubleshooting 排查,並記錄 APM 備份活動當下的錯誤訊息/log,確認根因後回填本節。
 
-<div style="position:relative;padding-top:56.25%;max-width:100%;margin:1rem 0;"><iframe src="https://www.youtube-nocookie.com/embed/v6DeSETPUSg" title="DP340 Google Workspace 備份還原驗證紀錄" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen style="position:absolute;inset:0;width:100%;height:100%;border:0;"></iframe></div>
-
-[在 YouTube 開啟原始影片](https://youtu.be/v6DeSETPUSg)
+<div class="video-grid"><article class="video-card"><div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/v6DeSETPUSg" title="DP340 Google Workspace 備份還原驗證紀錄" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><h3>備份還原驗證紀錄</h3><p><a href="https://youtu.be/v6DeSETPUSg" target="_blank" rel="noopener noreferrer">在 YouTube 開啟原始影片</a></p></article></div>
 
 ---
 

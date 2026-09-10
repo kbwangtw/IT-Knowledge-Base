@@ -5,7 +5,11 @@ date: 2026-09-01
 categories: [PVE, PBS, Notification]
 ---
 
-# Proxmox VE / Proxmox Backup Server 繁體中文通知模板安裝
+<div class="kb-hero">
+<h1>Proxmox VE / Proxmox Backup Server 繁體中文通知模板安裝</h1>
+<p>為 Proxmox VE 9.x 與 Proxmox Backup Server 4.x 提供繁體中文通知模板，PVE 9.2.11 已完成實機完整生命週期驗證。</p>
+<div class="kb-badges"><span class="kb-badge">PVE</span><span class="kb-badge">PBS</span><span class="kb-badge">Notification</span></div>
+</div>
 
 ## 摘要
 

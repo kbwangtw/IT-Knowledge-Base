@@ -5,7 +5,11 @@ date: 2026-08-26
 categories: [PVE, ProxCenter, Ceph]
 ---
 
-# ProxCenter 執行 PVE／Ceph Rolling Update：疑難排解紀錄
+<div class="kb-hero">
+<h1>ProxCenter 執行 PVE／Ceph Rolling Update：疑難排解紀錄</h1>
+<p>三節點 Proxmox VE／Ceph 叢集使用 ProxCenter 執行 Rolling Update，記錄 Repository 誤判、SSH 網段選錯與 sudo 權限不足三項卡關的排除過程。</p>
+<div class="kb-badges"><span class="kb-badge">PVE</span><span class="kb-badge">ProxCenter</span><span class="kb-badge">Ceph</span></div>
+</div>
 
 ## 摘要
 

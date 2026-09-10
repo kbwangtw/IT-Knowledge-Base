@@ -1,0 +1,289 @@
+---
+---
+@import "minima";
+
+/* ------------------------------------------------------------------ */
+/* IT Knowledge Base 共用元件樣式                                      */
+/* 原本只存在於 docs/pve/synology-dp340-pve-cluster-validation.md      */
+/* 的內嵌 <style>，抽成全站共用樣式，讓所有文件套用同一套視覺語言。      */
+/* ------------------------------------------------------------------ */
+
+.kb-hero {
+  padding: 2rem;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #15324a, #245f73);
+  color: #fff;
+  margin: 1rem 0 1.5rem;
+}
+.kb-hero h1 {
+  margin: 0 0 .75rem;
+  color: #fff;
+  line-height: 1.25;
+}
+.kb-hero p {
+  margin: .4rem 0;
+  max-width: 58rem;
+}
+
+.kb-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-top: 1rem;
+}
+.kb-badge {
+  padding: .3rem .65rem;
+  border: 1px solid rgba(255, 255, 255, .35);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .1);
+  font-size: .85rem;
+}
+
+.kb-alert {
+  border-left: 5px solid #d97706;
+  background: #fff7ed;
+  padding: 1rem 1.1rem;
+  border-radius: 8px;
+  margin: 1.25rem 0;
+}
+.kb-info {
+  border-left: 5px solid #2563eb;
+  background: #eff6ff;
+  padding: 1rem 1.1rem;
+  border-radius: 8px;
+  margin: 1.25rem 0;
+}
+
+.kb-toc {
+  background: #f5f7f8;
+  border: 1px solid #d8e0e5;
+  border-radius: 14px;
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+}
+.kb-toc ol {
+  columns: 2;
+}
+
+.kb-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.kb-card {
+  border: 1px solid #d8e0e5;
+  border-radius: 14px;
+  padding: 1rem;
+  background: #fff;
+}
+.kb-card h3 {
+  margin-top: 0;
+  color: #15324a;
+}
+.kb-card p {
+  margin: .35rem 0 0;
+  line-height: 1.7;
+}
+
+.test-card {
+  border: 1px solid #d8e0e5;
+  border-radius: 16px;
+  margin: 1.35rem 0;
+  overflow: hidden;
+}
+.test-head {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  background: #15324a;
+  color: #fff;
+  padding: 1rem 1.2rem;
+}
+.test-num {
+  display: grid;
+  place-items: center;
+  min-width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  background: #fff;
+  color: #15324a;
+  font-weight: 700;
+}
+.test-body {
+  padding: 1.15rem 1.35rem;
+}
+.test-body ol {
+  margin: .15rem 0 1rem;
+  padding-left: 1.65rem;
+}
+.test-body li {
+  margin: .5rem 0;
+  line-height: 1.75;
+}
+.test-result {
+  background: #f7fafc;
+  border-left: 4px solid #2563eb;
+  border-radius: 6px;
+  padding: .8rem 1rem;
+  margin-top: 1rem;
+}
+.test-note {
+  background: #fff7ed;
+  border-left: 4px solid #d97706;
+  border-radius: 6px;
+  padding: .8rem 1rem;
+  margin-top: .8rem;
+}
+.test-result strong,
+.test-note strong {
+  display: block;
+  margin-bottom: .25rem;
+  color: #15324a;
+}
+
+.verify-tag {
+  display: inline-block;
+  background: #fff3cd;
+  color: #664d03;
+  border: 1px solid #ffecb5;
+  border-radius: 6px;
+  padding: .25rem .5rem;
+  font-size: .85rem;
+  font-weight: 600;
+}
+
+.result-table {
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.kb-signoff {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.kb-signoff > div {
+  border-bottom: 1px solid #666;
+  padding: 1.2rem .25rem .25rem;
+}
+
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.video-card {
+  border: 1px solid #d8e0e5;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+}
+.video-card h3,
+.video-card p {
+  margin: .85rem 1rem;
+}
+.video-frame {
+  position: relative;
+  padding-top: 56.25%;
+  background: #111;
+}
+.video-frame iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.print-only {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .kb-grid,
+  .kb-signoff {
+    grid-template-columns: 1fr;
+  }
+  .kb-toc ol {
+    columns: 1;
+  }
+  .kb-hero {
+    padding: 1.35rem;
+  }
+  .result-table {
+    font-size: .88rem;
+  }
+  .video-grid {
+    grid-template-columns: 1fr;
+  }
+  .test-head {
+    align-items: flex-start;
+    padding: .9rem 1rem;
+  }
+  .test-head strong {
+    font-size: 1.05rem;
+    line-height: 1.45;
+  }
+  .test-body {
+    padding: 1rem;
+  }
+  .test-body ol {
+    padding-left: 1.35rem;
+    margin-bottom: .9rem;
+  }
+  .test-body li {
+    margin: .7rem 0;
+    line-height: 1.8;
+  }
+  .test-result,
+  .test-note {
+    padding: .8rem .9rem;
+  }
+  .kb-card {
+    padding: .9rem;
+  }
+  .kb-card h3 {
+    margin-bottom: .45rem;
+  }
+}
+
+@media print {
+  .site-header,
+  .site-footer,
+  .kb-toc,
+  .video-frame {
+    display: none !important;
+  }
+  .wrapper {
+    max-width: none !important;
+  }
+  .kb-hero {
+    background: none !important;
+    color: #000;
+    border: 2px solid #333;
+    padding: 1rem;
+  }
+  .kb-hero h1 {
+    color: #000;
+  }
+  .kb-card,
+  .test-card,
+  .video-card {
+    break-inside: avoid;
+  }
+  .test-head {
+    background: #eee !important;
+    color: #000;
+  }
+  .print-only {
+    display: block;
+  }
+  .result-table {
+    white-space: normal;
+    font-size: 9pt;
+  }
+}
