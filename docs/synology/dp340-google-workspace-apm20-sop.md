@@ -252,6 +252,19 @@ APM 會要求建立/取得 Service Account 相關資訊。
   - 還原耗時是否在可接受範圍內(記錄下來作為 RTO 參考)
 - **記錄**:每次演練需記錄日期、測試範圍、結果、若有異常需附上處置方式,存放於維運紀錄(建議與本 SOP 分開存放,避免內部細節外流)
 
+### 實際測試紀錄(第一次驗證)
+
+| 項目 | 測試步驟 | 結果 | 備註 |
+|---|---|---|---|
+| Google 我的雲端硬碟 | 於雲端硬碟新增一份 test 檔案 → DP340 執行備份 → 於雲端硬碟本機與垃圾桶皆刪除該 test 檔案 → 於 DP340 執行還原 | ✅ Pass | 約 15 分鐘後 APM 顯示還原成功;回到雲端硬碟可看到一個 `restore` 資料夾,內含原本已刪除的 test 檔案,資料完整 |
+| Gmail | 於同一次備份工作中一併勾選 <ADMIN_EMAIL> 帳號的 Gmail | ❌ Fail | 該次備份僅雲端硬碟成功,Gmail 郵件未成功備份,因此也無法執行還原 |
+
+> **待釐清**:Gmail 未成功備份的原因尚未確認,可能與 OAuth Scope 是否涵蓋 Gmail API、Domain-wide Delegation 設定範圍,或該帳號 Gmail 服務啟用狀態有關。下次測試建議依第 8 章 Troubleshooting 排查,並記錄 APM 備份活動當下的錯誤訊息/log,確認根因後回填本節。
+
+<div style="position:relative;padding-top:56.25%;max-width:100%;margin:1rem 0;"><iframe src="https://www.youtube-nocookie.com/embed/v6DeSETPUSg" title="DP340 Google Workspace 備份還原驗證紀錄" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen style="position:absolute;inset:0;width:100%;height:100%;border:0;"></iframe></div>
+
+[在 YouTube 開啟原始影片](https://youtu.be/v6DeSETPUSg)
+
 ---
 
 ## 10. Daily / Weekly / Monthly 維運 SOP
@@ -301,4 +314,5 @@ Push 到 `kbwangtw/IT-Knowledge-Base` 與 `Jianan-infra/IT-Knowledge-Base` 之�
 | 版本 | 日期 | 異動內容 | 異動人 |
 |---|---|---|---|
 | v0.1 | 待填 | 初版建立,依實際操作影片整理 Step 1–10 | 待填 |
+| v0.2 | 2026-09-10 | 新增第一次實際測試紀錄:Google 雲端硬碟備份還原 Pass,Gmail 備份未成功(原因待查) | kbwangtw |
 
