@@ -7,7 +7,7 @@ title: 資訊黑手的Knowledge Base
 
 ## 最新技術紀錄
 
-- [DP340 + APM 2.0 Google Workspace 備份 SOP](docs/synology/dp340-google-workspace-apm20-sop/)
+- [DP340 + APM 2.0 Google Workspace 備份與還原演練計畫](docs/synology/dp340-google-workspace-apm20-sop/)
 - [Synology DP340 × PVE Cluster：備份與原機／異機還原演練計畫](docs/pve/synology-dp340-pve-cluster-validation/)
 - [Proxmox VE / Proxmox Backup Server 繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification/)
 - [ProxCenter + PBS Restore／DR SOP：LXC 實戰紀錄](docs/pve/proxcenter-pbs-restore-dr-runbook/)
@@ -20,7 +20,7 @@ title: 資訊黑手的Knowledge Base
 - **PBS**：[繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification/)、[備份、Restore 與 DR 演練](docs/pve/proxcenter-pbs-restore-dr-runbook/)、驗證與保留政策
 - **ProxCenter**：資產管理、SSH 整合、[Rolling Update](docs/pve/proxcenter-ceph-rolling-update/) 與 [Restore／DR](docs/pve/proxcenter-pbs-restore-dr-runbook/)
 - **Ceph**：健康狀態、OSD、維護旗標與復原
-- **Synology**：[DP340 + APM 2.0 Google Workspace 備份 SOP](docs/synology/dp340-google-workspace-apm20-sop/)、[DP340 × PVE Cluster 備份還原驗證](docs/pve/synology-dp340-pve-cluster-validation/)、儲存、快照、備份與網路服務
+- **Synology**：[DP340 + APM 2.0 Google Workspace 備份與還原演練計畫](docs/synology/dp340-google-workspace-apm20-sop/)、[DP340 × PVE Cluster 備份還原驗證](docs/pve/synology-dp340-pve-cluster-validation/)、儲存、快照、備份與網路服務
 - **Network**：VLAN、路由、防火牆、DNS 與監控
 - **Hardware / HPE**：[ProLiant ML30 Gen11 擴充與維護紀錄](docs/hardware/hpe/ml30-gen11/)
 
