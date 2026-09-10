@@ -1,318 +1,290 @@
+# DP340 + APM 2.0 Google Workspace 備份 SOP
+
+> **文件狀態**:草稿,commit 前請依「敏感資訊去敏感化規範」章節檢查一次
+> **適用版本**:Synology ActiveProtect Manager (APM) 2.0(2026/9/4 發布,新增 Google Workspace 支援)
+> **維護單位**:Infra Team
+> **最後更新**:請填入實際日期
+> **備註**:Google Workspace protection 是 APM 2.0 才新增的功能,官方文件與 UI 措辭仍可能持續調整,若後續版本 UI 有變動,請同步更新本文件對應章節。
+
 ---
-layout: default
-title: "Synology DP340 × APM 2.0：Google Workspace 備份建置 SOP"
-date: 2026-09-10
-last_updated: 2026-09-10
-categories: [Synology, DP340, ActiveProtect, APM 2.0, Google Workspace, Backup, SOP]
+
+## 目錄
+
+1. 架構總覽
+2. 建置前準備 Checklist
+3. 建置步驟(Step 1–10)
+4. Google Workspace 授權設定注意事項(Domain-wide Delegation / Client ID / OAuth Scope)
+5. 服務對應設定(Gmail / Calendar / Contacts / Drive)
+6. 建置完成 Checklist
+7. Backup Activity 驗證方式
+8. Troubleshooting
+9. Restore 測試建議
+10. Daily / Weekly / Monthly 維運 SOP
+11. 敏感資訊去敏感化規範
+12. 版本紀錄
+
 ---
 
-# Synology DP340 × ActiveProtect Manager 2.0：Google Workspace 備份建置 SOP
+## 1. 架構總覽
 
-> 本文件整理自實際 Synology DP340 + ActiveProtect Manager 2.0（APM 2.0）操作紀錄，目的為建立工程師可重複執行的 Google Workspace 備份建置流程。
->
-> **重要：** 本文件以實際操作流程為主，不代表所有 Google Workspace 租戶、APM 版本或授權組合均具有完全相同的可用選項。正式導入前，應依實際版本與官方文件確認支援範圍。
-
-## 1. 文件目的
-
-建立 Google Workspace 至 Synology DP340 的集中式備份流程，透過 APM 2.0 完成 Google Workspace 授權、服務設定、保護原則與備份工作建立，並確認 DP340 已開始執行備份。
-
-## 2. 適用範圍
-
-- Synology DP340
-- ActiveProtect Manager 2.0
-- Google Workspace
-- Google Workspace 管理員環境
-- 企業 IT 工程師／系統管理員
-
-## 3. 建置流程總覽
-
-```text
-Google Workspace
-       │
-       │ Google API / 授權
-       ▼
-ActiveProtect Manager 2.0
-       │
-       │ Protection / Backup Plan
-       ▼
-Synology DP340
-       │
-       └── Backup Activity
+```
+Google Workspace (SaaS)
+   │  OAuth 2.0 Service Account + Domain-wide Delegation (HTTPS 443)
+   ▼
+DP340 (ActiveProtect Manager 2.0)
+   │  雲端應用程式 → Google Workspace Protection Plan
+   ▼
+DP340 本地儲存(備份伺服器:DP340)
+   │  (建議) 異地 / 離線 copy,符合 3-2-1 原則
+   ▼
+異地儲存(Vault / 另一台 NAS / Cloud Storage,依企業需求規劃)
 ```
 
-完整流程：
+**保護範圍**:Gmail、Google 日曆、Google 聯絡人、Google 我的雲端硬碟(My Drive)。
 
-1. 確認 DP340 與 APM 2.0 正常
-2. 建立 Google Workspace 連線
-3. 依 APM 精靈要求準備 Google Workspace 授權資訊
-4. 設定 Google Workspace 全網域委派（Domain-wide Delegation）
-5. 完成 APM 與 Google Workspace 的授權驗證
-6. 設定 Google Workspace 備份服務
-7. 建立自動備份規則
-8. 選擇需要保護的使用者／服務
-9. 指定 DP340 作為備份目的地
-10. 執行備份並確認 Backup Activity
+---
 
-## 4. 前置條件
+## 2. 建置前準備 Checklist
 
-### 4.1 DP340
+| 項目 | 說明 | 完成 |
+|---|---|---|
+| DP340 初始設定完成 | 硬體上架、磁碟陣列、基本網路設定 | ☐ |
+| APM 2.0 版本確認 | 確認已升級至 2.0(舊版無 Google Workspace 支援) | ☐ |
+| 網路連線正常 | DP340 可對外連通 Google API endpoints(443) | ☐ |
+| DNS / Internet 正常 | 解析正常、無 proxy 阻擋 | ☐ |
+| 系統時間正確 | NTP 同步,時間誤差會影響 OAuth token 驗證 | ☐ |
+| Google Workspace Super Admin 帳號 | 有權限執行 Domain-wide Delegation 設定者 | ☐ |
+| 授權/License 確認 | 已與代理商確認 GW connector 是否佔用額外保護額度 | ☐ |
+| 要保護的使用者/部門清單 | 先盤點好,避免建置時臨時決定 | ☐ |
+| 儲存容量評估 | 依使用者數量、Gmail/Drive 資料量估算所需空間 | ☐ |
 
-- DP340 已完成基本安裝與網路設定。
-- ActiveProtect Manager 2.0 可正常登入。
-- DP340 可正常連線 Internet。
-- DNS 與系統時間正常。
-- 備份儲存空間已依 Google Workspace 資料量完成容量評估。
+---
 
-### 4.2 Google Workspace
+## 3. 建置步驟
 
-- 具備 Google Workspace 管理員權限。
-- 可進入 Google Admin Console。
-- 可依 APM 精靈要求設定 API／授權相關項目。
-- 建置過程中產生的服務帳戶金鑰或授權檔案必須安全保存。
+### Step 1｜確認 DP340 前置狀態
 
-> **安全注意事項：** 不得將服務帳戶金鑰、OAuth Secret、Private Key、Token、完整憑證或任何租戶敏感資訊提交至 GitHub。
+確認以下項目皆正常:
 
-## 5. 建立 Google Workspace 連線
+- DP340 已完成初始設定
+- ActiveProtect Manager 2.0 運作正常
+- 網路連線正常
+- DNS / Internet 正常
+- 系統時間正常(建議設定 NTP,避免手動誤差)
 
-1. 登入 DP340 的 ActiveProtect Manager 2.0。
-2. 進入 Google Workspace／雲端應用程式相關設定。
-3. 啟動新增 Google Workspace 保護來源的流程。
-4. 依 APM 精靈提供的資訊準備 Google Workspace 授權環境。
-5. 記錄 APM 要求的必要資訊，但不要將敏感憑證寫入本文件。
+> **風險提醒**:系統時間偏差會導致後續 OAuth 授權驗證失敗,建議建置前先確認 NTP 同步狀態。
 
-## 6. Google Workspace 全網域委派
+### Step 2｜建立 Google Workspace 連線
 
-APM 與 Google Workspace 整合時，需要依實際 APM 精靈要求完成 Google Workspace 的授權設定。
+路徑:**ActiveProtect Manager → 雲端應用程式**
 
-### 6.1 Google Admin Console
+開始建立 Google Workspace 網域連線,APM 會進入 Google Workspace 連線精靈,依畫面指示逐步操作。
 
-進入 Google Admin Console 的 API／安全性控制項，依 APM 2.0 當前版本要求完成 **Domain-wide Delegation（全網域委派）**。
+### Step 3｜取得服務帳戶金鑰(Service Account Key)
 
-### 6.2 Client ID
+APM 會要求建立/取得 Service Account 相關資訊。
 
-將 APM／服務帳戶流程所產生或指定的 Client ID，依 APM 指示加入 Google Workspace 的全網域委派設定。
+> ⚠️ **重要注意事項**:服務帳戶金鑰檔案(JSON Key)**務必妥善保存**,遺失可能無法復原,需要在 Google Cloud Console 重新建立並重新走一次授權流程。
+>
+> 建議做法:
+> - 金鑰檔案不要放在一般共用資料夾,建議存放於受限存取的密碼/機密管理系統(例如公司的 Vault / Password Manager)
+> - 不要以任何形式(含截圖)放入 GitHub 或其他版控系統
+> - 記錄金鑰建立日期與負責人,方便日後輪替(key rotation)
 
-### 6.3 OAuth Scope
+### Step 4｜Google Workspace 全網域委派(Domain-wide Delegation)
 
-將 APM 精靈提供的 OAuth Scope 完整加入 Google Workspace。
+進入 **Google 管理控制台 → API 控制項 → 網域範圍委派(Domain-wide Delegation)**,新增 API 用戶端:
 
-> 不要自行猜測或修改 Scope。不同 APM 版本與服務組合可能要求不同授權範圍，應以實際 APM 畫面與官方文件為準。
+- 填入 APM 提供的 **Client ID**
+- 填入 APM 提供的 **OAuth Scope**
 
-## 7. 完成 Google Workspace 授權
+> 詳細注意事項請見第 4 章「Google Workspace 授權設定注意事項」。
 
-1. 回到 ActiveProtect Manager 2.0。
-2. 填入 APM 要求的 Google Workspace 網域／授權資訊。
-3. 執行連線驗證。
-4. 確認 APM 能正常識別 Google Workspace 租戶。
-5. 若驗證失敗，優先檢查：
-   - Client ID 是否正確。
-   - Domain-wide Delegation 是否已生效。
-   - OAuth Scope 是否完整。
-   - Google Workspace 管理員權限是否足夠。
-   - 服務帳戶／金鑰是否正確。
-   - DP340 是否可以正常連線 Google 服務。
+### Step 5｜完成授權
 
-## 8. 設定 Google Workspace 備份服務
+回到 APM,完成 Google Workspace 授權後,讓 APM 驗證 Google Workspace 網域,確認網域可以正常加入(狀態顯示已驗證/已連線)。
 
-依實際操作流程，進入 Google Workspace 保護設定後，選擇需要保護的 Workspace 服務。
+### Step 6｜設定自動還原(Recovery)相關選項
 
-本次實際操作畫面包含以下服務：
+依服務類型設定自動還原相關選項,涵蓋:
 
 - Gmail
-- Google Calendar
-- Google Contacts
-- Google Drive
+- Google 日曆
+- Google 聯絡人
+- Google 我的雲端硬碟(My Drive)
 
-實際可備份項目與細部功能，仍應以目前使用的 APM 2.0 版本與 Google Workspace 環境顯示為準。
+依企業實際需求選擇要啟用的服務與還原設定。
 
-## 9. 建立自動備份規則
+### Step 7｜建立自動備份規則
 
-建立 Google Workspace Protection／Backup Plan。
+建立 **Daily Backup** 規則,並指定:
 
-本次操作採用每日備份（Daily Backup）作為實際操作範例，並指定 DP340 作為備份設備。
+- **備份伺服器**:DP340
 
-### 建議命名
+> 建議排程避開營業時間,避免大量 API 呼叫影響 Google Workspace 使用體驗;首次全量備份時間可能較長,需預留足夠時間窗口。
 
-```text
-GW-DAILY-BACKUP
-```
+### Step 8｜選擇 Google Workspace 使用者/群組
 
-### 基本設定
+從 Google Workspace 使用者清單中,依企業實際需求選擇要保護的使用者或部門群組(例如各功能部門帳號)。
 
-| 項目 | 設定 |
-|---|---|
-| 備份來源 | Google Workspace |
-| 備份設備 | Synology DP340 |
-| 備份頻率 | Daily（本次實作範例） |
-| 保護對象 | 依企業需求選擇 |
-| Gmail | 依實際需求啟用 |
-| Calendar | 依實際需求啟用 |
-| Contacts | 依實際需求啟用 |
-| Google Drive | 依實際需求啟用 |
+> 建議:先以小範圍(例如 IT 部門)做 POC 驗證,確認流程與資料完整性後,再擴大到全公司範圍。
 
-> 備份頻率、保留政策與保護對象應依企業 RPO、資料量、網路頻寬與法遵需求另行設計，不應直接將本次實作的 Daily 設定視為所有環境的標準值。
+### Step 9｜設定使用者服務範圍
 
-## 10. 選擇 Google Workspace 使用者
+針對已選取的使用者/群組,設定要保護的服務範圍,包含:
 
-在 APM 的 Google Workspace 使用者清單中，依企業需求選擇要納入保護的帳號。
+- 郵件(Gmail)
+- 行事曆(Calendar)
+- 聯絡人(Contacts)
+- 雲端硬碟(Drive)
 
-建議正式環境先完成使用者盤點：
+並套用備份規則:**Daily Backup → DP340**
 
-- 一般使用者
-- 主管／高階主管
-- 財務／HR／採購等重要帳號
-- 共用帳號（若環境中存在）
-- 需要長期保存的離職員工帳號
+> 此畫面(設定完成後的服務對應清單)可作為「建置完成」的佐證截圖,建議存檔留存。
 
-> 本文件不記錄實際租戶的帳號名稱，以避免將企業內部資訊公開至版本控制系統。
+### Step 10｜確認備份工作已啟動
 
-## 11. 指定備份目的地
+路徑:**活動 → 備份活動**
 
-將 Protection／Backup Plan 指派至 DP340。
+確認 Gmail 及其他 Google Workspace 相關工作負載已出現在備份活動清單中,狀態顯示:
 
-確認：
+- 狀態:**正在備份**
+- 備份伺服器:**DP340**
 
-```text
-Backup Source  : Google Workspace
-Backup Server  : DP340
-Backup Plan    : GW-DAILY-BACKUP
-```
+代表備份工作已成功啟動執行。
 
-完成後儲存設定並啟用備份工作。
+---
 
-## 12. 驗證備份工作
+## 4. Google Workspace 授權設定注意事項
 
-建立備份規則後，進入 APM 的活動／工作監控畫面。
+### Domain-wide Delegation
 
-確認：
+- 只在 Google 管理控制台的 **API 控制項 → 網域範圍委派** 新增 APM 提供的 Client ID,**不要**額外開放給其他非必要的應用程式
+- 每次新增/異動委派設定,建議記錄操作人、日期、原因,方便稽核
 
-- Google Workspace 備份工作已建立。
-- 備份來源為 Google Workspace。
-- 備份設備顯示 DP340。
-- Backup Activity 已出現。
-- 工作狀態由排程／等待轉為執行或完成。
-- Gmail、Calendar、Contacts、Drive 等實際選取的工作負載開始處理。
+### Client ID
 
-### 驗收重點
+- Client ID 本身不是機密資訊(不等同密碼),但仍建議不要公開張貼在對外可見的頻道
+- 若日後金鑰輪替,Client ID 可能連帶變更,委派設定需同步更新
 
-```text
-Google Workspace
-       │
-       ▼
-APM 2.0 Backup Job
-       │
-       ▼
-DP340
-       │
-       ▼
-Backup Activity
-       │
-       └── 確認工作狀態正常
-```
+### OAuth Scope
 
-## 13. 建置完成檢查表
+- **最小權限原則**:只授權備份實際需要的 Scope(對應 Gmail / Calendar / Contacts / Drive 唯讀存取即可,除非有還原寫入需求)
+- 授權範圍設定錯誤(過寬或過窄)是常見的建置卡關原因,設定後務必回到 APM 端測試驗證是否能正常拉取資料
+- 建議在文件中額外附上「本次實際使用的 Scope 清單」內部版本(**不要**放進公開 GitHub repo,詳見第 11 章)
 
-- [ ] DP340 基本設定完成
-- [ ] APM 2.0 正常
-- [ ] Google Workspace 網域授權完成
-- [ ] Domain-wide Delegation 完成
-- [ ] OAuth Scope 已依 APM 要求設定
-- [ ] Google Workspace 連線驗證成功
-- [ ] 保護服務已選擇
-- [ ] 使用者／保護對象已確認
-- [ ] Backup Plan 已建立
-- [ ] DP340 已指定為備份設備
-- [ ] Backup Activity 已出現
-- [ ] 備份工作狀態正常
-- [ ] 敏感憑證未提交至 GitHub
+---
 
-## 14. Troubleshooting
+## 5. 服務對應設定摘要
 
-### 14.1 Google Workspace 授權失敗
+| 服務 | 對應內容 | 備份頻率 | 備份伺服器 |
+|---|---|---|---|
+| Gmail | 郵件、附件 | Daily | DP340 |
+| Google 日曆 | 行事曆事件 | Daily | DP340 |
+| Google 聯絡人 | 聯絡人資料 | Daily | DP340 |
+| Google 我的雲端硬碟 | My Drive 檔案 | Daily | DP340 |
 
-依序確認：
+> 依實際設定的群組數量調整表格內容,範例中為 7 個群組全數套用相同規則。
 
-1. Google Workspace 管理員權限。
-2. Client ID。
-3. Domain-wide Delegation。
-4. OAuth Scope。
-5. 服務帳戶與金鑰。
-6. DP340 Internet／DNS 連線。
+---
 
-### 14.2 找不到使用者
+## 6. 建置完成 Checklist
 
-確認：
+| 項目 | 驗證方式 | 完成 |
+|---|---|---|
+| Google Workspace 網域已加入 APM 且驗證成功 | APM 雲端應用程式頁面顯示已連線 | ☐ |
+| Domain-wide Delegation 設定完成 | Google 管理控制台可查到對應 Client ID | ☐ |
+| Daily Backup 規則已建立 | APM 備份規則列表可查到 | ☐ |
+| 目標使用者/群組已選取 | APM 使用者清單確認 | ☐ |
+| 四項服務(Mail/Calendar/Contacts/Drive)皆已套用規則 | APM 服務對應畫面截圖存檔 | ☐ |
+| 首次備份已成功執行 | 活動 → 備份活動,狀態非失敗 | ☐ |
+| 已完成至少一次還原測試 | 見第 9 章 | ☐ |
+| 已設定失敗通知(email/webhook) | APM 通知設定確認 | ☐ |
+| 已規劃異地/離線 copy | 符合 3-2-1 原則 | ☐ |
 
-- Google Workspace 租戶是否正確。
-- APM 授權是否成功。
-- Domain-wide Delegation 是否已生效。
-- 使用者是否屬於目前授權範圍。
+---
 
-### 14.3 Backup Activity 沒有開始
+## 7. Backup Activity 驗證方式
 
-確認：
+1. 路徑:**活動 → 備份活動**
+2. 確認對應 workload(Gmail / Calendar / Contacts / Drive)出現在清單中
+3. 狀態應顯示「正在備份」或「已完成」,備份伺服器欄位應為 **DP340**
+4. 若長時間停留在「正在備份」未完成,參考第 8 章 Troubleshooting
 
-- Backup Plan 是否已啟用。
-- 排程時間是否已到。
-- DP340 儲存空間是否足夠。
-- Internet／Google API 連線是否正常。
-- APM 是否顯示錯誤或警告。
+---
 
-## 15. 還原測試建議
+## 8. Troubleshooting
 
-本文件主要涵蓋「備份建置」SOP。正式上線後，應另外建立 Restore SOP，至少測試：
+| 問題現象 | 可能原因 | 處置方式 | 驗證 |
+|---|---|---|---|
+| 網域驗證失敗 | Domain-wide Delegation 尚未生效(Google 端有時需要數分鐘才會同步) | 稍候重試,或重新確認 Client ID / Scope 是否輸入正確 | APM 網域狀態顯示已驗證 |
+| OAuth 授權失敗 | 系統時間偏差 / Scope 設定不完整 | 檢查 NTP 同步、重新核對 Scope 清單 | 重新執行授權流程成功 |
+| 備份卡在「正在備份」不動 | API 配額限制、首次全量備份資料量過大 | 檢查 Google API 配額使用狀況,評估是否分批排程 | 備份活動狀態轉為已完成 |
+| 部分使用者資料未備份 | 使用者/群組未正確勾選,或該帳號權限不足 | 回到 Step 8 確認使用者清單 | 該使用者出現在備份活動中 |
+| 服務帳戶金鑰遺失 | 未妥善保管 | 於 Google Cloud Console 重新建立 Service Account 金鑰,重跑 Step 3–5 | 重新授權成功 |
+| 通知未收到 | 通知設定未啟用或收件設定錯誤 | 檢查 APM 通知設定 | 手動觸發測試通知成功送達 |
 
-1. 單一 Gmail 資料還原。
-2. 單一 Google Drive 檔案還原。
-3. Google Drive 資料夾還原。
-4. Google Calendar 還原。
-5. Google Contacts 還原。
-6. 重要使用者資料還原。
+---
 
-正式環境應以實測結果建立 RTO 基準，不應在沒有測試數據的情況下直接承諾固定還原時間。
+## 9. Restore 測試建議
 
-## 16. 維運建議
+- **頻率**:建議至少每季執行一次還原演練,重大版本升級後(如 APM 2.x → 2.x+1)額外加測一次
+- **測試範圍**:
+  - 單一使用者:還原一封 Gmail 郵件、一個 Drive 檔案,確認內容/中繼資料完整
+  - 抽樣還原:每次抽測 1–2 個群組,確認 Calendar / Contacts 資料可正確還原
+- **驗證重點**:
+  - 還原後資料內容是否與原始一致
+  - 檔案權限(Drive 共用權限)是否正確還原
+  - 還原耗時是否在可接受範圍內(記錄下來作為 RTO 參考)
+- **記錄**:每次演練需記錄日期、測試範圍、結果、若有異常需附上處置方式,存放於維運紀錄(建議與本 SOP 分開存放,避免內部細節外流)
+
+---
+
+## 10. Daily / Weekly / Monthly 維運 SOP
 
 ### Daily
 
-- 檢查前一日備份是否成功。
-- 檢查 Failed／Warning 工作。
+- 檢查前一日 Daily Backup 是否成功(活動 → 備份活動)
+- 確認無失敗/異常通知
+- 確認 DP340 儲存空間使用率在安全範圍內
 
 ### Weekly
 
-- 檢查 DP340 儲存使用量。
-- 檢查 Google Workspace 備份工作。
-- 檢查 Protection Plan。
+- 抽查 1–2 個使用者的備份資料是否完整(不需真正還原,可只檢視備份內容清單)
+- 檢查 Google API 配額使用趨勢,是否接近上限
+- 確認新加入/離職的使用者是否已同步調整保護清單(Account Discovery 若未啟用,需人工維護)
 
 ### Monthly
 
-- 執行一次 Restore Drill。
-- 檢查備份保留政策。
-- 評估資料成長與容量。
+- 執行一次抽樣還原測試(見第 9 章)
+- 檢視儲存容量成長趨勢,評估是否需要擴充
+- 確認 Service Account 金鑰、Domain-wide Delegation 設定仍然有效,無異常變更紀錄
+- 檢查 APM 是否有版本更新,評估升級排程
 
-## 17. 實際操作影片
+---
 
-本 SOP 對應的實際操作影片：
+## 11. 敏感資訊去敏感化規範(Push 到 GitHub 前必查)
 
-**Synology DP340 + APM 2.0 備份 Google Workspace**
+Push 到 `kbwangtw/IT-Knowledge-Base` 與 `Jianan-infra/IT-Knowledge-Base` 之前,請逐項確認以下內容**不存在**於檔案中:
 
-https://youtu.be/vG2X3yn1SOM
+| 類別 | 範例 | 處置方式 |
+|---|---|---|
+| 實際網域名稱 | `company.com` | 以 `<YOUR_DOMAIN>` 佔位符取代 |
+| 帳號 / Email | `admin@company.com` | 以 `<ADMIN_EMAIL>` 取代,或改用角色描述(例如「Super Admin 帳號」) |
+| Service Account 金鑰內容 | JSON key 檔案內容、private key | **絕對不可**出現,包含截圖 |
+| Client ID / Client Secret | OAuth 用戶端 ID 實際數值 | 以 `<CLIENT_ID_REDACTED>` 取代 |
+| DP340 內部 IP / hostname | `10.x.x.x`、內網主機名稱 | 以 `<DP340_INTERNAL_IP>` 取代或直接移除 |
+| 實際部門/使用者清單 | ACC、ELC、HR、QA、Warehouse、Shipping 等真實對應的內部單位 | 若為公司真實組織架構,建議改用通用範例(例如「部門 A / 部門 B」),除非該資訊本身不具機敏性 |
+| License / 授權序號 | APM license key | 不可出現 |
+| 截圖中的浮水印/使用者資訊 | 畫面截圖若含有實際資料 | 上傳前需打碼或改用示意圖 |
 
-## 18. 安全與文件管理
+**建議流程**:commit 前用 `grep` 或簡單腳本掃描檔案,搜尋常見敏感字串模式(如網域關鍵字、`@`符號後接公司網域、IP 位址格式),確認無殘留後再 push。
 
-本知識庫為技術文件用途。提交文件前必須完成去敏感化：
+---
 
-- 不得提交 Google Workspace 網域名稱（若屬客戶敏感資訊）。
-- 不得提交使用者完整 Email 清單。
-- 不得提交服務帳戶 JSON 金鑰。
-- 不得提交 OAuth Secret。
-- 不得提交 Private Key。
-- 不得提交 Token／Password。
-- 不得提交設備序號或其他不必要的識別資訊。
+## 12. 版本紀錄
 
-## 19. 參考資料
+| 版本 | 日期 | 異動內容 | 異動人 |
+|---|---|---|---|
+| v0.1 | 待填 | 初版建立,依實際操作影片整理 Step 1–10 | 待填 |
 
-- Synology ActiveProtect Manager：依目前版本官方文件確認實際支援範圍。
-- Google Workspace Admin Help：依目前 Google Admin Console 介面確認 Domain-wide Delegation 與 API 授權設定。
-
-> **版本註記：** 本文件建立於 2026-09-10，操作內容來自實際 DP340 + APM 2.0 建置紀錄。若 APM 或 Google Workspace 管理介面更新，應同步更新本 SOP。
