@@ -159,6 +159,14 @@ APM 會要求建立/取得 Service Account 相關資訊。
 
 代表備份工作已成功啟動執行。
 
+### 操作影片參考
+
+<div style="position:relative;padding-top:56.25%;max-width:100%;margin:1rem 0;"><iframe src="https://www.youtube-nocookie.com/embed/SZIe91ktVag" title="DP340 + APM 2.0 Google Workspace 備份建置操作影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen style="position:absolute;inset:0;width:100%;height:100%;border:0;"></iframe></div>
+
+[在 YouTube 開啟原始影片](https://youtu.be/SZIe91ktVag)
+
+> 本影片為 Step 1–10 建置流程的操作紀錄；若後續 APM UI 有變動，請以官方畫面為準，並同步更新本文件對應章節。
+
 ---
 
 ## 4. Google Workspace 授權設定注意事項
