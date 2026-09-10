@@ -1,10 +1,10 @@
 ---
 layout: default
-title: "DP340 + APM 2.0 Google Workspace 備份 SOP"
+title: "DP340 + APM 2.0 Google Workspace 備份與還原演練計畫"
 categories: [Synology, APM, Google Workspace, Backup]
 ---
 
-# DP340 + APM 2.0 Google Workspace 備份 SOP
+# DP340 + APM 2.0 Google Workspace 備份與還原演練計畫
 
 > **文件狀態**:草稿,commit 前請依「敏感資訊去敏感化規範」章節檢查一次
 > **適用版本**:Synology ActiveProtect Manager (APM) 2.0(2026/9/4 發布,新增 Google Workspace 支援)
