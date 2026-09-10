@@ -1,6 +1,6 @@
 # IT Knowledge Base
 
-Jianan-infra 的 IT 技術知識庫，集中保存已去敏感化、可重複使用的維運紀錄。
+kbwangtw 的 IT 技術知識庫，集中保存已去敏感化、可重複使用的維運紀錄。
 
 ## 文件範圍
 
