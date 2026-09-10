@@ -1,6 +1,6 @@
 ---
 layout: home
-title: IT Knowledge Base
+title: 資訊黑手的Knowledge Base
 ---
 
 這是一個可持續擴充的 IT 維運知識庫，內容以「問題、證據、處置、驗證、風險」為骨架。
