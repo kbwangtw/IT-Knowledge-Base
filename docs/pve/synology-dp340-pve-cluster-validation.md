@@ -122,15 +122,15 @@ pvesm status
 
 <h2 id="signoff">7. 結果與 Sign-off</h2>
 
-<div class="result-table">
+<div class="result-table" markdown="1">
 
 | ID | 項目 | 預期結果 | 實際結果／證據 | 數據 | 判定 |
 |---|---|---|---|---|---|
-| 01 | 完整備份／共網壓力 | 還原點可用；Corosync／Ceph 穩定 | ______ | ___ GB；___ min；峰值 ___ Gbps | ☐ Pass ☐ Fail |
-| 02 | 增量備份 | 新還原點與測試資料可辨識 | ______ | 異動 ___ GB；傳輸 ___ GB；___ min | ☐ Pass ☐ Fail |
-| 03 | 原機還原 | 原節點、VM_Pool、服務、checksum 正常 | ______ | RPO ___；Boot RTO ___；Service RTO ___ | ☐ Pass ☐ Fail |
-| 04 | 異機還原 | 異節點、VM_Pool、服務、checksum 正常 | ______ | RPO ___；Boot RTO ___；Service RTO ___ | ☐ Pass ☐ Fail |
-| 05 | 穩定性／收尾 | 觀察正常；證據與副本處置完整 | ______ | 觀察 ___ min；影片 SHA-256 ______ | ☐ Pass ☐ Fail |
+| 01 | 完整備份／共網壓力 | 還原點可用；Corosync／Ceph 穩定 | \_\_\_\_\_\_ | \_\_\_ GB；\_\_\_ min；峰值 \_\_\_ Gbps | ☐ Pass ☐ Fail |
+| 02 | 增量備份 | 新還原點與測試資料可辨識 | \_\_\_\_\_\_ | 異動 \_\_\_ GB；傳輸 \_\_\_ GB；\_\_\_ min | ☐ Pass ☐ Fail |
+| 03 | 原機還原 | 原節點、VM_Pool、服務、checksum 正常 | \_\_\_\_\_\_ | RPO \_\_\_；Boot RTO \_\_\_；Service RTO \_\_\_ | ☐ Pass ☐ Fail |
+| 04 | 異機還原 | 異節點、VM_Pool、服務、checksum 正常 | \_\_\_\_\_\_ | RPO \_\_\_；Boot RTO \_\_\_；Service RTO \_\_\_ | ☐ Pass ☐ Fail |
+| 05 | 穩定性／收尾 | 觀察正常；證據與副本處置完整 | \_\_\_\_\_\_ | 觀察 \_\_\_ min；影片 SHA-256 \_\_\_\_\_\_ | ☐ Pass ☐ Fail |
 
 </div>
 
