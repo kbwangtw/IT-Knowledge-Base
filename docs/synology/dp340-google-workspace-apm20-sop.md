@@ -317,4 +317,4 @@ Push 到 `kbwangtw/IT-Knowledge-Base` 與 `Jianan-infra/IT-Knowledge-Base` 之�
 
 ## 相關技術紀錄
 
-- [2026-09-11 整理：Google Workspace 重複資料刪除實測（75%／3.96x）](dp340-google-workspace-apm20-dedup-test.md)：含原始截圖、容量核算及單次觀察限制；此容量紀錄不代表 Gmail 備份問題已解決。
+- [2026-09-11 整理：六台 GuestOS + Google Workspace 合併備份重複資料刪除實測（75%／3.96x）](dp340-google-workspace-apm20-dedup-test.md)：含原始截圖、容量核算及單次觀察限制；此容量紀錄不代表 Gmail 備份問題已解決。

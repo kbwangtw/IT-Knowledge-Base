@@ -1,27 +1,28 @@
 ---
 layout: default
-title: "DP340 + APM 2.0 Google Workspace 重複資料刪除實測紀錄"
-categories: [Synology, APM, Google Workspace, Backup]
+title: "DP340 + APM 2.0 重複資料刪除實測：六台 GuestOS + Google Workspace"
+categories: [Synology, APM, GuestOS, Google Workspace, Backup]
 ---
 
-# DP340 + APM 2.0 Google Workspace 重複資料刪除實測紀錄
+# DP340 + APM 2.0 重複資料刪除實測：六台 GuestOS + Google Workspace
 
 - 整理日期：2026-09-11（非截圖拍攝時間）
 - 設備／軟體：Synology DP340／ActiveProtect Manager 2.0，依使用者提供的測試背景。
 - 資料來源：使用者於「撰寫 Google Workspace 備份計劃」對話提供的原始 `image.png`，以及「經過幾天的測試」之說明。
+- 統計範圍：**六台 GuestOS + Google Workspace 的合併備份資料總量**，依使用者補充確認。
 - 關聯文件：[DP340 + APM 2.0 Google Workspace 備份與還原演練計畫](dp340-google-workspace-apm20-sop.md)。
 
 ## 1. 問題與觀察目的
 
-在實際 Google Workspace 備份執行數天後，記錄 APM「重複資料刪除率」面板顯示的邏輯資料量、實體資料量與減省量，確認這批備份資料的容量節省效果。
+在六台 GuestOS 與 Google Workspace 的實際備份執行數天後，記錄 APM「重複資料刪除率」面板顯示的邏輯資料量、實體資料量與減省量，確認這批備份資料的容量節省效果。
 
-本次畫面顯示重複資料刪除率 **75%**：邏輯備份資料總量 **442.2 GB**，對應實體備份資料總量 **111.8 GB**，減省 **330.4 GB**，資料節省率 **3.96x**。這是 DP340／APM 2.0 在這批實際 Google Workspace 備份資料中的觀察結果，不能泛化為所有環境的保證值。
+本次畫面顯示重複資料刪除率 **75%**：邏輯備份資料總量 **442.2 GB**，對應實體備份資料總量 **111.8 GB**，減省 **330.4 GB**，資料節省率 **3.96x**。這是 DP340／APM 2.0 對六台 GuestOS 與 Google Workspace 合併備份資料的整體觀察結果，不能泛化為所有環境的保證值。**75% 與 3.96x 都是此合併範圍的指標，不能單獨歸因於 Google Workspace 或任一台 GuestOS；目前沒有各工作負載的容量與節省率拆分數據。**
 
 ## 2. 證據：原始截圖與數據
 
-![APM 重複資料刪除率面板：75%，實體 111.8 GB、減省 330.4 GB、邏輯 442.2 GB，資料節省率 3.96x](images/dp340-google-workspace-apm20-dedup-test.png)
+![六台 GuestOS + Google Workspace 合併備份的 APM 重複資料刪除率面板：75%，實體 111.8 GB、減省 330.4 GB、邏輯 442.2 GB，資料節省率 3.96x](images/dp340-google-workspace-apm20-dedup-test.png)
 
-截圖由使用者提供，原圖未經修改，於本 repository 以描述性檔名保存。畫面可見容量指標，未見帳號、網域、IP 或金鑰等敏感資訊。截圖本身未呈現設備型號、APM 完整版本、工作負載篩選條件或拍攝時間；DP340／APM 2.0／Google Workspace 的背景來自使用者說明，不是由這張局部畫面獨立辨識。
+截圖由使用者提供，原圖未經修改，於本 repository 以描述性檔名保存。畫面可見容量指標，未見帳號、網域、IP 或金鑰等敏感資訊。截圖本身未呈現設備型號、APM 完整版本、工作負載篩選條件或拍攝時間；DP340／APM 2.0 及六台 GuestOS + Google Workspace 的合併統計範圍來自使用者說明與後續補充，不是由這張局部畫面獨立辨識。
 
 | 畫面欄位 | 原始讀值 | 本次解讀 |
 |---|---:|---|
@@ -50,12 +51,12 @@ categories: [Synology, APM, Google Workspace, Backup]
 
 數據在上述核算下相互一致，可作為此批資料於觀察時點的重複資料刪除效果紀錄。此處沿用 APM 面板名稱描述結果；僅憑這張畫面，無法進一步拆分重複資料刪除、壓縮或其他底層機制各自的貢獻，也無法確定重複內容來自跨版本、跨使用者或其他來源。
 
-邏輯備份資料總量不應直接當作 Google Workspace 來源端的唯一資料量；實體備份資料總量也不等同整台 DP340 的磁碟使用量。截圖沒有提供系統、中繼資料或其他儲存開銷的完整口徑。
+邏輯備份資料總量涵蓋六台 GuestOS 與 Google Workspace，不應當作 Google Workspace 單獨的資料量，也不應直接視為來源端的唯一資料量；實體備份資料總量也不等同整台 DP340 的磁碟使用量。截圖沒有提供系統、中繼資料或其他儲存開銷的完整口徑。
 
 ## 5. 限制與風險
 
 - 本次為執行數天後的單一觀察時點，沒有逐日數列或對照組，不能推論長期趨勢或宣稱每個環境都能節省 75%。
-- 未提供精確測試起訖時間、備份次數、保留版本數、使用者數、各服務資料占比、完整 APM build 與面板統計範圍。截圖亦無法獨立確認是否混入其他工作負載。
+- 使用者已確認統計範圍為六台 GuestOS + Google Workspace；未提供精確測試起訖時間、備份次數、保留版本數、Google Workspace 使用者數、GuestOS 的作業系統與資料類型、各工作負載資料占比及完整 APM build。局部截圖本身未列出這些工作負載明細。
 - 不同資料組成、變更量、版本保留及統計範圍可能使結果不同；本次 3.96x 不宜直接作為其他環境的容量承諾。
 - 容量節省不代表備份完整性或可還原性已驗證。既有 SOP 的第一次測試仍記載 Google Drive 還原 Pass、Gmail 備份 Fail 且原因待查；本次截圖不能證明 Gmail 問題已解決，也不能推論所有 Google Workspace 服務都成功。
 - 本次未測量備份吞吐量、API 流量、還原時間或 RPO／RTO。
@@ -69,3 +70,4 @@ categories: [Synology, APM, Google Workspace, Backup]
 | 日期 | 異動 |
 |---|---|
 | 2026-09-11 | 初版：保存使用者原始截圖，記錄 75%、111.8 GB、330.4 GB、442.2 GB、3.96x，完成數據核算並列明適用範圍。 |
+| 2026-09-11 | 更正：依使用者補充，將標題與統計範圍修正為六台 GuestOS + Google Workspace 的合併備份資料，明確排除將整體節省率歸因於單一工作負載的解讀；數據與原始截圖不變。 |

@@ -12,7 +12,7 @@ kbwangtw 的 IT 技術知識庫，集中保存已去敏感化、可重複使用�
 
 ## 技術紀錄
 
-- [DP340 + APM 2.0 Google Workspace：重複資料刪除實測（75%／3.96x）](docs/synology/dp340-google-workspace-apm20-dedup-test.md)
+- [DP340 + APM 2.0：六台 GuestOS + Google Workspace 合併備份重複資料刪除實測（75%／3.96x）](docs/synology/dp340-google-workspace-apm20-dedup-test.md)
 
 - [HPE ProLiant ML30 Gen11：硬體擴充與 Windows Server 2025 實機驗證](docs/hardware/hpe/ml30-gen11/index.md)
 - [Proxmox VE / Proxmox Backup Server 繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification.md)
