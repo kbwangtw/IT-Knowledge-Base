@@ -13,6 +13,8 @@ categories: [PVE, PBS, ProxCenter, DR]
 
 ## 摘要
 
+> 2026-09-11 補充：[ProxCenter v1.4.9／PBS 4.2.5 更新與 Restore／DR 驗證 SOP](ProxCenter-PBS-Update-and-DR-Validation-SOP.md) 整合本篇還原紀錄、PBS API Token 403 排查、套件升級、reboot／CIFS／PVE 驗收及 rollback 程序，並區分實測結果、產品限制與待原廠確認事項。本篇保留原演練細節。
+
 本次在三節點 `ITBH-Cluster`（PVE `9.2.11`）完成一次應用程式層級的災難復原演練：透過 ProxCenter 將 PBS 上的正式 ProxCenter LXC 備份，以新 VMID 還原到 `node12` 的 Ceph storage。演練確認 Debian、網路、Docker、PostgreSQL、Frontend、Orchestrator 與 WeasyPrint 均可恢復，並實際排除 PBS datastore mapping、LXC Override name 及靜態 IP 衝突三項問題。
 
 本文不包含密碼、API Token、Token Secret、Private Key 或完整憑證。
