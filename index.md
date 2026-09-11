@@ -7,6 +7,8 @@ title: 資訊黑手的Knowledge Base
 
 ## 最新技術紀錄
 
+- [DP340 + APM 2.0 Google Workspace 重複資料刪除實測：75%／3.96x](docs/synology/dp340-google-workspace-apm20-dedup-test/)
+
 - [DP340 + APM 2.0 Google Workspace 備份與還原演練計畫](docs/synology/dp340-google-workspace-apm20-sop/)
 - [Synology DP340 × PVE Cluster：備份與原機／異機還原演練計畫](docs/pve/synology-dp340-pve-cluster-validation/)
 - [Proxmox VE / Proxmox Backup Server 繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification/)
