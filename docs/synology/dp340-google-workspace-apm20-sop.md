@@ -314,3 +314,7 @@ Push 到 `kbwangtw/IT-Knowledge-Base` 與 `Jianan-infra/IT-Knowledge-Base` 之�
 | v0.1 | 待填 | 初版建立,依實際操作影片整理 Step 1–10 | 待填 |
 | v0.2 | 2026-09-10 | 新增第一次實際測試紀錄:Google 雲端硬碟備份還原 Pass,Gmail 備份未成功(原因待查) | kbwangtw |
 
+
+## 相關技術紀錄
+
+- [2026-09-11 整理：Google Workspace 重複資料刪除實測（75%／3.96x）](dp340-google-workspace-apm20-dedup-test.md)：含原始截圖、容量核算及單次觀察限制；此容量紀錄不代表 Gmail 備份問題已解決。
