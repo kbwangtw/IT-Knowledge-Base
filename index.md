@@ -10,7 +10,6 @@ title: 資訊黑手的Knowledge Base
 - [Proxmox VE Cluster + PBS：Ubuntu VM112 災難復原實機驗證](docs/pve/ubuntu-vm112-pbs-disaster-recovery/)
 - [ProxCenter v1.4.9／PBS 4.2.5 更新與 Restore／DR 驗證 SOP](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)
 - [DP340 重複資料刪除報告](docs/synology/dp340-google-workspace-apm20-dedup-test/)
-
 - [DP340 + APM 2.0 Google Workspace 備份與還原演練計畫](docs/synology/dp340-google-workspace-apm20-sop/)
 - [Synology DP340 × PVE Cluster：備份與原機／異機還原演練計畫](docs/pve/synology-dp340-pve-cluster-validation/)
 - [Proxmox VE / Proxmox Backup Server 繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification/)
