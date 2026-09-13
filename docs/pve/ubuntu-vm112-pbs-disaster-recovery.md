@@ -13,6 +13,18 @@ categories: [PVE, PBS, Ubuntu, DR]
 
 ## 實測影片
 
+<div style="position: relative; width: 100%; height: 0; padding-bottom: 56.25%; margin: 1.5rem 0;">
+  <iframe
+    src="https://www.youtube.com/embed/yWz5n7C9la8"
+    title="Proxmox VE + PBS：Ubuntu VM112 完整還原實測"
+    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;"
+    loading="lazy"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+    referrerpolicy="strict-origin-when-cross-origin"
+    allowfullscreen>
+  </iframe>
+</div>
+
 [觀看 YouTube 實測影片：我直接把 Proxmox VM 刪掉！PBS 到底救不救得回來？Ubuntu 完整還原實測](https://youtu.be/yWz5n7C9la8)
 
 影片作為實測參考；本文未以影片標題推定還原成功，也未推算未提供的操作時間。可核對的影片時間碼與任務紀錄待補。
