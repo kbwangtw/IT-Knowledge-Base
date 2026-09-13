@@ -1,5 +1,5 @@
 ---
-layout: home
+layout: default
 title: 資訊黑手的Knowledge Base
 ---
 
