@@ -7,9 +7,9 @@ categories: [PVE, PBS, Ubuntu, DR]
 
 # Proxmox VE Cluster + Proxmox Backup Server：Ubuntu VM 災難復原實機驗證
 
-本紀錄以三節點 Proxmox VE Cluster 中的 VM112 為測試對象，規劃正常關閉 Ubuntu、刪除原 VM 與虛擬磁碟，以模擬 VM 完全遺失，再使用 PBS31 的備份還原為 VM112，逐項驗證作業系統、網路、檔案系統、資料與服務，並量測還原耗時及服務恢復時間。
+本紀錄以三節點 Proxmox VE Cluster 中的 VM112 為測試對象，以正常關閉 Ubuntu、刪除原 VM 與虛擬磁碟為演練情境，以模擬 VM 完全遺失，再使用 PBS31 的備份還原為 VM112，逐項驗證作業系統、網路、檔案系統、資料與服務，並量測還原耗時及服務恢復時間。
 
-> **紀錄狀態：已整理測試環境、備份資訊與刪除前 baseline；刪除、還原及還原後驗證的實際執行結果與時間待補。本文的操作流程與驗收條件不代表已完成或通過測試。**
+> **紀錄狀態：已依影片確認 Restore TASK OK、VM112 於 node11 啟動並進入 Ubuntu 桌面、hostname 與網卡位址一致，以及 systemctl 無失敗單元。Filesystem 詳細比對、資料完整性、應用功能及 RTO 達標結果待補。**
 
 ## 實測影片
 
@@ -27,7 +27,16 @@ categories: [PVE, PBS, Ubuntu, DR]
 
 [觀看 YouTube 實測影片：我直接把 Proxmox VM 刪掉！PBS 到底救不救得回來？Ubuntu 完整還原實測](https://youtu.be/yWz5n7C9la8)
 
-影片作為實測參考；本文未以影片標題推定還原成功，也未推算未提供的操作時間。可核對的影片時間碼與任務紀錄待補。
+已直接核對影片中的還原任務與 Ubuntu 終端畫面，證據如下。時間碼是影片播放位置，不代表實際事件時間。
+
+| 影片位置 | 可直接觀察的證據 | 判定範圍 |
+| --- | --- | --- |
+| [07:56](https://youtu.be/yWz5n7C9la8?t=476) | Restore log 顯示 `restore image complete`、`duration=397.97s`、`speed=154.38MB/s`，結尾 `TASK OK` | 還原任務成功；397.97 秒為 image restore 階段，約 6 分 38 秒 |
+| [08:56](https://youtu.be/yWz5n7C9la8?t=536) | VM112 在 `node11`，Ubuntu 已進入桌面，終端顯示 `ip a` 輸出 | 已開機並進入使用者工作階段 |
+| [09:01](https://youtu.be/yWz5n7C9la8?t=541) | `hostname` 為 `ubclient`；`ens18` 為 UP，MAC `bc:24:11:e7:8e:c0`，IPv4 `192.168.10.68/24`、dynamic | 主機名稱、網卡與 DHCP 位址符合 baseline；不等同外部連線或 DNS 已測通 |
+| [09:06](https://youtu.be/yWz5n7C9la8?t=546) | `systemctl --failed` 顯示 `0 loaded units listed.` | 當下無列出的失敗單元；應用功能仍需另驗 |
+
+未由影片總長或播放位置推算 RTO。以下僅更新畫面可核對的項目，其餘保留待補。
 
 ## 1. 測試目的與範圍
 
@@ -41,7 +50,7 @@ categories: [PVE, PBS, Ubuntu, DR]
 - 執行指定應用程式的服務及功能驗證。
 - 記錄 Restore Time、OS 恢復時間、服務恢復耗時，並與 RTO 目標比較。
 
-此情境為 VM 層級的遺失演練，不涵蓋整個 Cluster 或 PBS 同時損毀。是否跨節點還原待補，不能據此宣告 HA 自動接管或整站災難復原已驗證。
+此情境為 VM 層級的遺失演練，不涵蓋整個 Cluster 或 PBS 同時損毀。影片確認還原後 VM112 位於原節點 node11；本次不列為跨節點還原、HA 自動接管或整站災難復原驗證。
 
 ## 2. 實測環境
 
@@ -59,7 +68,7 @@ categories: [PVE, PBS, Ubuntu, DR]
 | 備份來源 | Proxmox Backup Server，PVE 儲存項目 `PBS31` |
 | PBS 軟體版本 | 待補 |
 | PBS datastore / namespace | 待補 |
-| 還原目標節點 | 待補 |
+| 還原目標節點 | `node11`（影片 08:56） |
 | 還原目標 storage | 待補 |
 | Network Bridge / VLAN | 待補 |
 | 演練執行日期 | 待補 |
@@ -86,12 +95,12 @@ PBS Verify 用於檢查備份資料完整性；`Verify State: OK` 不等同於�
 
 | 驗證項目 | 刪除前紀錄 | 還原後紀錄 | 判定 |
 | --- | --- | --- | --- |
-| Hostname | `ubclient` | 待補 | 待補 |
+| Hostname | `ubclient` | `ubclient` | 一致（09:01） |
 | OS | Ubuntu 22.04 | 待補 | 待補 |
-| 網路介面 | `ens18` | 待補 | 待補 |
-| MAC address | `bc:24:11:e7:8e:c0` | 待補 | 待補 |
-| IPv4 | `192.168.10.68/24` | 待補 | 待補 |
-| 位址取得方式 | DHCP（dynamic） | 待補 | 待補 |
+| 網路介面 | `ens18` | `ens18`，UP | 一致（09:01） |
+| MAC address | `bc:24:11:e7:8e:c0` | `bc:24:11:e7:8e:c0` | 一致（09:01） |
+| IPv4 | `192.168.10.68/24` | `192.168.10.68/24` | 一致（09:01） |
+| 位址取得方式 | DHCP（dynamic） | dynamic | 一致（09:01） |
 | 根檔案系統裝置 | `/dev/sda2` | 待補 | 待補 |
 | 根檔案系統容量 | 約 59 GB | 待補 | 待補 |
 | 已使用空間 | 約 29 GB | 待補 | 待補 |
@@ -164,14 +173,14 @@ sudo shutdown -h now
 | --- | --- |
 | 來源 | PBS31，2026-09-12 21:09:25 備份 |
 | VM ID | `112`，須確認已無其他 VM 使用 |
-| Target Node | 待補 |
+| Target Node | `node11`（還原後畫面確認） |
 | Target Storage | 待補 |
 | 網路 MAC / Unique 選項 | 實際選項待補；核對是否重建 MAC |
 | Start after restore | 預定先不勾選，以分開記錄還原與開機時間；實際值待補 |
 | Restore 開始 / 完成時間 | 待補 |
-| Restore 任務狀態 / log | 待補 |
+| Restore 任務狀態 / log | TASK OK（07:56）；完整 log 歸檔待補 |
 
-若選擇 `node10` 或 `node12`，需核對目標節點的儲存空間、Bridge/VLAN、CPU 與裝置相容性，再將結果列為跨節點還原證據。目前不能確認已執行跨節點還原。
+若選擇 `node10` 或 `node12`，需核對目標節點的儲存空間、Bridge/VLAN、CPU 與裝置相容性，再將結果列為跨節點還原證據。本次影片為還原至 node11，未驗證跨節點還原。
 
 ### 5.4 開機與還原後驗證
 
@@ -179,18 +188,18 @@ sudo shutdown -h now
 
 | 層級 | 驗收方式 | 實際結果 |
 | --- | --- | --- |
-| Restore | 任務成功結束，保存 log 與 VM 設定 | 待補 |
-| Ubuntu | 可正常開機與登入，hostname、OS 版本符合預期 | 待補 |
-| Network | 核對 ens18、MAC、IP、路由、DNS，從外部用戶端測試所需連線 | 待補 |
+| Restore | 任務成功結束，保存 log 與 VM 設定 | TASK OK（07:56）；完整 log 歸檔待補 |
+| Ubuntu | 可正常開機與登入，hostname、OS 版本符合預期 | 已進入 Ubuntu 桌面並操作終端，hostname 一致；OS 版本指令輸出待補 |
+| Network | 核對 ens18、MAC、IP、路由、DNS，從外部用戶端測試所需連線 | ens18 UP、MAC 與 IP 一致；路由、DNS 與外部連線測試待補 |
 | Filesystem | 核對根目錄掛載、裝置、容量與讀寫狀態，檢查相關錯誤 | 待補 |
 | Data | 比對備份點已有的重要檔案 checksum、內容或資料庫資料 | 待補 |
-| Service | 確認必要服務狀態，並執行實際功能測試 | 待補 |
+| Service | 確認必要服務狀態，並執行實際功能測試 | systemctl --failed 無失敗單元（09:06）；應用功能待補 |
 
 `systemctl --failed` 可作為系統服務檢查的一部分，但不能取代應用功能測試；`df -h` 的容量接近也不能證明資料完整。服務名稱、測試端點、預期回應及資料樣本均待補。
 
 ## 6. Restore Time 與 RTO
 
-為避免將選擇備份、設定還原、啟動作業系統與服務驗證全部混算為 Restore Time，本紀錄分開定義時間點。各系統時鐘與時區需一致；實際時間一律待補。
+為避免將選擇備份、設定還原、啟動作業系統與服務驗證全部混算為 Restore Time，本紀錄分開定義時間點。各系統時鐘與時區需一致；事件時間戳待補。影片 07:56 的 log 已確認 image restore 階段耗時 397.97 秒，此數值不直接替代完整 Restore 任務耗時或 RTO。
 
 | 時間點 | 定義 | 實際時間 |
 | --- | --- | --- |
@@ -203,6 +212,7 @@ sudo shutdown -h now
 
 | 指標 | 計算 / 定義 | 結果 |
 | --- | --- | --- |
+| Image restore 階段 | log：`duration=397.97s` | 397.97 秒（約 6 分 38 秒） |
 | Restore Time | `T1 − Tr`，還原任務本身耗時 | 待補 |
 | 遺失至還原完成 | `T1 − T0`，包含還原前操作時間 | 待補 |
 | OS 恢復時間 | `T2 − T0` | 待補 |
@@ -224,14 +234,16 @@ RTO 是目標值；本紀錄將量測值稱為「實測服務恢復耗時」。�
 | Ubuntu 刪除前 baseline | 已有上述數值；完整輸出歸檔待補 |
 | VM 與原磁碟刪除證據 | 待補 |
 | Restore 目標節點、storage 與設定 | 待補 |
-| Restore 任務完整 log | 待補 |
-| Ubuntu 開機、網路與 filesystem 輸出 | 待補 |
+| Restore 任務完整 log | 影片 07:56 可見 TASK OK 與 image restore 耗時；完整 log 檔待補 |
+| Ubuntu 開機、網路與 filesystem 輸出 | 08:56–09:06 確認桌面、hostname、網卡與 IP；filesystem 詳細輸出待補 |
 | 資料與應用功能驗證 | 待補 |
 | 時間點、Restore Time、RTO 目標與達標判定 | 待補 |
-| 影片對應時間碼 | 待補 |
+| 影片對應時間碼 | 已列於「實測影片」證據表 |
 
 ## 8. 目前結論
 
 目前已具備 VM112 的環境資料、PBS31 備份時間、`Verify State: OK` 與刪除前 baseline，可作為災難復原驗證紀錄的基礎。
 
-**實際還原是否成功、Ubuntu 與服務是否恢復、資料是否符合備份點，以及 Restore Time / RTO 是否達標，均待補。** 完成上述採證後，再更新本節為最終實測結論。
+**影片已確認 VM112 還原任務 TASK OK，並於 node11 進入 Ubuntu 桌面。Hostname、MAC、DHCP IPv4 與 baseline 一致，systemctl --failed 無失敗單元。**
+
+Image restore 階段耗時為 **397.97 秒（約 6 分 38 秒）**。完整 Restore 任務起迄、filesystem 詳細比對、資料完整性、應用功能與 RTO 達標情況仍待補；目前結論為「VM 還原與基本 OS／網卡狀態驗證通過」，尚非完整應用災難復原驗收。
