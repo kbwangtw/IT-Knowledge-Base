@@ -2,6 +2,12 @@
 ---
 @import "minima";
 
+/* 隱藏主題自動產生的頁首文章選單，文章入口集中於首頁。 */
+.site-header .site-nav {
+  display: none;
+}
+
+
 /* ------------------------------------------------------------------ */
 /* IT Knowledge Base 共用元件樣式                                      */
 /* 原本只存在於 docs/pve/synology-dp340-pve-cluster-validation.md      */
