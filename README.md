@@ -12,6 +12,7 @@ kbwangtw 的 IT 技術知識庫，集中保存已去敏感化、可重複使用�
 
 ## 技術紀錄
 
+- [Proxmox VE Cluster + PBS：Ubuntu VM112 災難復原實機驗證](docs/pve/ubuntu-vm112-pbs-disaster-recovery.md)
 - [ProxCenter v1.4.9／PBS 4.2.5 更新與 Restore／DR 驗證 SOP](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP.md)
 - [DP340 重複資料刪除報告](docs/synology/dp340-google-workspace-apm20-dedup-test.md)
 
