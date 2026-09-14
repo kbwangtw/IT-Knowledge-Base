@@ -7,6 +7,7 @@ title: 資訊黑手的Knowledge Base
 
 ## 最新技術紀錄
 
+- [Proxmox VE 9 + Ceph 20.2.4 Tentacle：CephX AES → AES256K 安全金鑰遷移實戰](docs/pve/ceph-20-2-4-cephx-aes256k-migration/)
 - [PVE Cluster Fail2Ban 排查與強化：遞增封鎖、iptables 驗證與管理介面暴露檢查](docs/pve/pve-cluster-fail2ban-hardening/)
 - [Proxmox VE Cluster + PBS：Ubuntu VM112 災難復原實機驗證](docs/pve/ubuntu-vm112-pbs-disaster-recovery/)
 - [ProxCenter v1.4.9／PBS 4.2.5 更新與 Restore／DR 驗證 SOP](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)
