@@ -1,56 +1,43 @@
 ---
 layout: default
-title: "Proxmox VE + Ceph 20.2.4：CephX AES → AES256K 安全金鑰遷移實戰"
+title: "Proxmox VE 9 + Ceph 20.2.4 Tentacle：CephX AES → AES256K 安全金鑰遷移實戰"
 date: 2026-09-14
 categories: [PVE, Ceph, Security]
 ---
 
 <div class="kb-hero">
-<h1>Proxmox VE + Ceph 20.2.4：CephX AES → AES256K 安全金鑰遷移實戰</h1>
-<p>三節點 Proxmox VE／Ceph Tentacle 20.2.4 升級後，依官方程序逐步處理 CephX 舊 AES 金鑰警告，完成 MON、MGR、MDS、OSD、bootstrap clients、client.crash 與 client.admin 的 AES256K 遷移。</p>
-<div class="kb-badges"><span class="kb-badge">PVE 9</span><span class="kb-badge">Ceph 20.2.4</span><span class="kb-badge">CephX</span><span class="kb-badge">AES256K</span></div>
+<h1>Proxmox VE 9 + Ceph 20.2.4 Tentacle：CephX AES → AES256K 安全金鑰遷移實戰</h1>
+<p>三節點 Proxmox VE 9／Ceph Tentacle 20.2.4 升級後，依 Ceph 官方程序處理 CVE-2025-30156 所揭露的舊 CephX AES credential，完成 MON、MGR、MDS、OSD、bootstrap clients、client.crash、client.admin 與最終 AES256K-only 切換。</p>
+<div class="kb-badges"><span class="kb-badge">PVE 9</span><span class="kb-badge">Ceph 20.2.4 Tentacle</span><span class="kb-badge">CephX</span><span class="kb-badge">AES256K</span><span class="kb-badge">HEALTH_OK</span></div>
 </div>
 
-> 本文為實機維運紀錄。所有 Ceph secret key 均未收錄；IP、FSID、金鑰內容等敏感資訊應在公開文件中去識別化。
+> 本文為 2026-09-14 實機維運紀錄。所有 Ceph secret key、FSID、IP 等敏感資訊均不收錄。文中的節點名稱保留作為操作流程說明。
 
-## 1. 為什麼升級後突然出現 HEALTH_WARN？
+## 1. 案例摘要
 
-Ceph 20.2.4 Tentacle 修補 CVE-2025-30156。舊 CephX `aes` key type 使用 AES-128-CBC，缺少完整性驗證；新版加入 `aes256k`（AES256-CTS-HMAC-SHA384-192）。既有叢集升級後仍維持相容性，但 Monitor 會偵測舊金鑰並產生 migration health warnings。
+Ceph 升級到 20.2.4 Tentacle 後，Cluster 並沒有故障，但開始出現多項 CephX `HEALTH_WARN`。原因是 Ceph 20.2.4 修補 CVE-2025-30156，會偵測既有 `aes` key type 並要求遷移到新的 `aes256k`。
 
-因此這不是「升級把 Ceph 弄壞」，而是新版開始揭露既有 CephX credential 的安全風險，要求管理者分階段遷移。
-
-官方參考：
-
-- https://docs.ceph.com/en/latest/security/CVE-2025-30156/
-- https://docs.ceph.com/en/latest/releases/tentacle/
-- https://docs.ceph.com/en/tentacle/rados/configuration/auth-config-ref/
-
-## 2. 實機環境
-
-| 項目 | 環境 |
-|---|---|
-| Hypervisor | Proxmox VE 9.2.x |
-| Ceph | 20.2.4 Tentacle |
-| Nodes | `node10`、`node11`、`node12` |
-| MON | 3 / 3 quorum |
-| MGR | 1 active + 2 standby |
-| MDS | 1 active + 2 standby |
-| OSD | 3（每節點 1 OSD） |
-| CephFS | 1 filesystem |
-| PG | 97 |
-
-操作期間的重要健康基線：
+本次採「一次一個 daemon／credential、每一步立即驗證」方式完成遷移。最終結果：
 
 ```text
+HEALTH_OK
 MON     3/3 quorum
+MGR     1 active + 2 standby
+MDS     1 active + 2 standby
 OSD     3 up / 3 in
+CephFS  1/1 healthy
 PG      97 active+clean
-CephFS  healthy
+
+auth_service_cipher   aes256k
+auth_allowed_ciphers  aes256k
+auth_preferred_cipher aes256k
 ```
 
-所有高風險操作都以「一次只處理一個 daemon／credential，完成後立即驗證」為原則。
+## 2. 為什麼升級後突然出現 HEALTH_WARN？
 
-## 3. 升級後常見警告
+Ceph 20.2.4 Tentacle 修補 CVE-2025-30156。舊 CephX `aes` key type 使用 AES-128-CBC，缺少完整性驗證；新版加入 `aes256k`（AES256-CTS-HMAC-SHA384-192）。既有 Cluster 升級後仍維持相容性，但 Monitor 會偵測 legacy credential 並產生 migration health warnings。
+
+因此這不是「升級把 Ceph 弄壞」，而是新版開始揭露既有 CephX credential 的安全風險。
 
 本次曾出現：
 
@@ -63,78 +50,99 @@ AUTH_INSECURE_KEYS_CREATABLE
 AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE
 ```
 
-先確認 Monitor 允許新舊 cipher 共存：
+## 3. 實機環境
 
-```bash
-ceph mon dump | grep -E 'auth_(service|allowed|preferred)_cipher'
+| 項目 | 環境 |
+|---|---|
+| Hypervisor | Proxmox VE 9.2.x |
+| Ceph | 20.2.4 Tentacle |
+| Nodes | `node10`、`node11`、`node12` |
+| MON | 3 / 3 quorum |
+| MGR | 1 active + 2 standby |
+| MDS | 1 active + 2 standby |
+| OSD | 3（每節點 1 OSD） |
+| CephFS | 1 filesystem |
+| Pools | 4 |
+| PG | 97 |
+
+操作期間持續以以下狀態作為安全基線：
+
+```text
+MON     3/3 quorum
+OSD     3 up / 3 in
+PG      97 active+clean
+CephFS  healthy
 ```
 
-遷移初期應保留：
+## 4. 遷移策略與正確順序
+
+本次依 Ceph Tentacle 官方 CephX migration 原則：
+
+1. 過渡期保留 `aes,aes256k`
+2. `auth_preferred_cipher` 改成 `aes256k`
+3. 輪替 MON、MGR、MDS、OSD service credentials
+4. 確認 `AUTH_INSECURE_SERVICE_KEY_TYPE` 消失
+5. 設定 `auth_service_cipher aes256k`
+6. 讓舊 rotating service keys 自然過期
+7. 輪替 bootstrap 與一般 client credentials
+8. `client.admin` 最後處理，先建立 emergency admin
+9. 確認所有 insecure client/service warnings 清除
+10. 最後才把 `auth_allowed_ciphers` 改成 `aes256k`
+
+> **不要一開始就停用 `aes`。** 舊 daemon 或 client key 尚未遷移時，可能直接失去認證能力。
+
+## 5. Preferred cipher
+
+先確認 Monitor 設定：
+
+```bash
+ceph mon dump 2>/dev/null | grep -E 'auth_(service|allowed|preferred)_cipher'
+```
+
+遷移初期保留：
 
 ```text
 auth_allowed_ciphers aes, aes256k
 ```
 
-然後把新 credential 的 preferred cipher 改成 AES256K：
+再設定：
 
 ```bash
 ceph mon set auth_preferred_cipher aes256k
 ```
 
-> **不要一開始就執行 `ceph mon set auth_allowed_ciphers aes256k`。** 舊 daemon/client key 尚未遷移時關閉 `aes`，可能直接造成認證中斷。
+## 6. MON 金鑰遷移
 
-## 4. 官方建議遷移順序
-
-本次依 Ceph Tentacle 官方 CephX migration 原則處理：
-
-1. 允許 `aes,aes256k`
-2. `auth_preferred_cipher` 設為 `aes256k`
-3. 輪替 service daemon credentials：MON → MGR → MDS → OSD
-4. 確認 `AUTH_INSECURE_SERVICE_KEY_TYPE` 消失
-5. 設定 `auth_service_cipher aes256k`
-6. 讓舊 rotating service keys 自然過期
-7. 輪替 bootstrap／一般 client credentials
-8. `client.admin` 最後處理，先建立 emergency admin
-9. 所有舊 client/service key 清除後，最後才停用 `aes`
-
-## 5. MON 金鑰遷移
-
-先建立受限工作目錄：
+建立 root-only 工作目錄：
 
 ```bash
 mkdir -p /root/ceph-key-migration
 chmod 700 /root/ceph-key-migration
 ```
 
-產生新的 MON AES256K credential 並保存：
+輪替 MON credential：
 
 ```bash
 ceph auth rotate --key-type=aes256k mon. \
   | tee /root/ceph-key-migration/mon.keyring
 ```
 
-三台 MON 採一次一台的方式 restart，每次都確認 quorum 回到 3/3 後才處理下一台。
+三台 MON 一次只 restart 一台，每次確認 quorum 回到 3/3 才處理下一台：
 
 ```bash
 ceph quorum_status
 ceph -s
 ```
 
-> 不要同時 restart 多個 MON。
+## 7. MGR 金鑰遷移
 
-## 6. MGR 金鑰遷移
-
-PVE package-based Ceph 的 MGR keyring 位置：
+PVE package-based Ceph 的 MGR keyring 位於：
 
 ```text
-/var/lib/ceph/mgr/ceph-node10/keyring
-/var/lib/ceph/mgr/ceph-node11/keyring
-/var/lib/ceph/mgr/ceph-node12/keyring
+/var/lib/ceph/mgr/ceph-nodeXX/keyring
 ```
 
-每台一次一個：stop → backup → rotate → 更新 keyring → 權限 → start → health check。
-
-概念流程：
+每台依序執行 stop → backup → rotate → 更新 keyring → 權限 → start → health check：
 
 ```bash
 systemctl stop ceph-mgr@NODE
@@ -146,7 +154,7 @@ systemctl start ceph-mgr@NODE
 ceph -s
 ```
 
-## 7. MDS 金鑰遷移
+## 8. MDS 金鑰遷移
 
 MDS keyring：
 
@@ -154,24 +162,22 @@ MDS keyring：
 /var/lib/ceph/mds/ceph-nodeXX/keyring
 ```
 
-先處理 standby MDS。最後處理 active MDS 時，先停止 active，確認另一台 standby 自動接手 rank 0，再進行 rotate。
+先處理 standby MDS。處理 active MDS 時先停止 active，確認另一台 standby 自動接手 rank 0，再 rotate 舊 active MDS，避免 CephFS metadata service 同時中斷。
 
 ```bash
 ceph fs status
 ceph -s
 ```
 
-這樣可以避免一次中斷 CephFS metadata service。
+## 9. OSD：除了 keyring，還要更新 BlueStore label
 
-## 8. OSD 金鑰遷移：除了 keyring，還要注意 BlueStore label
-
-OSD 是本次最需要謹慎的 daemon。一次只處理一顆 OSD，並在維護期間設定 `noout`：
+OSD 一次只處理一顆，維護期間先：
 
 ```bash
 ceph osd set noout
 ```
 
-每顆 OSD 的流程：
+每顆 OSD：
 
 ```bash
 systemctl stop ceph-osd@ID
@@ -182,13 +188,13 @@ chown ceph:ceph /var/lib/ceph/osd/ceph-ID/keyring
 chmod 600 /var/lib/ceph/osd/ceph-ID/keyring
 ```
 
-package/systemd + ceph-volume 建立的 BlueStore OSD，還要檢查並更新 BlueStore label 內的 `osd_key`。先用：
+對 ceph-volume 建立的 BlueStore OSD，還要找出 block device：
 
 ```bash
 ceph-volume lvm list
 ```
 
-找到該 OSD 的 block device，再依官方程序：
+並更新 BlueStore label 內的 `osd_key`：
 
 ```bash
 ceph-bluestore-tool --dev /dev/DEVICE \
@@ -196,36 +202,28 @@ ceph-bluestore-tool --dev /dev/DEVICE \
   -v /root/ceph-key-migration/osd.ID.keyring
 ```
 
-再啟動：
+再啟動並等待恢復：
 
 ```bash
 systemctl start ceph-osd@ID
 ceph -s
 ```
 
-必須等 OSD 回到 `up/in`、PG 回到 `active+clean`，才處理下一顆。
-
-全部完成後：
+每顆都等到 OSD `up/in`、PG `active+clean` 才處理下一顆。全部完成：
 
 ```bash
 ceph osd unset noout
 ```
 
-## 9. Service cipher 改成 AES256K
+## 10. Service cipher 改成 AES256K
 
-所有 daemon service key 都完成後：
+所有 daemon service credentials 完成後：
 
 ```bash
 ceph mon set auth_service_cipher aes256k
 ```
 
-確認：
-
-```bash
-ceph mon dump | grep -E 'auth_(service|allowed|preferred)_cipher'
-```
-
-本次過渡狀態：
+過渡狀態為：
 
 ```text
 auth_service_cipher aes256k
@@ -233,11 +231,11 @@ auth_allowed_ciphers aes, aes256k
 auth_preferred_cipher aes256k
 ```
 
-`AUTH_INSECURE_SERVICE_TICKETS` 隨後消失。
+此後 `AUTH_INSECURE_SERVICE_TICKETS` 消失。
 
-## 10. Rotating service keys：不要急著 wipe
+## 11. Rotating service keys：實測等待自然過期
 
-Ceph 仍可能顯示：
+仍可能看到：
 
 ```text
 AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE
@@ -247,15 +245,17 @@ AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE
   mgr using aes
 ```
 
-本次 `auth_service_ticket_ttl` 為 3600 秒：
+本次：
 
 ```bash
 ceph config get mon auth_service_ticket_ttl
 ```
 
-Ceph 官方對一般部署的建議是讓 rotating service keys 自然過期，不建議為了立即消除 warning 強制 wipe。因 rotating keys 為階梯式輪替，實際清除可能需要數小時。
+得到 `3600` 秒，但這不代表 warning 一小時整就一定消失。Ceph 官方對一般部署建議讓 rotating service keys 自然過期，不建議只為消除 warning 就執行 wipe。
 
-## 11. Bootstrap client credentials
+本案例在 14:48 檢查時四類 rotating AES keys 仍存在；16:25 再檢查時 `AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE` 已自然消失。實測證明不需要強制 wipe，也不需要為此重啟整個 Cluster。
+
+## 12. Bootstrap client credentials
 
 本次 insecure clients 包含：
 
@@ -270,15 +270,13 @@ client.crash
 client.admin
 ```
 
-### bootstrap-osd
-
-實際使用：
+`client.bootstrap-osd` 實際使用：
 
 ```text
 /var/lib/ceph/bootstrap-osd/ceph.keyring
 ```
 
-先 rotate：
+輪替後分發到所有實際使用節點：
 
 ```bash
 ceph auth rotate --key-type=aes256k client.bootstrap-osd \
@@ -286,56 +284,32 @@ ceph auth rotate --key-type=aes256k client.bootstrap-osd \
 chmod 600 /root/ceph-key-migration/bootstrap-osd.new.keyring
 ```
 
-再把新 keyring 分發到所有實際使用此 credential 的節點：
-
-```bash
-cp /root/ceph-key-migration/bootstrap-osd.new.keyring \
-  /var/lib/ceph/bootstrap-osd/ceph.keyring
-chmod 600 /var/lib/ceph/bootstrap-osd/ceph.keyring
-```
-
-使用 SHA256 比對檔案是否一致，不要 `cat` secret：
+使用 SHA256 比對，不輸出 secret：
 
 ```bash
 sha256sum /root/ceph-key-migration/bootstrap-osd.new.keyring \
   /var/lib/ceph/bootstrap-osd/ceph.keyring
 ```
 
-### 其他 bootstrap entities
+實機檢查 bootstrap-mds、bootstrap-mgr、bootstrap-rbd、bootstrap-rbd-mirror、bootstrap-rgw 目錄沒有實際 keyring，因此只安全保存新 credential，沒有憑空建立 consumer path。
 
-實機檢查發現 bootstrap-mds、bootstrap-mgr、bootstrap-rbd、bootstrap-rbd-mirror、bootstrap-rgw 目錄皆沒有實際 keyring，因此只將新 credential 安全保存於 `/root/ceph-key-migration/`，沒有憑空部署到原本不存在的使用位置。
+> 原則：rotate client key 後必須更新每一個真正使用該 credential 的位置；沒有實際 consumer 時不要自行創造部署路徑。
 
-例如：
+## 13. PVE 的 client.crash 特殊處理
 
-```bash
-ceph auth rotate --key-type=aes256k client.bootstrap-rgw \
-  > /root/ceph-key-migration/bootstrap-rgw.new.keyring
-chmod 600 /root/ceph-key-migration/bootstrap-rgw.new.keyring
-```
-
-原則是：**rotate client key 後，必須更新每一個真正使用該 credential 的位置；沒有實際 consumer 時不要自行創造部署路徑。**
-
-## 12. PVE 的 client.crash 特殊處理
-
-三台節點都看到：
+三台節點使用：
 
 ```text
 /etc/pve/ceph/ceph.client.crash.keyring
 ```
 
-`/etc/pve` 為 PVE cluster filesystem（pmxcfs），因此先比對三台 SHA256，確認為同一份 credential，再進行 rotate。
-
-備份：
+`/etc/pve` 為 PVE cluster filesystem（pmxcfs）。先備份，再 rotate：
 
 ```bash
 cp -a /etc/pve/ceph/ceph.client.crash.keyring \
   /root/ceph-key-migration/client.crash.keyring.old
 chmod 600 /root/ceph-key-migration/client.crash.keyring.old
-```
 
-rotate：
-
-```bash
 ceph auth rotate --key-type=aes256k client.crash \
   > /root/ceph-key-migration/client.crash.new.keyring
 chmod 600 /root/ceph-key-migration/client.crash.new.keyring
@@ -350,36 +324,16 @@ chown root:www-data /etc/pve/ceph/ceph.client.crash.keyring
 chmod 640 /etc/pve/ceph/ceph.client.crash.keyring
 ```
 
-三台再以 SHA256 確認 pmxcfs 已同步。
+### ceph-crash startup ping 的 misleading error
 
-### ceph-crash 啟動時的 misleading error
-
-`ceph-crash.service` restart 後曾看到：
+restart `ceph-crash.service` 曾看到：
 
 ```text
 No supported authentication method found! Is the keyring missing?
 unable to find a keyring via 'keyring' config /etc/pve/priv/ceph.client.admin.keyring: Permission denied
 ```
 
-檢查 `/usr/bin/ceph-crash` 後發現程式會先降權限成 `ceph` UID + `www-data` GID，然後在啟動 ping 階段直接執行：
-
-```text
-ceph -s
-```
-
-沒有指定 `-n client.crash`。因此會落到一般 `[client]` 的 keyring 設定：
-
-```text
-/etc/pve/priv/$cluster.$name.keyring
-```
-
-以降權後身份嘗試讀 `client.admin` 時產生 Permission denied。真正 `post_crash()` 則會依序嘗試：
-
-```text
-client.crash
-client.crash.<hostname>
-client.admin
-```
+實機檢查 `/usr/bin/ceph-crash` 後發現，它降權限為 `ceph` UID + `www-data` GID 後，啟動 ping 階段直接執行 `ceph -s`，沒有指定 `-n client.crash`，因此會落到一般 `[client]` 的 admin keyring 路徑而遭遇權限問題。真正 `post_crash()` 才會依序嘗試 `client.crash`、`client.crash.<hostname>`、`client.admin`。
 
 另外確認：
 
@@ -387,26 +341,24 @@ client.admin
 ceph-conf -n client.crash --lookup keyring
 ```
 
-正確解析為：
+正確解析：
 
 ```text
 /etc/pve/ceph/ceph.client.crash.keyring
 ```
 
-以及 auth DB caps 保持：
+原有 caps 也保持：
 
 ```text
 caps mgr = "profile crash"
 caps mon = "profile crash"
 ```
 
-因此不要因 startup ping 的訊息就擅自放寬 `/etc/pve/priv` 權限或修改 `client.crash` caps。
+因此不要因 startup ping 訊息就擅自放寬 `/etc/pve/priv` 權限或修改 `client.crash` caps。
 
-## 13. client.admin：最後處理，先建立 emergency admin
+## 14. client.admin：最後處理，先建立 emergency admin
 
-這是整個 migration 風險最高的 client credential。Ceph 官方特別要求先建立緊急管理 credential。
-
-建立：
+先建立緊急管理 credential：
 
 ```bash
 ceph auth get-or-create client.admin-backup mon "allow *" \
@@ -414,30 +366,25 @@ ceph auth get-or-create client.admin-backup mon "allow *" \
 chmod 600 /root/ceph-key-migration/client.admin-backup.keyring
 ```
 
-驗證 emergency credential，輸出丟棄，避免把所有 key 顯示到終端紀錄：
+驗證：
 
 ```bash
 ceph -n client.admin-backup \
   -k /root/ceph-key-migration/client.admin-backup.keyring \
   auth ls >/dev/null
-
 echo $?
 ```
 
 必須為 `0`。
 
-### 備份 PVE 與 local admin keyring
-
-本次 node10 同時存在：
+本次 node10 同時有：
 
 ```text
 /etc/pve/priv/ceph.client.admin.keyring
 /etc/ceph/ceph.client.admin.keyring
 ```
 
-先備份並用 SHA256 驗證一致。
-
-### Rotate admin
+先備份，再 rotate：
 
 ```bash
 ceph auth rotate --key-type=aes256k client.admin \
@@ -445,156 +392,216 @@ ceph auth rotate --key-type=aes256k client.admin \
 chmod 600 /root/ceph-key-migration/client.admin.new.keyring
 ```
 
-此刻舊 admin key 已不能重新認證，因此立即更新正式 keyring：
+立即更新正式 keyring：
 
 ```bash
 cp /root/ceph-key-migration/client.admin.new.keyring \
   /etc/pve/priv/ceph.client.admin.keyring
-
 cp /root/ceph-key-migration/client.admin.new.keyring \
   /etc/ceph/ceph.client.admin.keyring
-
 chmod 600 /etc/pve/priv/ceph.client.admin.keyring
 chmod 600 /etc/ceph/ceph.client.admin.keyring
 ```
 
-先用 SHA256 確認，再測：
+三節點均驗證新的 admin credential 可正常執行 `ceph -s`。
 
-```bash
-ceph -s
-echo $?
-```
+## 15. 最後 AES-only 切換
 
-三台節點都必須能以新的 PVE admin keyring 正常執行 `ceph -s`。
-
-本次驗證結果：
-
-```text
-node10  admin authentication OK
-node11  admin authentication OK
-node12  admin authentication OK
-MON     3/3 quorum
-OSD     3 up / 3 in
-PG      97 active+clean
-CephFS  healthy
-```
-
-## 14. 目前最後等待階段
-
-完成所有 daemon/client migration 後，本次剩餘：
-
-```text
-AUTH_INSECURE_KEYS_ALLOWED
-AUTH_INSECURE_KEYS_CREATABLE
-AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE
-```
-
-Monitor 設定：
-
-```text
-auth_service_cipher aes256k
-auth_allowed_ciphers aes, aes256k
-auth_preferred_cipher aes256k
-```
-
-前兩個 warning 是因為遷移期間仍刻意允許 `aes`；第三個則等待 rotating service keys 自然淘汰。
-
-定期只需檢查：
+16:25 再次執行：
 
 ```bash
 date
 ceph health detail
 ```
 
-不要為了追求立即 `HEALTH_OK` 而強制 wipe rotating keys。
-
-## 15. 最後收尾：停用舊 AES
-
-**只有在以下條件都成立後才做：**
+此時 `AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE` 已消失，只剩：
 
 ```text
-AUTH_INSECURE_CLIENT_KEY_TYPE          已消失
-AUTH_INSECURE_SERVICE_KEY_TYPE         已消失
-AUTH_INSECURE_SERVICE_TICKETS          已消失
-AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE 已消失
-三台 admin authentication              正常
-MON/OSD/PG/CephFS                       正常
+AUTH_INSECURE_KEYS_ALLOWED
+AUTH_INSECURE_KEYS_CREATABLE
 ```
 
-最後執行：
+且先前的下列警告均已消失：
+
+```text
+AUTH_INSECURE_CLIENT_KEY_TYPE
+AUTH_INSECURE_SERVICE_KEY_TYPE
+AUTH_INSECURE_SERVICE_TICKETS
+AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE
+```
+
+因此執行最後切換：
 
 ```bash
 ceph mon set auth_allowed_ciphers aes256k
 ```
 
-驗證：
+立即驗證：
 
 ```bash
-ceph mon dump | grep -E 'auth_(service|allowed|preferred)_cipher'
+ceph mon dump 2>/dev/null | grep -E 'auth_(service|allowed|preferred)_cipher'
 ceph health detail
 ceph -s
 ```
 
-預期：
+實測結果：
 
 ```text
 auth_service_cipher aes256k
 auth_allowed_ciphers aes256k
 auth_preferred_cipher aes256k
+HEALTH_OK
 ```
 
-`AUTH_INSECURE_KEYS_ALLOWED` 應清除；當 allowed ciphers 不再包含 insecure type 時，`AUTH_INSECURE_KEYS_CREATABLE` 的預設行為也會隨之關閉。
+Cluster 同時維持：
 
-確認整個 cluster 正常後，才移除 emergency admin：
+```text
+MON     3 daemons，3/3 quorum
+MGR     1 active + 2 standby
+MDS     1 active + 2 standby
+OSD     3 up / 3 in
+CephFS  1/1 healthy
+Pools   4
+PG      97 active+clean
+```
+
+切換當下 Cluster 仍有數百 MiB/s 的 client read I/O，服務仍維持正常。
+
+## 16. AES256K-only 後的三節點驗證
+
+停用舊 AES 後，不立刻刪除 emergency admin，而是逐節點驗證。
+
+node10：
+
+```bash
+ceph -s >/dev/null
+echo "NODE10_ADMIN_RC=$?"
+
+ceph -n client.admin-backup \
+  -k /root/ceph-key-migration/client.admin-backup.keyring \
+  auth ls >/dev/null
+echo "BACKUP_ADMIN_RC=$?"
+```
+
+結果：
+
+```text
+NODE10_ADMIN_RC=0
+BACKUP_ADMIN_RC=0
+```
+
+node11：
+
+```text
+NODE11_ADMIN_RC=0
+HEALTH_OK
+```
+
+node12：
+
+```text
+NODE12_ADMIN_RC=0
+HEALTH_OK
+```
+
+這證明三台 PVE 節點的 `client.admin` 在 AES256K-only 環境下均可正常認證。
+
+## 17. 移除 emergency admin，正式結案
+
+確認三節點正常後，在 node10 移除 emergency auth entity：
 
 ```bash
 ceph auth rm client.admin-backup
 ```
 
-再次：
+再次驗證：
 
 ```bash
-ceph -s
+ceph -s >/dev/null
+echo "FINAL_ADMIN_RC=$?"
 ceph health detail
+ceph mon dump 2>/dev/null | grep -E 'auth_(service|allowed|preferred)_cipher'
 ```
 
-## 16. 不要做的事情
+最終實測：
+
+```text
+FINAL_ADMIN_RC=0
+HEALTH_OK
+auth_service_cipher aes256k
+auth_allowed_ciphers aes256k
+auth_preferred_cipher aes256k
+```
+
+至此 CephX AES → AES256K migration 正式完成。
+
+## 18. 本次時間線
+
+| 時間 | 狀態 |
+|---|---|
+| 遷移初期 | daemon/client 舊 AES credentials 逐項輪替 |
+| 14:48 | 仍有 MON/MDS/OSD/MGR 共 4 類 rotating AES service keys |
+| 16:25 | rotating warning 自然消失，只剩 AES allowed/creatable warnings |
+| 16:26 後 | `auth_allowed_ciphers` 切為 `aes256k`，立即 `HEALTH_OK` |
+| 最終驗證 | node10/node11/node12 admin 全部 RC=0 |
+| 結案 | 移除 `client.admin-backup`，仍為 `HEALTH_OK` |
+
+## 19. 這次踩到的重點
+
+- 升級後的 CephX WARN 是安全 migration 訊號，不等於 Ceph 故障。
+- `auth_allowed_ciphers aes256k` 一定要最後才做。
+- MON、MGR、MDS、OSD 都應採 rolling、一個一個處理。
+- OSD 不只要換 keyring，ceph-volume BlueStore OSD 也要注意 label 裡的 `osd_key`。
+- rotating service keys 不需要為了追求立即 HEALTH_OK 就強制 wipe；本案例等待後自然消失。
+- `client.admin` 要最後處理，而且先建立可驗證的 emergency admin。
+- PVE 的 `/etc/pve` 是 pmxcfs，共享 keyring 要理解其同步特性。
+- `ceph-crash` startup ping 的 Permission denied 不代表新的 `client.crash` credential 失敗，不能因此亂改權限或 caps。
+- 驗證 keyring 同步時用 SHA256，不要把 secret `cat` 到終端、ticket、聊天室或 GitHub。
+
+## 20. 不要做的事情
 
 ```text
 ✗ daemon/client 尚未完成遷移就關閉 aes
-✗ 同時 restart 多個 MON/OSD
+✗ 同時 restart 多個 MON 或 OSD
 ✗ OSD rotate 後忘記 BlueStore osd_key label
-✗ 把 keyring 用 cat 貼到 ticket、聊天室或 GitHub
-✗ 為了清 warning 強制 wipe rotating service keys
+✗ 把 keyring secret 貼到 GitHub、ticket 或聊天室
+✗ 為了清 warning 就強制 wipe rotating service keys
 ✗ client.admin 未建立 emergency credential 就直接 rotate
 ✗ 看到 ceph-crash startup ping error 就放寬 /etc/pve/priv 權限
+✗ AES256K-only 尚未完成三節點驗證就刪 emergency admin
 ```
 
-## 17. 每一步的安全驗證原則
+## 21. 最終結論
 
-建議反覆使用：
+這次真正重要的不是「把 HEALTH_WARN 清掉」，而是安全地完成所有正在使用的 credential migration，再停用 legacy AES。
 
-```bash
-ceph -s
-ceph health detail
-ceph quorum_status
-ceph osd tree
-ceph fs status
+完整流程可以濃縮成：
+
+```text
+Ceph 20.2.4 Tentacle Upgrade
+        ↓
+偵測 legacy CephX AES credentials
+        ↓
+Preferred cipher → AES256K
+        ↓
+MON / MGR / MDS / OSD rotation
+        ↓
+BlueStore osd_key 更新
+        ↓
+Service cipher → AES256K
+        ↓
+Bootstrap / client.crash / client.admin rotation
+        ↓
+Rotating service keys 自然過期
+        ↓
+auth_allowed_ciphers → AES256K only
+        ↓
+三節點 admin authentication 驗證
+        ↓
+移除 emergency admin
+        ↓
+HEALTH_OK
 ```
-
-關鍵檔案只比較 hash：
-
-```bash
-sha256sum FILE1 FILE2
-```
-
-不要輸出 credential 本體。
-
-## 18. 結論
-
-Ceph 20.2.4 升級後的 CephX warnings 是安全 migration 訊號，不代表叢集已故障。本次三節點 PVE/Ceph 叢集採逐 daemon、逐 client 的方式完成 AES → AES256K credential rotation，並在每一階段維持 MON quorum、OSD up/in、PG active+clean 與 CephFS healthy。
-
-最重要的原則不是「最快把 HEALTH_WARN 清掉」，而是：
 
 > **先確保所有真正使用中的 credential 都已安全換成 AES256K，再關閉舊 AES。**
 
