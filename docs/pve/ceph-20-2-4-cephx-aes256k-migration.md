@@ -2,6 +2,7 @@
 layout: default
 title: "Proxmox VE 9 + Ceph 20.2.4 Tentacle：CephX AES → AES256K 安全金鑰遷移實戰"
 date: 2026-09-14
+last_modified_at: 2026-09-15
 categories: [PVE, Ceph, Security]
 ---
 
@@ -13,11 +14,13 @@ categories: [PVE, Ceph, Security]
 
 > 本文為 2026-09-14 實機維運紀錄。所有 Ceph secret key、FSID、IP 等敏感資訊均不收錄。文中的節點名稱保留作為操作流程說明。
 
+> **2026-09-15 修訂：Ceph HEALTH_OK 不代表 PVE RBD storage credential 正常。** 本次發現 `client.admin` rotate 後，`/etc/pve/priv/ceph/VM_Pool.keyring` 仍是舊 key，導致 RBD storage inactive 與 PBS 備份失敗。以下保留原遷移實戰，並補正 Storage 同步與備份驗證。
+
 ## 1. 案例摘要
 
 Ceph 升級到 20.2.4 Tentacle 後，Cluster 並沒有故障，但開始出現多項 CephX `HEALTH_WARN`。原因是 Ceph 20.2.4 修補 CVE-2025-30156，會偵測既有 `aes` key type 並要求遷移到新的 `aes256k`。
 
-本次採「一次一個 daemon／credential、每一步立即驗證」方式完成遷移。最終結果：
+本次採「一次一個 daemon／credential、每一步立即驗證」方式完成遷移。2026-09-14 的 Ceph 層驗證結果（完整結案另須通過第 16 節的 Storage／PBS 驗證）：
 
 ```text
 HEALTH_OK
@@ -86,7 +89,7 @@ CephFS  healthy
 6. 讓舊 rotating service keys 自然過期
 7. 輪替 bootstrap 與一般 client credentials
 8. `client.admin` 最後處理，先建立 emergency admin
-9. 確認所有 insecure client/service warnings 清除
+9. 同步所有使用該 credential 的 PVE Storage keyring；完成指定 keyring 的 RBD、各節點 `pvesm status` 與 VM／LXC 備份驗證，並確認所有 insecure client/service warnings 清除
 10. 最後才把 `auth_allowed_ciphers` 改成 `aes256k`
 
 > **不要一開始就停用 `aes`。** 舊 daemon 或 client key 尚未遷移時，可能直接失去認證能力。
@@ -405,7 +408,19 @@ chmod 600 /etc/ceph/ceph.client.admin.keyring
 
 三節點均驗證新的 admin credential 可正常執行 `ceph -s`。
 
-## 15. 最後 AES-only 切換
+### 14.1 必做：同步 PVE RBD Storage keyring
+
+`client.admin` rotate 後，除了上述 admin 路徑，也必須盤點 `/etc/pve/storage.cfg` 中使用同一個身分的 RBD Storage。PVE 的 Storage credential 路徑為：
+
+```text
+/etc/pve/priv/ceph/<STORAGE_ID>.keyring
+```
+
+本案例 Storage ID 與 pool 都叫 `VM_Pool`，但其他環境兩者未必相同。本次設定沒有指定其他 `username`，keyring entity 為 `[client.admin]`，因此同步目前有效的 admin keyring；若 Storage 使用專用 client，應同步該 client 的有效 key，不能一律覆蓋成 admin。
+
+**立即依第 16.3 節先備份再同步，並完成第 16.4 節驗證，才繼續停用舊 AES。** 只更新 Ceph DB 與 `/etc/ceph/ceph.client.admin.keyring`，不保證 Storage 的獨立副本也會更新。
+
+## 15. 最後 AES256K-only 切換
 
 16:25 再次執行：
 
@@ -430,7 +445,7 @@ AUTH_INSECURE_SERVICE_TICKETS
 AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE
 ```
 
-因此執行最後切換：
+原紀錄於此執行最後切換；修訂後 SOP 必須先確認第 14.1 節 Storage credential 同步與第 16 節功能驗證通過，不能只以 warnings 消失判定：
 
 ```bash
 ceph mon set auth_allowed_ciphers aes256k
@@ -504,11 +519,173 @@ NODE12_ADMIN_RC=0
 HEALTH_OK
 ```
 
-這證明三台 PVE 節點的 `client.admin` 在 AES256K-only 環境下均可正常認證。
+這證明三台 PVE 節點的 Ceph CLI admin 認證正常；尚不足以證明 PVE RBD Storage 使用的 keyring 正常。以下為 2026-09-15 事故與補正流程。
+
+
+### 16.1 實際事故：Ceph 正常，PVE RBD inactive、PBS 備份失敗
+
+2026-09-14 輪替 `client.admin` 後，Ceph DB 與 `/etc/ceph/ceph.client.admin.keyring` 已更新，但 `/etc/pve/priv/ceph/VM_Pool.keyring` 仍保留舊 key。事故時：
+
+| 檢查 | 修復前結果 |
+|---|---|
+| `ceph -s` | `HEALTH_OK` |
+| 一般 `rbd -p VM_Pool ls` | 可列出 images |
+| VM／CT | 仍在運作 |
+| `pvesm status` | `VM_Pool rbd inactive`；PBS31 本身 active |
+| 指定 PVE Storage keyring 的 `rbd ls` | `Permission denied` |
+| QEMU VM 104／LXC CT 100 備份 | RBD 存取／snapshot 認證失敗 |
+
+實際錯誤訊息（移除時間戳與執行緒 ID）：
+
+```text
+monclient(hunting): handle_auth_bad_method failed to auth with my available methods: (13) Permission denied
+rbd: couldn't connect to the cluster!
+rbd: listing images failed: (13) Permission denied
+cannot determine size of volume 'VM_Pool:vm-104-disk-0'
+```
+
+LXC 失敗發生在 RBD snapshot 階段；錯誤關鍵片段如下，省略號代表省略的命令參數，並非完整原始 log：
+
+```text
+rbd snapshot ... Permission denied
+```
+
+> **Ceph HEALTH_OK 不代表 PVE RBD storage credential 正常。** 一般 CLI 與 PVE Storage 可能使用不同 keyring；VM 持續運作也不能取代新連線、snapshot 與備份驗證。`handle_auth_bad_method` 本身不能單獨證明 cipher 不相容，本次是以不同 keyring 的對照測試確認舊 credential 副本問題。
+
+### 16.2 診斷：固定身分與 keyring，逐層對照
+
+在發生問題的節點以 root 執行，先確認 Cluster、Storage 與實際 Storage 設定：
+
+```bash
+ceph -s
+pvesm status
+cat /etc/pve/storage.cfg
+rbd -p VM_Pool ls
+```
+
+接著以相同 client 與 pool，只改變 keyring 路徑：
+
+```bash
+rbd --id admin --keyring /etc/pve/priv/ceph/VM_Pool.keyring -p VM_Pool ls
+rbd --id admin --keyring /etc/ceph/ceph.client.admin.keyring -p VM_Pool ls
+```
+
+本次第一個測試認證失敗，第二個成功列出 `vm-100-disk-0`、`vm-104-disk-0` 等 images，定位到 Storage keyring 的差異。
+
+再比對本機 admin、Ceph DB 與 Storage 的 **key 值**，避免整份 keyring 因空白或 caps 排序不同而誤判。以下 Bash 程式只輸出一致／不一致，不輸出 secret；任何讀取失敗都停止比較：
+
+```bash
+(
+  set -e
+  set +x
+  local_key=$(ceph-authtool /etc/ceph/ceph.client.admin.keyring -n client.admin --print-key)
+  db_key=$(ceph -n client.admin -k /etc/ceph/ceph.client.admin.keyring auth get-key client.admin)
+  storage_key=$(ceph-authtool /etc/pve/priv/ceph/VM_Pool.keyring -n client.admin --print-key)
+  test -n "$local_key" && test -n "$db_key" && test -n "$storage_key"
+  if [ "$local_key" = "$db_key" ]; then
+    echo "本機 admin 與 Ceph DB：一致"
+  else
+    echo "本機 admin 與 Ceph DB：不一致"
+  fi
+  if [ "$storage_key" = "$db_key" ]; then
+    echo "Storage 與 Ceph DB：一致"
+  else
+    echo "Storage 與 Ceph DB：不一致"
+  fi
+)
+```
+
+本次結果為「本機 admin 與 DB 一致，Storage 與 DB 不一致」。若兩個指定 keyring 的 RBD 測試都失敗，不能直接套用此根因，應再檢查身分、caps、Ceph 設定、連線及 client 版本。
+
+### 16.3 已驗證修復：先備份，再同步有效 credential
+
+前提：已確認 `VM_Pool` 使用 `client.admin`，來源 key 與 DB 一致，且以來源 keyring 執行 `rbd ls` 成功。以下只在 **node10** 執行一次：
+
+```bash
+(
+  set -e
+  umask 077
+  backup_dir=$(mktemp -d /root/ceph-rbd-keyring-backup.XXXXXX)
+  cp /etc/pve/priv/ceph/VM_Pool.keyring "$backup_dir/VM_Pool.keyring"
+  chmod 600 "$backup_dir/VM_Pool.keyring"
+  printf '舊 keyring 備份：%s\n' "$backup_dir/VM_Pool.keyring"
+
+  cp /etc/ceph/ceph.client.admin.keyring /etc/pve/priv/ceph/VM_Pool.keyring
+  stat -c '%U:%G %a %n' /etc/pve/priv/ceph/VM_Pool.keyring
+)
+```
+
+預期檔案權限：
+
+```text
+root:www-data 600 /etc/pve/priv/ceph/VM_Pool.keyring
+```
+
+本次修復流程中的權限設定命令為：
+
+```bash
+chown root:www-data /etc/pve/priv/ceph/VM_Pool.keyring
+chmod 600 /etc/pve/priv/ceph/VM_Pool.keyring
+```
+
+**pmxcfs 注意事項：** `/etc/pve` 是 cluster filesystem，權限依路徑管理；`priv` 下的檔案僅 root 可存取。上述命令不是改變 pmxcfs 權限的通用方法，若拒絕設定，應以 `stat` 確認是否已為 `root:www-data 600`，不要放寬 `/etc/pve/priv`。同步內容是本次修復的關鍵。[Proxmox pmxcfs 官方說明](https://github.com/proxmox/pve-docs/blob/master/pmxcfs.adoc)
+
+在正常有 quorum 的同一 PVE Cluster 中，這個共享路徑會同步至 node11、node12，**不需三台各自重複複製或修改**；但各台仍須分別驗證。此特性不代表一般 `/etc/ceph` 本機檔案也自動同步。
+
+舊 keyring 備份用於追查；DB 已輪替時，單純還原舊檔不能恢復認證。本次只同步有效 keyring 即恢復，不需要再次 rotate。
+
+### 16.4 修復後驗證與必做清單
+
+在 **node10、node11、node12 各自執行**：
+
+```bash
+pvesm status
+rbd --id admin --keyring /etc/pve/priv/ceph/VM_Pool.keyring -p VM_Pool ls
+```
+
+本次三台 `pvesm status` 均確認 `VM_Pool = active`，指定 Storage keyring 的 RBD 列表測試成功。
+
+接著在 VM／CT 所在節點依序測試 PBS31 備份：
+
+```bash
+vzdump 104 --storage PBS31 --mode snapshot
+vzdump 100 --storage PBS31 --mode snapshot
+```
+
+依本次事故驗證紀錄，兩條路徑均已成功：
+
+| 路徑 | 已確認結果 |
+|---|---|
+| QEMU VM 104 → Ceph RBD → PBS31 | 備份 `TASK OK` |
+| LXC CT 100（AdGuard）→ RBD snapshot → PBS31 | snapshot 建立、清除成功，備份 `TASK OK` |
+
+LXC 成功判讀須涵蓋 snapshot 建立、資料上傳、暫存 snapshot 清除及整體任務完成。以下列出應核對的關鍵行，不是重新拼接的完整原始 log：
+
+```text
+Creating snap: 100% complete...done.
+INFO: cleanup temporary 'vzdump' snapshot
+Removing snap: 100% complete...done.
+INFO: Finished Backup of VM 100
+INFO: Backup job finished successfully
+TASK OK
+```
+
+本次 CT 100 處理 3.124 GiB，重用 2.905 GiB（93.0%）；開始上傳或看到增量統計仍不能取代最後的 `TASK OK`。
+
+遷移完成前逐項核對：
+
+- [ ] Ceph health、MON quorum、OSD／PG 正常。
+- [ ] 所有使用已輪替 client 的 Storage keyring 均已盤點並同步。
+- [ ] 本機 admin key、Ceph DB 與使用 admin 的 Storage key 一致。
+- [ ] node10／node11／node12 的 `VM_Pool` 均為 `active`。
+- [ ] 各節點指定 PVE Storage keyring 的 `rbd ls` 成功。
+- [ ] QEMU VM 104 → PBS31 備份 `TASK OK`。
+- [ ] LXC CT 100 snapshot 建立／清除成功，PBS 備份 `TASK OK`。
+- [ ] AES256K-only 切換後再次確認 Storage 與備份路徑，才移除 emergency admin。
 
 ## 17. 移除 emergency admin，正式結案
 
-確認三節點正常後，在 node10 移除 emergency auth entity：
+原紀錄僅確認三節點 admin CLI 正常便移除 emergency auth entity；修訂後必須完成第 16.4 節的 Storage／VM／LXC／PBS 驗證，才能在 node10 移除：
 
 ```bash
 ceph auth rm client.admin-backup
@@ -533,7 +710,7 @@ auth_allowed_ciphers aes256k
 auth_preferred_cipher aes256k
 ```
 
-至此 CephX AES → AES256K migration 正式完成。
+上述為 2026-09-14 的 Ceph 層結果；2026-09-15 補齊 Storage keyring 同步及 VM／LXC 備份驗證後，才完成本次事故結案。
 
 ## 18. 本次時間線
 
@@ -544,7 +721,10 @@ auth_preferred_cipher aes256k
 | 16:25 | rotating warning 自然消失，只剩 AES allowed/creatable warnings |
 | 16:26 後 | `auth_allowed_ciphers` 切為 `aes256k`，立即 `HEALTH_OK` |
 | 最終驗證 | node10/node11/node12 admin 全部 RC=0 |
-| 結案 | 移除 `client.admin-backup`，仍為 `HEALTH_OK` |
+| 09-14 原結案 | 移除 `client.admin-backup`，仍為 `HEALTH_OK`；當時漏驗 Storage／PBS |
+| 09-15 診斷 | 一般 RBD 正常，指定 `VM_Pool.keyring` 認證失敗，確認舊 key 副本 |
+| 09-15 修復 | 備份舊檔並同步有效 admin keyring，三節點 `VM_Pool active` |
+| 09-15 完整結案 | VM 104 與 CT 100 → PBS31 均 `TASK OK`，LXC snapshot 建立／清除成功 |
 
 ## 19. 這次踩到的重點
 
@@ -554,7 +734,9 @@ auth_preferred_cipher aes256k
 - OSD 不只要換 keyring，ceph-volume BlueStore OSD 也要注意 label 裡的 `osd_key`。
 - rotating service keys 不需要為了追求立即 HEALTH_OK 就強制 wipe；本案例等待後自然消失。
 - `client.admin` 要最後處理，而且先建立可驗證的 emergency admin。
-- PVE 的 `/etc/pve` 是 pmxcfs，共享 keyring 要理解其同步特性。
+- PVE 的 `/etc/pve` 是 pmxcfs，共享 keyring 更新一次，各節點分別驗證。
+- `client.admin` rotate 後必須同步所有使用它的 `/etc/pve/priv/ceph/<STORAGE_ID>.keyring`。
+- `HEALTH_OK` 不代表 PVE RBD Storage credential 正常，結案必須包含 `pvesm status`、指定 keyring 的 RBD 及 VM／LXC → PBS 驗證。
 - `ceph-crash` startup ping 的 Permission denied 不代表新的 `client.crash` credential 失敗，不能因此亂改權限或 caps。
 - 驗證 keyring 同步時用 SHA256，不要把 secret `cat` 到終端、ticket、聊天室或 GitHub。
 
@@ -568,7 +750,9 @@ auth_preferred_cipher aes256k
 ✗ 為了清 warning 就強制 wipe rotating service keys
 ✗ client.admin 未建立 emergency credential 就直接 rotate
 ✗ 看到 ceph-crash startup ping error 就放寬 /etc/pve/priv 權限
-✗ AES256K-only 尚未完成三節點驗證就刪 emergency admin
+✗ 只看 HEALTH_OK 就判定 Storage 與 PBS 備份正常
+✗ client.admin rotate 後漏更新 Storage 專用 keyring 副本
+✗ AES256K-only 尚未完成三節點 Storage 與 VM／LXC 備份驗證就刪 emergency admin
 ```
 
 ## 21. 最終結論
@@ -592,11 +776,13 @@ Service cipher → AES256K
         ↓
 Bootstrap / client.crash / client.admin rotation
         ↓
+同步 PVE Storage keyring，驗證 RBD／pvesm／VM 與 LXC 備份
+        ↓
 Rotating service keys 自然過期
         ↓
 auth_allowed_ciphers → AES256K only
         ↓
-三節點 admin authentication 驗證
+三節點 admin／Storage authentication 與 PBS 備份驗證
         ↓
 移除 emergency admin
         ↓
@@ -606,6 +792,10 @@ HEALTH_OK
 > **先確保所有真正使用中的 credential 都已安全換成 AES256K，再關閉舊 AES。**
 
 ## 官方文件
+
+- Proxmox CephX migration（新部署應先核對當前 PVE 官方流程與 migration helper）：<https://pve.proxmox.com/pve-docs/chapter-pveceph.html#pveceph_cephx_migration>
+- Proxmox RBD Storage authentication：<https://pve.proxmox.com/pve-docs/pve-storage-rbd-plain.html>
+- Proxmox Cluster File System／權限與同步：<https://github.com/proxmox/pve-docs/blob/master/pmxcfs.adoc>
 
 - Ceph CVE-2025-30156：<https://docs.ceph.com/en/latest/security/CVE-2025-30156/>
 - Ceph Tentacle 20.2.4 Release Notes：<https://docs.ceph.com/en/latest/releases/tentacle/>
