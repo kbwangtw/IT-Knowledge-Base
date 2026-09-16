@@ -12,6 +12,8 @@ kbwangtw 的 IT 技術知識庫，集中保存已去敏感化、可重複使用�
 
 ## 技術紀錄
 
+- [Proxmox VE Graylog Syslog 集中管理與 Pipeline 分類建置技術文件](docs/pve/proxmox-graylog-syslog-pipeline-sop.md)
+
 - [PVE Cluster Fail2Ban 排查與強化：遞增封鎖、iptables 驗證與管理介面暴露檢查](docs/pve/pve-cluster-fail2ban-hardening.md)
 - [Proxmox VE 9 + Ceph 20.2.4 Tentacle：CephX AES → AES256K 安全金鑰遷移實戰](docs/pve/ceph-20-2-4-cephx-aes256k-migration.md)
 - [Proxmox VE Cluster + PBS：Ubuntu VM112 災難復原實機驗證](docs/pve/ubuntu-vm112-pbs-disaster-recovery.md)

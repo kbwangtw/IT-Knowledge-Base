@@ -7,6 +7,8 @@ title: 資訊黑手的Knowledge Base
 
 ## 最新技術紀錄
 
+- [Proxmox VE Graylog Syslog 集中管理與 Pipeline 分類建置技術文件](docs/pve/proxmox-graylog-syslog-pipeline-sop/)
+
 - [Proxmox VE 9 + Ceph 20.2.4 Tentacle：CephX AES → AES256K 安全金鑰遷移實戰](docs/pve/ceph-20-2-4-cephx-aes256k-migration/)
 - [PVE Cluster Fail2Ban 排查與強化：遞增封鎖、iptables 驗證與管理介面暴露檢查](docs/pve/pve-cluster-fail2ban-hardening/)
 - [Proxmox VE Cluster + PBS：Ubuntu VM112 災難復原實機驗證](docs/pve/ubuntu-vm112-pbs-disaster-recovery/)
@@ -21,7 +23,7 @@ title: 資訊黑手的Knowledge Base
 
 ## 文件分類
 
-- **PVE**：[DP340 備份還原驗證計畫](docs/pve/synology-dp340-pve-cluster-validation/)、[繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification/)、叢集、HA、虛擬機、儲存與升級
+- **PVE**：[Graylog Syslog 集中管理與 Pipeline 分類](docs/pve/proxmox-graylog-syslog-pipeline-sop/)、[DP340 備份還原驗證計畫](docs/pve/synology-dp340-pve-cluster-validation/)、[繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification/)、叢集、HA、虛擬機、儲存與升級
 - **PBS**：[更新與 DR 整合驗證 SOP](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)、[繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification/)、[備份、Restore 與 DR 演練](docs/pve/proxcenter-pbs-restore-dr-runbook/)、驗證與保留政策
 - **ProxCenter**：資產管理、SSH 整合、[PBS 更新與 DR 驗證](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)、[Rolling Update](docs/pve/proxcenter-ceph-rolling-update/) 與 [Restore／DR](docs/pve/proxcenter-pbs-restore-dr-runbook/)
 - **Ceph**：健康狀態、OSD、維護旗標與復原
