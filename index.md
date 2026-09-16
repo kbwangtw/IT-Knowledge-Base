@@ -7,6 +7,7 @@ title: 資訊黑手的Knowledge Base
 
 ## 最新技術紀錄
 
+- [Office 2024 VL MAK 啟用失敗 0xC004C020：額度超限排查與 KMS 遷移建議](docs/licensing/office-2024-vl-mak-activation-limit-exceeded/)
 - [Proxmox VE 9 + Ceph 20.2.4 Tentacle：CephX AES → AES256K 安全金鑰遷移實戰](docs/pve/ceph-20-2-4-cephx-aes256k-migration/)
 - [PVE Cluster Fail2Ban 排查與強化：遞增封鎖、iptables 驗證與管理介面暴露檢查](docs/pve/pve-cluster-fail2ban-hardening/)
 - [Proxmox VE Cluster + PBS：Ubuntu VM112 災難復原實機驗證](docs/pve/ubuntu-vm112-pbs-disaster-recovery/)
@@ -28,6 +29,7 @@ title: 資訊黑手的Knowledge Base
 - **Synology**：[DP340 + APM 2.0 Google Workspace 備份與還原演練計畫](docs/synology/dp340-google-workspace-apm20-sop/)、[DP340 × PVE Cluster 備份還原驗證](docs/pve/synology-dp340-pve-cluster-validation/)、儲存、快照、備份與網路服務
 - **Network**：VLAN、路由、防火牆、DNS 與監控
 - **Hardware / HPE**：[ProLiant ML30 Gen11 擴充與維護紀錄](docs/hardware/hpe/ml30-gen11/)
+- **Licensing**：[Office 2024 VL MAK 啟用失敗排查與 KMS 遷移建議](docs/licensing/office-2024-vl-mak-activation-limit-exceeded/)、軟體授權型態判讀與啟用管理
 
 > 所有範例均應去敏感化；請勿提交密碼、Private Key、Token Secret 或完整憑證。
 
