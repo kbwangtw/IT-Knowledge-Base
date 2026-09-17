@@ -122,19 +122,101 @@ pvesm status
 
 <h2 id="signoff">7. 結果與 Sign-off</h2>
 
-<div class="result-table">
+本節用於記錄 DP340 × PVE Cluster 備份與還原演練的最終結果、實測數據、證據與正式簽核。
+正式 Pass／Fail 判定須配合 APM／PVE Job Log、還原點、RPO／RTO、Cluster／Ceph 狀態及測試資料 checksum 綜合確認。
 
-| ID | 項目 | 預期結果 | 實際結果／證據 | 數據 | 判定 |
-|---|---|---|---|---|---|
-| 01 | 完整備份／共網壓力 | 還原點可用；Corosync／Ceph 穩定 | ______ | ___ GB；___ min；峰值 ___ Gbps | ☐ Pass ☐ Fail |
-| 02 | 增量備份 | 新還原點與測試資料可辨識 | ______ | 異動 ___ GB；傳輸 ___ GB；___ min | ☐ Pass ☐ Fail |
-| 03 | 原機還原 | 原節點、VM_Pool、服務、checksum 正常 | ______ | RPO ___；Boot RTO ___；Service RTO ___ | ☐ Pass ☐ Fail |
-| 04 | 異機還原 | 異節點、VM_Pool、服務、checksum 正常 | ______ | RPO ___；Boot RTO ___；Service RTO ___ | ☐ Pass ☐ Fail |
-| 05 | 穩定性／收尾 | 觀察正常；證據與副本處置完整 | ______ | 觀察 ___ min；影片 SHA-256 ______ | ☐ Pass ☐ Fail |
+### 7.1 演練結果總表
 
-</div>
+| ID | 演練項目 | 預期結果 | 實際結果 | 判定 |
+|---|---|---|---|---|
+| 01 | 完整備份／共網壓力 | 備份成功、還原點可用；Corosync／Ceph 維持穩定 | 待填 | ☐ Pass ☐ Fail |
+| 02 | 增量備份 | 新還原點可用，測試資料可辨識 | 待填 | ☐ Pass ☐ Fail |
+| 03 | 原機還原 | 原節點還原成功；VM_Pool、服務、checksum 正常 | 待填 | ☐ Pass ☐ Fail |
+| 04 | 異機還原 | 異節點還原成功；VM_Pool、服務、checksum 正常 | 待填 | ☐ Pass ☐ Fail |
+| 05 | 穩定性／收尾 | 服務穩定；Cluster／Ceph 正常；證據完整 | 待填 | ☐ Pass ☐ Fail |
 
-<div class="kb-signoff"><div>執行人／日期</div><div>系統負責人／日期</div><div>見證／核准人／日期</div></div>
+### 7.2 實測數據
+
+| ID | 項目 | 資料量 | 耗時 | RPO | Boot RTO | Service RTO | 峰值頻寬 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 01 | 完整備份 | ___ GB | ___ min | — | — | — | ___ Gbps |
+| 02 | 增量備份 | 異動 ___ GB／傳輸 ___ GB | ___ min | — | — | — | ___ Gbps |
+| 03 | 原機還原 | ___ GB | ___ min | ___ | ___ | ___ | ___ Gbps |
+| 04 | 異機還原 | ___ GB | ___ min | ___ | ___ | ___ | ___ Gbps |
+| 05 | 穩定性觀察 | — | ___ min | — | — | — | — |
+
+> **RPO**：所選還原點與故障／演練時間之間的資料時間差。  
+> **Boot RTO**：從還原作業開始至 VM 可正常開機的時間。  
+> **Service RTO**：從還原作業開始至應用服務可正常提供服務的時間。
+
+### 7.3 證據索引
+
+| 證據類型 | 檔名／位置 | Job ID／SHA-256 | 備註 |
+|---|---|---|---|
+| DP340 完整備份 Job | 待填 | Job ID：______ | APM Job Log |
+| DP340 增量備份 Job | 待填 | Job ID：______ | APM Job Log |
+| 原機還原 Job | 待填 | Job ID：______ | Same-Node Restore |
+| 異機還原 Job | 待填 | Job ID：______ | Cross-Node Restore |
+| PVE Cluster 前／後狀態 | 待填 | — | `pvecm status` |
+| Ceph 前／後狀態 | 待填 | — | `ceph -s` |
+| VM_Pool 狀態 | 待填 | — | `pvesm status` |
+| 測試資料 checksum | 待填 | SHA-256：______ | 還原前後比對 |
+| 備份演練影片 | YouTube／原始錄影檔 | SHA-256：______ | 完整／增量備份 |
+| 還原演練影片 | YouTube／原始錄影檔 | SHA-256：______ | 原機／異機還原 |
+
+### 7.4 問題與改善追蹤
+
+若演練過程出現異常、條件式通過或後續改善事項，統一記錄於下表。
+
+| 問題編號 | 問題／異常說明 | 影響 | 改善措施 | 負責人 | 到期日 | 狀態 |
+|---|---|---|---|---|---|---|
+| ISSUE-01 | — | — | — | — | — | ☐ Open ☐ Closed |
+| ISSUE-02 | — | — | — | — | — | ☐ Open ☐ Closed |
+| ISSUE-03 | — | — | — | — | — | ☐ Open ☐ Closed |
+
+### 7.5 最終演練結論
+
+| 項目 | 結果 |
+|---|---|
+| 完整備份 | ☐ Pass ☐ Fail |
+| 增量備份 | ☐ Pass ☐ Fail |
+| 原機還原 | ☐ Pass ☐ Fail |
+| 異機還原 | ☐ Pass ☐ Fail |
+| Cluster／Corosync 穩定性 | ☐ Pass ☐ Fail |
+| Ceph／VM_Pool 穩定性 | ☐ Pass ☐ Fail |
+| 測試資料完整性 | ☐ Pass ☐ Fail |
+| 證據完整性 | ☐ Pass ☐ Fail |
+| **整體演練結果** | **☐ Pass ☐ Conditional Pass ☐ Fail** |
+
+**結論／備註：**
+
+> ______
+
+### 7.6 演練資訊
+
+| 項目 | 紀錄 |
+|---|---|
+| 演練編號 | ______ |
+| 演練日期 | ______ |
+| Proxmox VE | 9.2.11 |
+| ActiveProtect Manager | 2.0-88101 |
+| DP340 韌體版本 | ______ |
+| 測試 VM | ______ |
+| 來源節點 | ______ |
+| 異機還原目標節點 | ______ |
+| Storage | Ceph VM_Pool |
+
+### 7.7 Sign-off
+
+| 簽核角色 | 姓名 | 簽核結果 | 日期 | 簽名／備註 |
+|---|---|---|---|---|
+| 執行人 | ______ | ☐ 完成 | ______ | ______ |
+| 系統負責人 | ______ | ☐ 同意 ☐ 條件式同意 | ______ | ______ |
+| 見證／核准人 | ______ | ☐ 核准 ☐ 不核准 | ______ | ______ |
+
+> **簽核原則：**  
+> 所有必要測試案例、實測數據與證據完成後，方可進行最終 Sign-off。  
+> 若存在未關閉的重大 ISSUE，應列為 Conditional Pass 或 Fail，並完成改善及重新驗證。
 
 <h2 id="operations">8. 演練後維運建議</h2>
 
