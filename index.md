@@ -7,6 +7,8 @@ title: 資訊黑手的Knowledge Base
 
 ## 最新技術紀錄
 
+- [PVE 節點問號、Ceph OSD 全 down：金鑰不一致的排查與復原](docs/pve/ceph-osd-cephfs-keyring-recovery/)
+
 - [Proxmox VE Graylog Syslog 集中管理與 Pipeline 分類建置技術文件](docs/pve/proxmox-graylog-syslog-pipeline-sop/)
 
 - [Proxmox VE 9 + Ceph 20.2.4 Tentacle：CephX AES → AES256K 安全金鑰遷移實戰](docs/pve/ceph-20-2-4-cephx-aes256k-migration/)
@@ -26,7 +28,7 @@ title: 資訊黑手的Knowledge Base
 - **PVE**：[Graylog Syslog 集中管理與 Pipeline 分類](docs/pve/proxmox-graylog-syslog-pipeline-sop/)、[DP340 備份還原驗證計畫](docs/pve/synology-dp340-pve-cluster-validation/)、[繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification/)、叢集、HA、虛擬機、儲存與升級
 - **PBS**：[更新與 DR 整合驗證 SOP](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)、[繁體中文通知模板安裝](docs/pve/proxmox-zh-tw-notification/)、[備份、Restore 與 DR 演練](docs/pve/proxcenter-pbs-restore-dr-runbook/)、驗證與保留政策
 - **ProxCenter**：資產管理、SSH 整合、[PBS 更新與 DR 驗證](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)、[Rolling Update](docs/pve/proxcenter-ceph-rolling-update/) 與 [Restore／DR](docs/pve/proxcenter-pbs-restore-dr-runbook/)
-- **Ceph**：健康狀態、OSD、維護旗標與復原
+- **Ceph**：[PVE 節點問號、Ceph OSD 全 down：金鑰不一致的排查與復原](docs/pve/ceph-osd-cephfs-keyring-recovery/)、健康狀態、OSD、維護旗標與復原
 - **Synology**：[DP340 + APM 2.0 Google Workspace 備份與還原演練計畫](docs/synology/dp340-google-workspace-apm20-sop/)、[DP340 × PVE Cluster 備份還原驗證](docs/pve/synology-dp340-pve-cluster-validation/)、儲存、快照、備份與網路服務
 - **Network**：VLAN、路由、防火牆、DNS 與監控
 - **Hardware / HPE**：[ProLiant ML30 Gen11 擴充與維護紀錄](docs/hardware/hpe/ml30-gen11/)

@@ -2,7 +2,7 @@
 layout: default
 title: "Proxmox VE 9 + Ceph 20.2.4 Tentacle：CephX AES → AES256K 安全金鑰遷移實戰"
 date: 2026-09-14
-last_modified_at: 2026-09-15
+last_modified_at: 2026-09-18
 categories: [PVE, Ceph, Security]
 ---
 
@@ -15,6 +15,8 @@ categories: [PVE, Ceph, Security]
 > 本文為 2026-09-14 實機維運紀錄。所有 Ceph secret key、FSID、IP 等敏感資訊均不收錄。文中的節點名稱保留作為操作流程說明。
 
 > **2026-09-15 修訂：Ceph HEALTH_OK 不代表 PVE RBD storage credential 正常。** 本次發現 `client.admin` rotate 後，`/etc/pve/priv/ceph/VM_Pool.keyring` 仍是舊 key，導致 RBD storage inactive 與 PBS 備份失敗。以下保留原遷移實戰，並補正 Storage 同步與備份驗證。
+
+> **2026-09-18 更正與後續事故：** 原第 9 節將 keyring 檔案路徑直接傳給 BlueStore label 的 `-v`，該範例已撤下；`-v` 是要儲存的值，不是讀取檔案的參數。另已確認 CephFS 的獨立 `.secret` 副本也必須盤點。見 [OSD／CephFS 金鑰故障復原紀錄](https://github.com/kbwangtw/IT-Knowledge-Base/blob/main/docs/pve/ceph-osd-cephfs-keyring-recovery.md)。本次服務已恢復，但 label 持久性與重開機驗證尚未完成，不能以目前 HEALTH_OK 推論後續重啟安全。
 
 ## 1. 案例摘要
 
@@ -197,13 +199,9 @@ chmod 600 /var/lib/ceph/osd/ceph-ID/keyring
 ceph-volume lvm list
 ```
 
-並更新 BlueStore label 內的 `osd_key`：
+**2026-09-18 更正：原 label 寫入範例已撤下，請勿沿用舊版。** `set-label-key` 的 `-v` 代表要儲存的值；直接傳入 keyring 檔案路徑，不會自動取出檔案中的金鑰。[Ceph 官方工具說明](https://docs.ceph.com/en/latest/man/8/ceph-bluestore-tool/)
 
-```bash
-ceph-bluestore-tool --dev /dev/DEVICE \
-  set-label-key --key osd_key \
-  -v /root/ceph-key-migration/osd.ID.keyring
-```
+應先核對實際版本、裝置與 label／啟用流程，並在本機比對 label 的金鑰與 MON 有效金鑰，避免輸出 secret。若確認需修改 label，另行安排單顆 OSD 的停機維護；本文不再提供未經該環境驗證的通用 label 寫入指令。2026-09-18 的恢復僅修正本機 keyring，沒有檢查或修改 label，也沒有做重開機持久性驗證。
 
 再啟動並等待恢復：
 

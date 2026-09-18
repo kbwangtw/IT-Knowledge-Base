@@ -12,6 +12,8 @@ kbwangtw 的 IT 技術知識庫，集中保存已去敏感化、可重複使用�
 
 ## 技術紀錄
 
+- [PVE 節點問號、Ceph OSD 全 down：金鑰不一致的排查與復原](docs/pve/ceph-osd-cephfs-keyring-recovery.md)
+
 - [Proxmox VE Graylog Syslog 集中管理與 Pipeline 分類建置技術文件](docs/pve/proxmox-graylog-syslog-pipeline-sop.md)
 
 - [PVE Cluster Fail2Ban 排查與強化：遞增封鎖、iptables 驗證與管理介面暴露檢查](docs/pve/pve-cluster-fail2ban-hardening.md)
