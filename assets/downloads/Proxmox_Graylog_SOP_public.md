@@ -6,6 +6,8 @@
 
 9/18 更新重點：完成「PVE 任務失敗警報」與「PVE 任務失敗通知」，排除 Gmail SMTP 驗證問題。本次文件更新只整理既有操作與測試結果，沒有重新操作 Graylog 或 PVE 主機。
 
+> **2026-09-18 後續實測：**服務異常告警已 matched 並收到 Gmail；多次驗證失敗已建立且三筆測試訊息入庫，Last Matched 與真正告警信仍待確認。請接續閱讀 [PVE 告警實測紀錄](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-pve-alert-validation-2026-09-18/)。
+
 ## 先認識四個名詞
 
 | 名稱 | 白話意思 | 本案名稱 |

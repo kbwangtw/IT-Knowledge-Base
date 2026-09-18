@@ -40,6 +40,7 @@ last_modified_at: 2026-09-18
 | 文章 | 適合什麼時候看 |
 | --- | --- |
 | [把三台 PVE 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop/) | 任務失敗告警已設定、Gmail 測試信已收到；完整故障觸發待驗證 |
+| [PVE 告警實測：服務異常已收信，驗證失敗待確認](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 2026-09-18 設定、測試命令與下次接續點 |
 | [PVE 一直被嘗試登入：確認 Fail2Ban 真的有擋](docs/pve/pve-cluster-fail2ban-hardening/) | 逐層核對日誌、封鎖時間與封包命中 |
 
 ## 硬體擴充與安裝

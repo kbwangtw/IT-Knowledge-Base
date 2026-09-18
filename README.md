@@ -13,6 +13,7 @@
 - [ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？](docs/pve/proxcenter-ceph-rolling-update.md)
 - [從 PBS 還原 ProxCenter：先複製一台，再確認能用](docs/pve/proxcenter-pbs-restore-dr-runbook.md)
 - [把三台 PVE 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop.md)
+- [PVE 告警實測：服務異常已收信，驗證失敗待確認](docs/pve/graylog-pve-alert-validation-2026-09-18.md)
 - [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification.md)
 - [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](docs/pve/pve-cluster-fail2ban-hardening.md)
 - [用 DP340 備份 PVE：先把還原測試安排好](docs/pve/synology-dp340-pve-cluster-validation.md)
@@ -22,7 +23,7 @@
 
 ## 閱讀與維護方式
 
-全站 13 篇文章於 2026-09-18 完成白話整理，保留既有網址、圖片與影片。每篇的原始日期、環境版本、實測結果與待驗證項目分開呈現；演練計畫不等於完成報告。
+原有 13 篇文章於 2026-09-18 完成白話整理，保留既有網址、圖片與影片。每篇的原始日期、環境版本、實測結果與待驗證項目分開呈現；演練計畫不等於完成報告。
 
 文章中的主機名稱、位址和指令都是案例內容，操作前需核對自己的環境。金鑰、密碼、token、私鑰與完整憑證不得放入本倉庫。
 
