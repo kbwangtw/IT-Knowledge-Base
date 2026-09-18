@@ -27,3 +27,5 @@
 文章中的主機名稱、位址和指令都是案例內容，操作前需核對自己的環境。金鑰、密碼、token、私鑰與完整憑證不得放入本倉庫。
 
 Graylog 的可下載 Markdown 與文章同步；既有 Word 附件保留為歷史版本。網站使用 Markdown 維護，修改紀錄可從 Git 歷史追查。
+
+2026-09-18 補記 Graylog／PVE 任務失敗告警：已完成 Pipeline 失敗樣本模擬、Event Definition、Gmail SMTP 排錯與實際測試收信，並儲存通知綁定。新的 PVE 故障觸發自動 Email、其他重要告警、信件明細與 Infrastructure Dashboard 仍待後續驗證／完善。
