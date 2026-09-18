@@ -1,181 +1,96 @@
 ---
 layout: default
-title: "Proxmox VE Graylog Syslog 集中管理與 Pipeline 分類建置技術文件"
+title: "把三台 PVE 的日誌集中到 Graylog"
 date: 2026-09-17
 categories: [PVE, Graylog, Syslog]
 permalink: /docs/pve/proxmox-graylog-syslog-pipeline-sop/
+last_modified_at: 2026-09-18
 ---
 
-<div class="kb-hero">
-<h1>Proxmox VE Graylog Syslog 集中管理與 Pipeline 分類建置技術文件</h1>
-<p>三節點 Syslog 集中收集、多 Stage Pipeline、PVE Task 欄位解析與任務監控 Dashboard 的實際建置紀錄。</p>
-<div class="kb-badges"><span class="kb-badge">PVE</span><span class="kb-badge">Graylog 7.1.9</span><span class="kb-badge">SOP</span><span class="kb-badge">2026-09-17 更新</span></div>
-</div>
+# 把三台 PVE 的日誌集中到 Graylog
 
-> **公開版本注意：**公開版本已將實際內網 IP 替換為文件示例位址 `192.0.2.24`；套用指令前請改成自己的 Graylog 位址。節點名稱與分類邏輯沿用實際建置紀錄。
+日誌分散在三台主機時，要查「哪台出錯、哪個工作失敗」得逐台找。本次把 node10、node11、node12 的日誌送進 Graylog，再替訊息加上來源、類型與任務狀態，最後做成一張任務監控看板。
 
-## 文件導覽
+> 實測日期：2026-09-17；Graylog 7.1.9，部署於 LXC。三台來源與任務看板已有驗證；失敗告警尚未建置。本文保留已提供的規則範例，但沒有完整最新版任務解析規則可供直接匯入。
 
-* TOC
-{:toc}
+## 先認識四個名詞
 
-版本 1.2｜建置紀錄日期 2026 年 9 月 17 日｜文件類型：企業內部 SOP 與建置紀錄
+| 名稱 | 白話意思 | 本案名稱 |
+| --- | --- | --- |
+| Input | 收日誌的入口 | Syslog UDP 1514 |
+| Stream | 把相關訊息放在一起 | Infrastructure Syslog |
+| Pipeline | 替訊息分類、拆出欄位的規則 | Infrastructure Syslog |
+| Index Set | 決定訊息存在哪一組索引 | infra_syslog |
 
-## 1. 目的與目前完成狀態
+本次實際索引可見 infra_syslog_0。看板只是呈現資料，來源分類與欄位解析要先做好。
 
-本文件記錄 Proxmox VE 日誌集中送往 Graylog、Stream / Index、Pipeline Rule、Stage 分層、實際測試與故障排除。
-
-目前 `node10`、`node11`、`node12` 均持續透過 rsyslog 將系統日誌送至 Graylog。已完成 PVE 節點識別、Authentication、Infrastructure System Errors、systemd Service Events、PVE Task Events 與 PVE Task Started 分類；Stage 0、Stage 1、Stage 2 均已建立，且 Service 與 Task 分類已使用實際訊息驗證。
-
-截至 2026-09-17，PVE Task Pipeline 已完成 node10／node11／node12 實機驗證，node11／node12 已使用 pveupdate／aptupdate 實測 success。Dashboard「PVE 任務監控」的 8 個 Widget 已完成，均指定 Infrastructure Syslog Stream。下一階段為 Alerts → Event Definitions → PVE Task Failed Alert，尚未開始。
-
-## 2. 環境資訊
-
-| 項目 | 設定 |
-| --- | --- |
-| Graylog | 7.1.9，部署於 PVE LXC |
-| 公開文件示例管理位址 | 192.0.2.24:9000 |
-| Syslog | UDP 1514 |
-| PVE 節點 | node10、node11、node12 |
-| Stream | Infrastructure Syslog |
-| Pipeline | Infrastructure Syslog |
-| Index prefix | infra_syslog |
-| 實際驗證 Index | infra_syslog_0 |
-| PVE 設備欄位 | `device_type=pve` |
-| PVE Cluster 標籤 | `pve_cluster=PVE-Cluster` |
-
-資料流程：
-
-```text
-PVE node10 / node11 / node12
-  → rsyslog
-  → Graylog Syslog UDP 1514
+~~~text
+三台 PVE → rsyslog → Graylog UDP 1514
   → Infrastructure Syslog Stream
-  → Infrastructure Syslog Pipeline
-      Stage 0：設備識別 / Authentication / System Errors
-      Stage 1：PVE Service Events
-      Stage 2：PVE Task 分類 / 欄位解析 / 狀態
-  → infra_syslog Index Set
-  → Graylog Search / PVE 任務監控 Dashboard
-```
+  → 分類與欄位解析
+  → infra_syslog 索引
+  → 搜尋與「PVE 任務監控」看板
+~~~
 
-## 3. PVE Syslog 轉送
+## 1. 先讓三台日誌都進得來
 
-三台 PVE 節點使用 `/etc/rsyslog.d/60-graylog.conf`：
+在各 PVE 節點設定轉送；192.0.2.24 是文件示範位址，請替換成自己的 Graylog：
 
-```bash
+~~~bash
 cat > /etc/rsyslog.d/60-graylog.conf <<'EOF'
 # Forward PVE syslog messages to Graylog
 *.* @192.0.2.24:1514
 EOF
-```
+~~~
 
-檢查並重啟：
+先檢查語法，成功後才重啟：
 
-```bash
+~~~bash
 rsyslogd -N1
 systemctl restart rsyslog
 systemctl status rsyslog --no-pager
-```
+~~~
 
-> 單一 `@` 為 UDP。公開文件使用 TEST-NET 位址，實際環境請替換為自己的 Graylog IP。
+這裡單一 @ 表示 UDP。Graylog 也要有對應的 UDP 1514 Input。完成後逐台搜尋 source，確認 node10、node11、node12 都有新訊息，不只看服務顯示 running。
 
-## 4. Stage 0：基礎識別與通用分類
+## 2. 第一層：認出主機，再標記一般事件
 
-Stage 0 目前包含三條 Rule，Continue processing 設定為：
+Stage 0 放三類規則：
 
-```text
-At least one of the rules on this stage matches the message
-```
+| 規則 | 在做什麼 |
+| --- | --- |
+| PVE - Identify Cluster Nodes | source 是三台節點之一時，加入 device_type=pve、pve_cluster=PVE-Cluster |
+| PVE-Authentication Events | 標記認證相關訊息 |
+| Infrastructure - System Errors | 找 DENIED、failed、error 等字樣，標記 system_error |
 
-### 4.1 PVE - Identify Cluster Nodes
+一般錯誤的文字比對是初步分類，不能單靠一個 error 字樣就判定整個服務故障；仍須看原訊息。
 
-```text
-When：OR
-source = node10
-source = node11
-source = node12
+可產生可辨識的測試訊息：
 
-Then：
-device_type = pve
-pve_cluster = PVE-Cluster
-```
-
-已以真實訊息確認三台節點可被標記。
-
-### 4.2 PVE-Authentication Events
-
-用途：分類認證相關訊息。
-
-已驗證測試：
-
-```bash
+~~~bash
 logger -p auth.info -t pam_unix "Graylog authentication pipeline test"
-```
-
-結果包含：
-
-```text
-device_type = pve
-pve_cluster = PVE-Cluster
-event_category = authentication
-```
-
-### 4.3 Infrastructure - System Errors
-
-此 Rule 原名 `PVE-System Errors`，後改名為通用 Infrastructure 分類。
-
-```text
-When：OR
-message contains DENIED
-message contains failed
-message contains error
-
-Then：
-event_category = system_error
-```
-
-測試：
-
-```bash
 logger -p kern.warning -t INFRA_ERROR_TEST "DENIED Graylog infrastructure system error test"
-```
+~~~
 
-已確認：
+回到 Graylog 開啟訊息，核對來源與新增欄位。訊息收到了、欄位卻沒有出現，問題可能在規則或 Pipeline 與 Stream 的連接。
 
-```text
-device_type = pve
-pve_cluster = PVE-Cluster
-event_category = system_error
-```
+### 規則改名後，Stage 也要檢查
 
-### 4.4 Rule 改名故障排除
+本次曾出現：
 
-Rule 改名後 Stage 曾顯示：
-
-```text
+~~~text
 Rule PVE - System Errors has been renamed or removed. This rule will be skipped.
-```
+~~~
 
-處理方式：Stage 0 → Edit → Remove 舊參照 → 選入 `Infrastructure - System Errors` → Update stage → 重新送測試訊息驗證。
+原因是 Stage 還引用舊名稱。移除舊引用，再加入新的 Infrastructure - System Errors 後恢復。規則清單裡有新名稱，不代表所有 Stage 已自動更新。
 
-**重要：**在本次 Graylog 7.1.9 實際操作中，Rule 改名後應重新檢查 Stage 關聯，不要假設 Stage 會自動更新名稱。
+## 3. 第二層：把 systemd 的服務事件分出來
 
-## 5. Stage 1：PVE Service Events
+Stage 1 判讀 systemd 相關訊息中的 Started、Stopped、Starting、Stopping、Reached target，標記 event_category=service。
 
-Stage 1：
+本次已測過五種訊息。規則使用 Source Code Editor 編輯，避免把「systemd 且任一事件文字」誤設成全部條件都必須成立：
 
-```text
-Continue processing on next stage when:
-None or more rules on this stage match
-
-Rule:
-PVE - Service Events
-```
-
-此 Rule 因需要 `systemd AND (Started OR Stopped...)` 的巢狀邏輯，改用 Source Code Editor。
-
-```text
+~~~text
 rule "PVE - Service Events"
 when
     contains(to_string($message.message), "systemd", true)
@@ -194,51 +109,25 @@ when
 then
     set_field("event_category", "service");
 end
-```
+~~~
 
-### 5.1 五種 Service Event 實測
+測試範例：
 
-已分別送出並在 Graylog Message Details 驗證：
-
-```bash
+~~~bash
 logger -p daemon.info -t systemd "Started graylog-pipeline-test.service - Graylog Pipeline Test Service"
 logger -p daemon.info -t systemd "Stopped graylog-pipeline-test.service - Graylog Pipeline Test Service"
 logger -p daemon.info -t systemd "Starting graylog-pipeline-test.service - Graylog Pipeline Test Service"
 logger -p daemon.info -t systemd "Stopping graylog-pipeline-test.service - Graylog Pipeline Test Service"
 logger -p daemon.info -t systemd "Reached target graylog-pipeline-test.target - Graylog Pipeline Test Target"
-```
+~~~
 
-五種訊息均成功產生：
+本案 Stage 1、Stage 2 使用「None or more rules on this stage match」的繼續條件。不要把某一類沒有命中，誤設成所有後續處理都停止。Stage 0 的來源識別也必須能讓預期的 PVE 訊息通過。
 
-```text
-device_type = pve
-pve_cluster = PVE-Cluster
-event_category = service
-```
+## 4. 第三層：辨認 PVE 任務與結果
 
-因此 `Started / Stopped / Starting / Stopping / Reached target` 五個分支均已逐一驗證。
+PVE 的 pvedaemon 日誌會出現 UPID，也就是工作的識別資料。最基本的分類規則如下：
 
-## 6. Stage 2：PVE Task Events
-
-Stage 2：
-
-```text
-Continue processing on next stage when:
-None or more rules on this stage match
-```
-
-初期建置包含（保留以下歷史 Rule 範例，最新欄位與驗證狀態見 6.4 節）：
-
-```text
-PVE - Task Events
-PVE - Task Started
-```
-
-### 6.1 PVE - Task Events
-
-依 Graylog 匯出的實際訊息清單分析，PVE Task 可見 `pvedaemon` 與 `UPID:`。基礎 Rule：
-
-```text
+~~~text
 rule "PVE - Task Events"
 when
     contains(to_string($message.message), "pvedaemon", true)
@@ -247,220 +136,69 @@ when
 then
     set_field("event_category", "pve_task");
 end
-```
+~~~
 
-Simulation 成功後加入 Stage 2，再以 PVE Web UI 實際開啟 VM/LXC Console 產生真實 Task Log。
+這段只把訊息分成 pve_task，**不會自動完成所有任務欄位解析**。
 
-真實訊息格式例如：
+最新版看板使用的欄位：
 
-```text
-node10 pvedaemon[...]: <root@pam> starting task UPID:node10:...:vncproxy:100:root@pam:
-```
+| 欄位 | 代表什麼 |
+| --- | --- |
+| pve_event_type | 事件類型 |
+| pve_task_name | 工作名稱 |
+| pve_task_node | 執行節點 |
+| pve_vmid | VM／CT 編號；有些任務沒有這個值 |
+| pve_task_user | 執行使用者 |
+| pve_task_status | started、success、warning 或 failed |
 
-以及：
+初期規則曾用 task_status，後續改為 pve_task_status。新看板應使用後者，不能把初期範例當作完整最新版。本紀錄沒有保存最新版全部解析原始碼，因此不提供拼湊的「一鍵匯入」。
 
-```text
-node10 pvedaemon[...]: <root@pam> end task UPID:node10:...:vncproxy:103:root@pam: OK
-```
+三台任務來源已有驗證，node11、node12 的 pveupdate／aptupdate 也有真實成功事件。
 
-真實 `starting task` 訊息已確認：
+### 搜尋不到時，先放寬條件
 
-```text
-device_type = pve
-pve_cluster = PVE-Cluster
-event_category = pve_task
-```
+本次用 source:node10 AND "UPID:" 查最近 5 分鐘沒有結果；改查 pvedaemon 並延長到 15 分鐘，才找到訊息：
 
-### 6.2 PVE - Task Started（初期建置紀錄）
-
-本節程式碼為初期使用 `task_status` 的歷史範例；目前 Dashboard 與後續 Alert 統一使用 `pve_task_status`，請勿直接以舊欄位建立查詢。
-
-Graylog Pipeline DSL 不接受本次嘗試的 `{ }` 形式 inline `if` 寫法，因此沒有修改已穩定運作的 `PVE - Task Events`，改為獨立 Rule：
-
-```text
-rule "PVE - Task Started"
-when
-    contains(to_string($message.message), "pvedaemon", true)
-    &&
-    contains(to_string($message.message), "UPID:", true)
-    &&
-    contains(to_string($message.message), "starting task", true)
-then
-    set_field("task_status", "started");
-end
-```
-
-Simulation 已成功產生：
-
-```text
-task_status = started
-```
-
-將 `PVE - Task Started` 與 `PVE - Task Events` 同時加入 Stage 2 後，再以真實 PVE Console 操作驗證。同一筆真實訊息成功同時得到：
-
-```text
-device_type = pve
-pve_cluster = PVE-Cluster
-event_category = pve_task
-task_status = started
-```
-
-這證明 Stage 2 的兩條 Rule 可共同處理同一筆 PVE Task 訊息。
-
-### 6.3 Task Log 搜尋注意事項
-
-曾使用：
-
-```text
-source:node10 AND "UPID:"
-```
-
-在 5 分鐘時窗得到 0 筆；放寬為：
-
-```text
+~~~text
 source:node10 AND pvedaemon
-```
+~~~
 
-並將時間範圍調為 15 分鐘後，可看到多筆真實 `starting vnc proxy`、`starting task UPID:`、`end task ... OK` 與 `successful auth` 訊息。
+零筆結果可能只是時間或查詢條件不同，不等於日誌沒送到。先找到原訊息，再核對分類欄位。
 
-因此排查 Task 時，建議先以 `source + pvedaemon` 廣搜，再從 Message Details 確認 UPID，不要只用單一片語搜尋結果判斷「PVE 沒有產生 Task Log」。
+## 5. 看板：先看整體，再看異常明細
 
-### 6.4 PVE Task Pipeline 最新驗證狀態
+本次「PVE 任務監控」有八個 Widget：
 
-PVE Task Pipeline 已完成三節點實機驗證。目前解析欄位如下；各任務實際欄位值以 Message Details 為準。
-
-| 欄位 | 用途／已確認內容 |
+| 區塊 | 內容 |
 | --- | --- |
-| `device_type` | `pve` |
-| `event_category` | `pve_task` |
-| `pve_cluster` | `PVE-Cluster` |
-| `pve_event_type` | PVE 事件類型 |
-| `pve_task_name` | 任務名稱／類型 |
-| `pve_task_node` | 任務所屬節點 |
-| `pve_vmid` | VM／LXC 識別欄位；依任務內容可能為空 |
-| `pve_task_user` | 執行任務的使用者 |
-| `pve_task_status` | 任務狀態；Dashboard 使用 started／success／warning／failed |
+| 四個數字 | failed、warning、success、started |
+| 狀態趨勢 | 看不同狀態隨時間的變化 |
+| 節點統計 | 哪個節點有多少完成事件 |
+| 任務種類統計 | 哪一類工作最多 |
+| 最近異常 | 逐筆列出 warning／failed |
 
-| 節點 | 驗證結果 |
-| --- | --- |
-| node10 | PVE Task Pipeline 實機驗證完成 |
-| node11 | PVE Task Pipeline 實機驗證完成；以 pveupdate／aptupdate 實測 success |
-| node12 | PVE Task Pipeline 實機驗證完成；以 pveupdate／aptupdate 實測 success |
+每個 Widget 都明確限制 Infrastructure Syslog Stream，時間範圍使用最近一天到現在。不要只因 Dashboard 名稱正確，就以為每個 Widget 都選到正確 Stream。
 
-目前完成紀錄未提供最新完整 Rule 原始碼與 Rule 名稱清單，因此保留前述初期範例供追溯；最新欄位以本節為準。warning／failed 已納入 Dashboard 查詢，並不代表已刻意製造警告／失敗任務或完成 Alert 觸發測試。
+節點與種類統計排除 started，避免把同一工作的開始和結束都混進完成統計：
 
-## 7. 目前 Pipeline 架構
-
-```text
-Infrastructure Syslog
-│
-├─ Stage 0
-│  ├─ PVE - Identify Cluster Nodes
-│  ├─ PVE-Authentication Events
-│  └─ Infrastructure - System Errors
-│
-├─ Stage 1
-│  └─ PVE - Service Events
-│
-└─ Stage 2
-   └─ PVE Task 分類 / 欄位解析 / 狀態（見 6.4 節）
-```
-
-已驗證欄位：
-
-| 類型 | 欄位 |
-| --- | --- |
-| PVE 節點 | `device_type=pve`、`pve_cluster=PVE-Cluster` |
-| Authentication | `event_category=authentication` |
-| System Error | `event_category=system_error` |
-| Service Event | `event_category=service` |
-| PVE Task | `event_category=pve_task` |
-| PVE Task 狀態 | `pve_task_status`（started／success／warning／failed） |
-| PVE Task 解析 | `pve_event_type`、`pve_task_name`、`pve_task_node`、`pve_vmid`、`pve_task_user` |
-
-## 8. 驗收狀態與 PVE 任務監控 Dashboard
-
-| 項目 | 狀態 |
-| --- | --- |
-| Syslog UDP 1514 / Stream / Index | ✅ 已完成 |
-| node10 / node11 / node12 自動收集與節點識別 | ✅ 已完成 |
-| Authentication / Infrastructure System Errors | ✅ 已驗證 |
-| Rule rename 故障排除 | ✅ 已完成並複測 |
-| Stage 1 Service Events | ✅ 五種狀態逐一驗證 |
-| PVE Task Pipeline 與欄位解析 | ✅ 三節點實機驗證完成 |
-| node11 / node12 success | ✅ pveupdate／aptupdate 實測 |
-| PVE 任務監控 Dashboard | ✅ 8 個 Widget 已完成 |
-| PVE Task Failed Alert | ⏳ 尚未開始 |
-| Synology / TP-Link 納管 | ⏳ 後續規劃 |
-
-### 8.1 共用範圍與時間設定
-
-- Dashboard 名稱：**PVE 任務監控**。
-- 所有 PVE Widget 的 Stream 均指定 **Infrastructure Syslog**。
-- Dashboard Global Override：**1 day ago → Now**。
-
-> **已確認的設定陷阱：**未指定 Stream 會混入其他資料。每個 PVE Widget 都必須明確選擇 Infrastructure Syslog，不能只依賴 Widget 名稱或 Dashboard 名稱限制資料來源。
-
-### 8.2 八個 Widget
-
-| 編號 | Widget 名稱 | 統計／查詢範圍 | 分組與顯示設定 |
-| --- | --- | --- | --- |
-| 1 | PVE 任務失敗數 | `pve_task_status:failed` | KPI 訊息筆數 |
-| 2 | PVE 任務警告數 | `pve_task_status:warning` | KPI 訊息筆數 |
-| 3 | PVE 任務成功數 | `pve_task_status:success` | KPI 訊息筆數 |
-| 4 | PVE 任務啟動數 | `pve_task_status:started` | KPI 訊息筆數 |
-| 5 | PVE 任務狀態趨勢 | PVE 任務狀態隨時間的變化 | 狀態趨勢圖 |
-| 6 | PVE 各節點任務量 | 僅 success／warning／failed | Group By：`pve_task_node`；Skip Empty Values |
-| 7 | PVE 任務類型分布 | 僅 success／warning／failed | Group By：`pve_task_name`；Skip Empty Values |
-| 8 | PVE 最近異常任務 | 僅 warning／failed | 訊息表格；timestamp Descending |
-
-各節點任務量與任務類型分布使用以下狀態範圍，排除 started：
-
-```text
+~~~text
 pve_task_status:success OR pve_task_status:warning OR pve_task_status:failed
-```
+~~~
 
-最近異常任務 Query：
+分組使用 pve_task_node 或 pve_task_name，並略過空值。最近異常使用：
 
-```text
+~~~text
 pve_task_status:warning OR pve_task_status:failed
-```
+~~~
 
-最近異常任務欄位順序：
+明細依 timestamp 由新到舊，顯示時間、節點、任務、VMID、使用者與狀態。VMID 空白不一定是解析失敗，先確認那種任務是否本來就沒有 VMID。
 
-```text
-timestamp
-pve_task_node
-pve_task_name
-pve_vmid
-pve_task_user
-pve_task_status
-```
+## 目前完成與待辦
 
-排序設定為 **timestamp Descending**，最新異常列在最上方。若目前時間範圍內 warning／failed 均為 0，異常表格可為空；仍應先確認 Stream 與時間範圍正確。
+已完成三台接收、基礎分類、五種服務事件測試、任務欄位驗證與八個 Widget。畫面 0 errors/s 只能說當下沒有顯示處理錯誤，仍要抽查欄位是否正確。
 
-### 8.3 Dashboard 版面
+尚未建置 PVE Task Failed Alert；Synology、TP-Link 的後續整合也不列入已完成範圍。做告警前，先用真實成功、警告、失敗樣本確認分類，避免把 started 當完成，或一筆事件重複通知。
 
-| 位置 | 左側 | 右側 |
-| --- | --- | --- |
-| 第一排 | 失敗／警告 KPI | 成功／啟動 KPI |
-| 第二排 | 任務狀態趨勢 | 各節點任務量 |
-| 第三排 | 任務類型分布 | 最近異常任務 |
+## 可下載文字版
 
-第一排由左至右依序為：**失敗 → 警告 → 成功 → 啟動**。
-
-## 9. 下一步
-
-下一階段尚未開始：**Alerts → Event Definitions → PVE Task Failed Alert**。
-
-預定以 `pve_task_status:failed` 作為失敗任務篩選條件，建立 Event Definition；Event 觸發驗證與後續 Email 通知尚未完成，不列入本次 Dashboard／Pipeline 完成範圍。
-
-## 10. 維運原則與修訂紀錄
-
-每次修改 Rule 名稱、條件、Action 或 Stage 掛載後，都要重新產生測試訊息並從 Message Details 驗證欄位。`0 errors/s` 只能表示當下沒有 Pipeline 執行錯誤，不能取代分類結果驗證。
-
-版本 1.0：完成 Syslog 收集、Stage 0 三條 Rule、系統錯誤 Rule 改名故障排除。
-
-版本 1.1：新增 Stage 1 / Stage 2、`PVE - Service Events` 五種狀態實測、`PVE - Task Events` 真實 Task 驗證、`PVE - Task Started` 與 `task_status=started` 真實驗證，並記錄 `PVE - Task Success` 為下一步。
-
-版本 1.2：完成三節點 PVE Task Pipeline 驗證紀錄，補上 pve_* 解析欄位、node11／node12 success 實測、8 個 Dashboard Widget、Infrastructure Syslog 範圍、Global Override 與版面；下一階段更新為尚未開始的 PVE Task Failed Alert。
+[下載同版 Markdown]({{ '/assets/downloads/Proxmox_Graylog_SOP_public.md' | relative_url }})。文字版與本文同步；倉庫若仍保留較早的 Word 檔，屬歷史附件，不代表已同步這次改寫。

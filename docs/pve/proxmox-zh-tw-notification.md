@@ -1,179 +1,116 @@
 ---
 layout: default
-title: "Proxmox VE / Proxmox Backup Server 繁體中文通知模板安裝"
+title: "把 PVE／PBS 通知改成繁體中文"
 date: 2026-09-01
 categories: [PVE, PBS, Notification]
+last_modified_at: 2026-09-18
 ---
 
-<div class="kb-hero">
-<h1>Proxmox VE / Proxmox Backup Server 繁體中文通知模板安裝</h1>
-<p>為 Proxmox VE 9.x 與 Proxmox Backup Server 4.x 提供繁體中文通知模板，PVE 9.2.11 已完成實機完整生命週期驗證。</p>
-<div class="kb-badges"><span class="kb-badge">PVE</span><span class="kb-badge">PBS</span><span class="kb-badge">Notification</span></div>
-</div>
+# 把 PVE／PBS 通知改成繁體中文
 
-## 摘要
+這個專案用自訂通知模板，讓備份等通知改成繁體中文。它處理的是通知內容；收件人、通知條件與寄送管道仍由原本的通知設定管理。
 
-[proxmox-zh-tw-notification](https://github.com/kbwangtw/proxmox-zh-tw-notification) 為 Proxmox VE 9.x 與 Proxmox Backup Server 4.x 提供繁體中文通知模板。它使用 Proxmox 官方支援的 template override 目錄，不修改 `/usr/share` 內由套件管理器維護的原廠模板。
+> 紀錄日期：2026-09-01。PVE 9.2.11 已測過安裝、中文備份信、移除還原及重新安裝；PBS 4.2.5 的模板已準備，但當時尚未完成相同的安裝生命週期實測。
 
-PVE 涵蓋 vzdump VM／CT 備份通知的主旨、純文字與 HTML 內容；PBS 涵蓋 Garbage Collection、Prune、Verification、Sync 與 Package Updates。腳本只改變通知內容，不會建立通知 target 或 matcher。
+## 先看自己適用哪一種
 
-## 支援與驗證狀態
+| 產品 | 本紀錄的驗證程度 |
+| --- | --- |
+| PVE 9.2.11 | 安裝 → 中文 vzdump 郵件 → 移除並還原 → 清理 state → 再安裝，已確認 |
+| PBS 4.2.5 | 模板已提供，完整安裝與移除流程仍待測 |
+| 其他版本 | 需先核對模板相容性，不沿用「已驗證」結論 |
 
-| 產品 | 支援範圍 | 驗證狀態 |
-|---|---|---|
-| Proxmox VE 9.x | vzdump VM／CT 備份通知 | **PVE 9.2.11 已完成實機完整生命週期驗證** |
-| Proxmox Backup Server 4.x | GC、Prune、Verification、Sync、Package Updates | **PBS 4.2.5 模板已完成；實機安裝驗證尚待進行** |
+原始專案：[proxmox-zh-tw-notification](https://github.com/kbwangtw/proxmox-zh-tw-notification)。
 
-PVE 9.2.11 已完成：
+## 模板放哪裡？
 
-```text
-install → 中文 vzdump email → uninstall/restore
-        → state cleanup → reinstall → 成功
-```
+| 產品 | 自訂模板目錄 |
+| --- | --- |
+| PVE | /etc/pve/notification-templates/default/ |
+| PBS | /etc/proxmox-backup/notification-templates/default/ |
 
-> PBS 4.2.5 目前只能視為「模板完成」，不能宣稱已通過與 PVE 相同的實機 install／uninstall 驗證。
+本方案使用自訂模板位置，不直接修改 /usr/share 裡的套件檔案。本次流程不需要為了套用文字模板重啟服務；驗證時應觸發一封新通知。
 
-## 安裝前注意事項
+## 安裝前，先保留原有設定
 
-- 必須以 `root` 權限執行，且主機需能存取 `raw.githubusercontent.com`。
-- 先確認既有 override 模板；腳本會備份，但仍建議納入變更紀錄。
-- PVE 叢集的 `/etc/pve` 由 pmxcfs 管理；不要在每個節點同時重複寫入。
-- 通知 target 與 matcher 仍須在 Proxmox 管理介面設定。
+使用 root，確認原始專案與腳本內容。下列指令會下載 main 分支腳本並立即執行，內容可能隨專案更新；正式維護若需要可追溯版本，應先保存並審閱確定的版本。
 
-## 安裝
+PVE 叢集先確認 quorum 和 /etc/pve 可寫：
 
-### PVE
+~~~bash
+pvecm status
+mount | grep /etc/pve
+~~~
 
-```bash
+PVE 的模板目錄是叢集共享設定，正常有 quorum 時只需安裝一次，再於各節點核對。不必三台重複覆寫。
+
+## 安裝方式
+
+PVE：
+
+~~~bash
 curl -fsSL https://raw.githubusercontent.com/kbwangtw/proxmox-zh-tw-notification/main/install.sh | bash -s -- --pve
-```
+~~~
 
-### PBS
+PBS（本紀錄仍待完整實測）：
 
-```bash
+~~~bash
 curl -fsSL https://raw.githubusercontent.com/kbwangtw/proxmox-zh-tw-notification/main/install.sh | bash -s -- --pbs
-```
+~~~
 
-### 模式參數
+腳本也提供 --auto 自動判斷與 --all 模式；未指定時使用自動模式。知道產品種類時，明確指定比較容易檢查操作範圍。
 
-| 參數 | 行為 |
-|---|---|
-| `--auto` | 預設；偵測主機已安裝的 PVE、PBS，或兩者 |
-| `--pve` | 只安裝 PVE 模板 |
-| `--pbs` | 只安裝 PBS 模板 |
-| `--all` | 同時安裝 PVE 與 PBS 模板 |
+## 備份目錄和安裝紀錄有什麼不同？
 
-不帶參數等同 `--auto`：
+| 位置 | 用途 |
+| --- | --- |
+| /var/backups/proxmox-zh-tw-notification/&lt;產品&gt;-&lt;UTC時間戳&gt;/ | 保留每次操作相關備份 |
+| /var/lib/proxmox-zh-tw-notification/&lt;產品&gt;/original/ | 記住首次安裝前的原始狀態 |
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/kbwangtw/proxmox-zh-tw-notification/main/install.sh | bash
-```
+重新安裝不應把「第一次安裝前的狀態」覆蓋成已翻譯版本，否則移除時就無法回復原貌。移除流程會處理受管理的模板並還原原始狀態；備份另行保留。
 
-## 模板目標路徑
+不要把 state 目錄當成暫存檔隨手清掉。若缺少安裝紀錄，先核對備份與實際檔案，再決定如何人工還原。
 
-| 產品 | Override 目錄 |
-|---|---|
-| PVE | `/etc/pve/notification-templates/default/` |
-| PBS | `/etc/proxmox-backup/notification-templates/default/` |
+## 怎麼確認真的生效？
 
-專案不會修改 `/usr/share/pve-manager/templates/` 或 `/usr/share/proxmox-backup/templates/`。模板在下一封通知產生時載入，安裝與移除後都**不需要重新啟動 PVE 或 PBS 服務**。
+PVE 可先查看模板檔：
 
-## PVE Cluster 與 pmxcfs
-
-`/etc/pve` 不是一般磁碟目錄，而是 pmxcfs 叢集設定檔系統。叢集具有 quorum 且 pmxcfs 可寫時，在一個節點寫入模板後會同步到其他節點。
-
-```bash
-pvecm status
-mount | grep /etc/pve
-```
-
-若叢集失去 quorum，`/etc/pve` 可能變成唯讀。應先修復 quorum／pmxcfs，不要用權限指令強行繞過。
-
-## 備份、first-install state 與還原
-
-若目標目錄已有模板，每次安裝前會完整備份到：
-
-```text
-/var/backups/proxmox-zh-tw-notification/<產品>-<UTC時間戳>/
-```
-
-首次安裝某產品時，原始 override 狀態另存於：
-
-```text
-/var/lib/proxmox-zh-tw-notification/<產品>/original/
-```
-
-同一產品後續 reinstall 不會覆寫這份 first-install snapshot。state 也記錄目標目錄與本專案管理的檔名，讓 `uninstall.sh` 精準移除並還原。安裝器會先取得所有模板才修改目標；複製失敗時會嘗試回復本次變更。
-
-uninstall 只處理安裝記錄中的檔案，還原首次安裝前模板後清除該產品 state；`/var/backups` 的歷史備份不會自動刪除。
-
-## 移除
-
-### PVE
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kbwangtw/proxmox-zh-tw-notification/main/uninstall.sh | bash -s -- --pve
-```
-
-### PBS
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kbwangtw/proxmox-zh-tw-notification/main/uninstall.sh | bash -s -- --pbs
-```
-
-也可使用 `--auto` 或 `--all`。uninstall 的 `--auto` 會依 `/var/lib/proxmox-zh-tw-notification/` 的安裝記錄決定移除產品。
-
-## 安裝後驗證
-
-```bash
-# PVE
+~~~bash
 find /etc/pve/notification-templates/default -maxdepth 1 -type f -name '*.hbs' -print
+~~~
 
-# PBS
+PBS 對應查：
+
+~~~bash
 find /etc/proxmox-backup/notification-templates/default -maxdepth 1 -type f -name '*.hbs' -print
-```
+~~~
 
-接著從 **Datacenter / Notifications** 傳送測試通知，或執行對應工作並檢查新通知。PBS 實機驗證時應分別覆蓋 GC、Prune、Verification、Sync 與 Package Updates。
+接著觸發模板涵蓋的實際通知，例如 PVE 備份完成信，檢查中文內容、變數與收件結果。通用「測試通知」不一定會用到 vzdump 模板，不能只靠它判斷備份信翻譯成功。
 
-## Troubleshooting
+## 想改回原本內容
 
-### `/etc/pve` 唯讀或無法寫入
+PVE：
 
-```bash
-pvecm status
-systemctl status pve-cluster
-mount | grep /etc/pve
-```
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/kbwangtw/proxmox-zh-tw-notification/main/uninstall.sh | bash -s -- --pve
+~~~
 
-先修復 quorum 或 pmxcfs，不要直接改權限。
+PBS：
 
-### 為什麼 PVE 不能使用 `chmod`、`install -m` 或 `cp -a`
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/kbwangtw/proxmox-zh-tw-notification/main/uninstall.sh | bash -s -- --pbs
+~~~
 
-pmxcfs 不是一般 POSIX 檔案系統，權限與 metadata 由它管理：
+移除後重新核對模板與實際通知。PBS 指令在這裡保留作為專案使用方式，不表示本紀錄已測過成功移除。
 
-- `chmod` 可能不受支援或被拒絕。
-- `install -m` 複製後會設定 mode，因此可能失敗。
-- `cp -a` 會保留權限、時間等 metadata，也可能觸發不支援的操作。
+## 常見問題
 
-所以專案對 PVE 目標使用一般 `cp`；PBS 的一般檔案系統目錄才使用 `install -m 0644`。
+| 現象 | 先查什麼 |
+| --- | --- |
+| /etc/pve 不能寫 | quorum、pve-cluster 與 pmxcfs 狀態 |
+| chmod 或保留權限複製失敗 | /etc/pve 的權限由 pmxcfs 管理，不是一般磁碟目錄 |
+| 安裝後還是英文 | 是否為新通知、模板種類是否涵蓋、檔案放在哪個產品目錄 |
+| 自動判斷找不到產品 | 確認主機產品後指定 --pve 或 --pbs |
+| 移除找不到 state | 先查首次安裝紀錄與備份，不把缺檔當成已還原 |
 
-### 安裝成功但仍收到英文通知
-
-- 確認通知類型由本專案涵蓋，且目標目錄與檔名正確。
-- 產生一封新通知；舊郵件不會被改寫。
-- 確認工作由正確的 PVE cluster 或 PBS 主機執行。
-- Proxmox 更新若改變官方模板變數，先比較上游模板與本專案版本。
-
-### `--auto` 找不到產品
-
-確認產品與版本後可明確使用 `--pve` 或 `--pbs`；不要在非 Proxmox 主機強制執行。
-
-### uninstall 找不到安裝記錄
-
-若 state 已被手動刪除，不要猜測原始模板；請從 `/var/backups/proxmox-zh-tw-notification/` 選擇正確時間點人工復原。
-
-## 原始專案
-
-- GitHub：[kbwangtw/proxmox-zh-tw-notification](https://github.com/kbwangtw/proxmox-zh-tw-notification)
-- [install.sh](https://github.com/kbwangtw/proxmox-zh-tw-notification/blob/main/install.sh)
-- [uninstall.sh](https://github.com/kbwangtw/proxmox-zh-tw-notification/blob/main/uninstall.sh)
+本專案在 PVE 寫入共享模板時使用一般內容複製；PBS 一般檔案系統的權限處理不同，不能把兩邊的檔案操作方式混用。

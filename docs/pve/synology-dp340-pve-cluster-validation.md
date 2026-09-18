@@ -1,233 +1,129 @@
 ---
 layout: default
-title: "Synology DP340 × PVE Cluster：備份與原機／異機還原演練計畫"
+title: "用 DP340 備份 PVE：先把還原測試安排好"
 date: 2026-09-02
 last_updated: 2026-09-04
 categories: [PVE, Synology, Backup, Recovery, DR, Ceph]
+last_modified_at: 2026-09-18
 ---
 
-<div class="kb-hero">
-<h1>Synology DP340 × PVE Cluster<br>備份與原機／異機還原演練計畫</h1>
-<p>適用於 Proxmox VE 9.2.11 三節點叢集、Ceph VM_Pool，以及 Synology DP340 ActiveProtect Manager 2.0-88101。本文聚焦於 <strong>PVE 虛擬機（VM）</strong>的備份、原節點還原、跨節點還原與災難復原驗證。</p>
-<div class="kb-badges"><span class="kb-badge">PVE 9.2.11</span><span class="kb-badge">APM 2.0-88101</span><span class="kb-badge">Ceph VM_Pool</span><span class="kb-badge">VM Backup</span><span class="kb-badge">Same-Node Restore</span><span class="kb-badge">Cross-Node Restore</span></div>
-</div>
+# 用 DP340 備份 PVE：先把還原測試安排好
 
-<div class="kb-alert"><strong>重要限制（截至 2026-09-04）：</strong>Synology ActiveProtect Manager（APM）2.0 支援 Proxmox VE 虛擬機（VM）備份與還原，但<strong>目前不支援 Proxmox VE LXC Container 備份</strong>。本文件所有 DP340 備份與還原演練均以 <strong>VM</strong> 為測試對象。LXC 請另行使用 Proxmox Backup Server（PBS）、<code>vzdump</code> 或其他相容方案保護。後續版本支援狀態請以 Synology 官方規格為準。</div>
+這篇是 Synology DP340 搭配三節點 PVE 的演練計畫。目的不只是看到備份完成，而是確認能還原、資料對得上，並知道需要多久。
 
-<div class="kb-alert"><strong>版本聲明：</strong>本文件是驗證計畫，不是產品功能保證。API Token、增量備份、Instant Restore、跨節點還原、storage mapping、還原後自動開機及網路設定等行為，仍須依實際 APM、DP340 韌體、PVE 版本與 Synology 官方相容矩陣驗證。</div>
+**原紀錄的結果表尚未填完，因此本文仍是待驗收計畫，不能因為有影片就寫成全部測試通過。**
 
-<nav class="kb-toc" aria-label="章節導覽"><strong>章節導覽</strong><ol><li><a href="#objective">目的與成功標準</a></li><li><a href="#environment">環境基線</a></li><li><a href="#network">網路與資料路徑</a></li><li><a href="#prepare">前置準備</a></li><li><a href="#cases">演練案例</a></li><li><a href="#videos">演練影片</a></li><li><a href="#signoff">結果與簽核</a></li><li><a href="#operations">維運建議</a></li></ol></nav>
+> 建立日期：2026-09-02；環境更新至 2026-09-04。當時記錄為 APM 2.0-88101、PVE 9.2.11。本案範圍是 VM；依當時紀錄未包含 LXC，後續版本支援需另外核對。
 
-<h2 id="objective">1. 演練目的與成功標準</h2>
+<a id="objective"></a>
+## 這次要回答五個問題
 
-本演練用來驗證 DP340 是否能從指定還原點，將 PVE 虛擬機（VM）還原至原節點，並在來源節點不可用時還原至另一個健康節點。還原後必須完成 VM 開機、網路、應用服務與資料一致性驗證。
+1. 能不能完成第一次完整備份？
+2. VM 資料改變後，下一份備份能不能保存改變？
+3. 能不能還原回原節點？
+4. 能不能還原到另一個節點？
+5. 還原後連續觀察 30 分鐘，系統與服務是否穩定？
 
-- 備份成功，還原點時間符合預期 RPO。
-- 備份資料走指定 Data 網段，並確認 Corosync、quorum 與 Ceph 維持健康。
-- 原機及異機還原完成，目標 storage 為 Ceph VM_Pool，VM 服務與測試資料正常。
-- VMID、MAC、IP、hostname、HA 與排程不與既有系統衝突。
-- 保存 APM／PVE 工作紀錄、RPO、RTO、吞吐量、截圖、影片與 checksum。
+「30 分鐘」是計畫中的觀察長度，不是已通過結果，也不是正式的恢復時間目標。
 
-<h2 id="environment">2. 實際環境基線</h2>
+<a id="environment"></a>
+## 先記住環境限制
 
-| 元件 | 實際設定 |
-|---|---|
-| PVE Cluster | 3 個節點：Node10、Node11、Node12；Proxmox VE 9.2.11 |
-| 每節點網路 | 2 張 2.5GbE NIC |
-| 系統碟 | 每節點 512 GB M.2 SSD × 1，安裝 PVE |
-| Ceph 資料碟 | 每節點 2 TB M.2 SSD × 1，加入 Ceph 儲存池 |
-| PVE Storage | Ceph 儲存池內的 VM_Pool，供 3 節點共同使用 |
-| 備份設備 | Synology DP340 |
-| 管理平台 | ActiveProtect Manager（APM）2.0-88101 |
-| APM 2.0 Proxmox 保護對象 | **PVE 虛擬機（VM）**；截至 2026-09-04 不支援 LXC Container 備份 |
-| Management / Service | 192.168.10.0/24；DP340 管理介面使用此網段 |
-| Data / Corosync | 172.16.10.0/24；DP340 10G Data 介面與 PVE Data／Corosync 共網 |
-| 流量控制 | 目前未設定 QoS、ACL 或備份速率限制 |
+| 項目 | 本案配置 |
+| --- | --- |
+| PVE | node10／node11／node12，PVE 9.2.11 |
+| 每台網路 | 兩個 2.5GbE |
+| 每台系統碟 | 512GB M.2 |
+| 每台 Ceph 碟 | 2TB M.2 |
+| DP340 | 管理 1GbE、資料 10GbE |
+| APM | 2.0-88101 |
+| 管理網 | 192.168.10.0/24 |
+| 資料／Corosync 網 | 172.16.10.0/24 |
+| DP340 位址 | 對應網段的 .18；完整設定依現場核對 |
 
-<div class="kb-info"><strong>Ceph 基準：</strong>正式演練前須重新保存 <code>ceph -s</code>、<code>pvesm status</code> 與 PVE Ceph 畫面，並確認沒有 recovery、rebalance 或重大 scrub。</div>
+DP340 有 10GbE，不代表單台 PVE 備份可以跑到 10Gbps；PVE 的 2.5GbE 和其他共用資源也會影響速度。
 
-<h2 id="network">3. 網路拓撲與資料路徑</h2>
+<a id="network"></a>
+## 為什麼先只測一台 VM？
 
-~~~text
-Management / Service：192.168.10.0/24
-管理者 ── TL-SG108-M2（2.5G）
-              ├── Node10：192.168.10.10（2.5G）
-              ├── Node11：192.168.10.11（2.5G）
-              ├── Node12：192.168.10.12（2.5G）
-              └── DP340 Management：192.168.10.18（1G）
+本案 Corosync 和備份共用資料網，尚無 QoS、ACL 或流量限制的測試結果。若一次開很多備份，可能影響叢集通訊。
 
-Data / Cluster / Corosync：172.16.10.0/24
-DP340 Data：172.16.10.18（10G）── TL-SX-1008
-                          ├── Node10：172.16.10.10（2.5G）
-                          ├── Node11：172.16.10.11（2.5G）
-                          └── Node12：172.16.10.12（2.5G）
-                               ├── Backup / Restore Data
-                               └── Cluster / Corosync
+先用一台 VM、一個工作測試，觀察 quorum、Corosync、Ceph 與網路負載，再決定是否增加併發。出現節點失聯、quorum 異常、Ceph 明顯惡化或正式服務受影響時，先停止擴大測試並查原因。
 
-三節點 Ceph ── VM_Pool ── VM
-~~~
+<a id="prepare"></a>
+## 演練前先準備
 
-<div class="kb-grid"><div class="kb-card"><h3>管理路徑</h3><p>192.168.10.0/24 用於 PVE／APM 管理，不承載大量備份。</p></div><div class="kb-card"><h3>資料路徑</h3><p>DP340 Data 介面為 10G，但單一 PVE 節點為 2.5G，因此單節點吞吐上限仍受 PVE 端限制。</p></div><div class="kb-card"><h3>共網風險</h3><p>Backup Data 與 Corosync 共用 172.16.10.0/24，應先以單一 Node、單一備份工作驗證，再逐步增加負載。</p></div></div>
+- 選一台允許測試的 VM，記下 CPU、記憶體、磁碟、bridge、VLAN、MAC、IP 與必要服務。
+- 放入可辨認的測試資料，保存時間、內容與 SHA256，供還原後比較。
+- 記下叢集與 Ceph 基線，確認空間、主控台、備份帳號與連線可用。
+- 確认目標 VMID 尚未使用；規劃測試網路，避免同名、同 MAC、同 IP 與重複排程。
+- 在已安裝的 APM 版本核對權限與實際還原選項；CBT、即時還原等行為未驗證前不列為已具備能力。
+- 記錄 DP340 韌體、APM build、保留政策與測試時間，原紀錄缺的欄位要補上。
 
-<div class="kb-alert"><strong>停止條件：</strong>如發生 quorum 改變、節點離線、Corosync 延遲／丟包、非預期 fencing／reboot、Ceph 健康惡化、VM_Pool I/O 異常或管理介面失聯，立即停止新增備份／還原工作並保存證據。</div>
+演練預設不拔電、不刪正式 VM、不覆寫原磁碟。若另有破壞性情境，需獨立安排與核准，不能混進一般還原測試。
 
-<h2 id="prepare">4. 演練前置準備</h2>
+<a id="cases"></a>
+## 五個測試，分開留下結果
 
-### 4.1 測試工作負載
+| 測試 | 做法 | 通過時應有的證據 |
+| --- | --- | --- |
+| 第一次備份 | 選指定 VM，完成一份備份 | 最終成功日誌、還原點時間、處理量 |
+| 資料變更後備份 | 修改測試檔並保存新時間與 SHA256，再備份 | 新還原點與資料版本對照；不能只看進度條 |
+| 原節點還原 | 還原到獨立測試 VMID，避免覆蓋 | 工作成功、可開機、資料和服務驗證 |
+| 其他節點還原 | 在另一台核對儲存、網路及裝置相容性後還原 | 實際目標節點與同樣的驗證資料 |
+| 穩定與收尾 | 觀察 30 分鐘，再關閉或隔離副本 | 系統／Ceph／網路狀態與收尾紀錄 |
 
-至少選 2 台測試 VM，建議 Windows／Linux 各 1 台。記錄 VMID、名稱、來源節點、CPU、RAM、磁碟、實際使用量、MAC、IP、bridge、hostname、HA、服務 port 與 VM_Pool 位置，並建立帶時間戳的測試檔案與 SHA-256。
+若版本提供還原後自動開機選項，測試時先關閉，檢查副本設定再啟動。Unique MAC 不會自動解決所有靜態 IP 與應用排程衝突，也要確認 HA 不會自動拉起測試副本。
 
-> **LXC 不列入本次 DP340／APM 2.0 測試。** 截至 2026-09-04，APM 2.0 不支援 Proxmox VE LXC Container 備份；LXC 請另以 PBS、vzdump 或其他相容備份機制建立獨立 SOP 與還原演練。
+還原後不能只看桌面；要驗證備份點的測試資料、必要應用功能與外部連線。
 
-### 4.2 PVE 與 Ceph 基線
+## 時間怎麼記，才有比較意義？
 
-~~~bash
-pveversion -v
-pvecm status
-ha-manager status
-ceph -s
-pvesm status
-~~~
+先約定目標，再記實際值：
 
-三節點、quorum、MON／OSD、Ceph health 與 VM_Pool 容量均正常才能開始。演練不得與 Ceph recovery、rebalance、重大 scrub 或節點維護同時進行。
+| 指標 | 本計畫的記法 |
+| --- | --- |
+| 還原耗時 | 還原工作開始到完成 |
+| 開機恢復耗時 | 還原開始到作業系統可登入 |
+| 服務恢復耗時 | 還原開始到必要服務驗收完成 |
+| 還原點距離 | 模擬事故時間與所選備份點的差距 |
+| RTO／RPO 達標 | 以預先約定的起算點與目標比較，另核對實際資料 |
 
-### 4.3 DP340 串接
+若正式 RTO 從事故發生起算，就要把選擇備份與準備時間算進去，不能拿「還原開始」的較短值代替。
 
-1. 從 Management／Service 網段登入 DP340 APM。
-2. 確認 DP340 Data 介面為 172.16.10.18/24，且路由設定符合預期。
-3. 使用專用 PVE 帳號／API Token；Secret 僅存密碼庫，不使用日常 root 帳號。
-4. 新增 PVE 保護來源時，優先使用 PVE 節點的 Data 網段位址。
-5. 確認 APM 可探索 3 個節點、測試 VM 與預期 storage。
-6. APM 2.0 的 Proxmox VE 保護對象以 VM 為主；LXC Container 不列入備份工作。
+<a id="videos"></a>
+## 演練影片
 
-<span class="verify-tag">需依實際版本驗證</span> API 權限、Token、TLS、叢集探索、VM 支援與 storage mapping。
-
-<h2 id="cases">5. 備份及原機／異機還原演練</h2>
-
-<section class="test-card"><div class="test-head"><span class="test-num">01</span><strong>完整備份與共網壓力基線</strong></div><div class="test-body"><ol><li>錄製 PVE、Ceph、VM_Pool 與測試 VM 前置狀態。</li><li>在 APM 先以單一 VM、單一工作執行完整備份。</li><li>記錄 job ID、來源節點、開始／結束時間、還原點、資料量與平均／峰值頻寬。</li><li>監控 PVE Data 介面、DP340 Data 介面、交換器埠、Corosync、quorum 與 Ceph。</li></ol><div class="test-result"><strong>Pass</strong>備份成功、還原點可選，Cluster／Corosync／Ceph 無新增異常，且大量備份流量未誤走 Management 網段。</div></div></section>
-
-<section class="test-card"><div class="test-head"><span class="test-num">02</span><strong>增量備份與測試資料</strong></div><div class="test-body"><ol><li>在測試 VM 建立帶時間戳的檔案並記錄 SHA-256。</li><li>再次執行備份，記錄時間、邏輯異動量、實際傳輸量與 DP340 容量變化。</li><li>確認新還原點晚於測試檔案建立時間。</li></ol><div class="test-result"><strong>Pass</strong>第二次備份成功，後續還原可取得測試檔案且 checksum 相符。</div><div class="test-note"><strong>注意</strong><span class="verify-tag">需依實際版本驗證</span> CBT、增量鏈、去重／壓縮與 APM 統計口徑。</div></div></section>
-
-<section class="test-card"><div class="test-head"><span class="test-num">03</span><strong>原機還原（Same-Node Restore）</strong></div><div class="test-body"><ol><li>記錄來源節點、VMID、MAC、IP、VM_Pool volume 與所選還原點。</li><li>依核准流程關機並隔離、重新命名或刪除原測試 VM。</li><li>在 APM 執行原機還原；若產品支援，優先採新 VMID 並關閉還原後自動開機。</li><li>記錄提交、VM 建立完成、可開機、OS Ready 與服務可用時間。</li><li>首次開機前核對 VMID、MAC、IP、bridge、hostname、HA 與開機順序。</li><li>驗證 OS、網路、服務、測試檔案、SHA-256 與磁碟所在 storage。</li></ol><div class="test-result"><strong>Pass</strong>原節點還原成功，資料與服務正常，沒有重複 VMID／MAC／IP 或非預期 HA 動作。</div></div></section>
-
-<section class="test-card"><div class="test-head"><span class="test-num">04</span><strong>異機還原（Cross-Node Restore）</strong></div><div class="test-body"><ol><li>確認目標節點 online、quorum、Ceph 與 VM_Pool 容量正常。</li><li>關機並隔離來源 VM；未評估 HA、Ceph 與 fencing 前，不建議直接拔除實體節點電源。</li><li>在 APM 選擇還原點、健康節點、新 VMID 與 VM_Pool。</li><li>還原完成後先核對 VMID、MAC、IP、bridge、hostname 與 HA，再啟動 VM。</li><li>驗證 OS、網路、服務、測試檔案與 checksum，並再次檢查 Cluster 與 Ceph。</li></ol><div class="test-result"><strong>Pass</strong>VM 在另一節點啟動並提供服務，資料完整，VM_Pool、Corosync、quorum 與 Ceph 維持正常。</div><div class="test-note"><strong>注意</strong><span class="verify-tag">需依實際版本驗證</span> 跨節點還原、VMID／MAC、storage mapping 與自動開機行為。</div></div></section>
-
-<section class="test-card"><div class="test-head"><span class="test-num">05</span><strong>穩定性觀察與收尾</strong></div><div class="test-body"><ol><li>還原 VM 至少觀察 30 分鐘，記錄服務 health、CPU、RAM、磁碟 I/O 與應用 log。</li><li>執行 read-only 測試；經核准後才做可回復的寫入／讀回驗證。</li><li>確認原 VM 與還原 VM 沒有重複 IP、排程、外部連線或 production automation。</li><li>保存 APM／PVE job log、前後狀態、截圖、影片與 checksum。</li><li>依核准結果保留、關機或清理還原 VM。</li></ol><div class="test-result"><strong>Pass</strong>服務穩定，Cluster／Ceph 回到基線，證據與副本處置完整。</div></div></section>
-
-<h2 id="videos">6. 已提供的演練影片</h2>
+影片可幫助理解操作畫面；正式驗收仍要把時間碼、日誌與結果表對起來。
 
 <div class="video-grid"><article class="video-card"><div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/N4TgeOz_Oz4" title="Synology DP340 備份 PVE Cluster 演練影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><h3>備份演練</h3><p><a href="https://youtu.be/N4TgeOz_Oz4" target="_blank" rel="noopener noreferrer">在 YouTube 開啟備份影片</a></p></article><article class="video-card"><div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/6kksyT5lLUw" title="Synology DP340 還原 PVE Cluster 演練影片" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div><h3>還原演練</h3><p><a href="https://youtu.be/6kksyT5lLUw" target="_blank" rel="noopener noreferrer">在 YouTube 開啟還原影片</a></p></article></div>
 
-<div class="kb-info"><strong>證據判讀：</strong>影片僅是演練佐證，正式 Pass／Fail 仍須配合 APM／PVE job log、還原點、RPO／RTO、Corosync／Ceph 前後狀態與測試資料 checksum。</div>
+<a id="signoff"></a>
+## 結果表：留給每次演練填寫
 
-<h2 id="signoff">7. 結果與 Sign-off</h2>
+| 項目 | 結果 | 證據／時間碼 |
+| --- | --- | --- |
+| 完整備份 | 待填 | 待填 |
+| 變更後備份與資料對照 | 待填 | 待填 |
+| 原節點還原 | 待填 | 待填 |
+| 其他節點還原 | 待填 | 待填 |
+| 開機、檔案、應用測試 | 待填 | 待填 |
+| 30 分鐘穩定觀察 | 待填 | 待填 |
+| 測試副本收尾 | 待填 | 待填 |
+| RTO／RPO 目標與結果 | 待填 | 待填 |
 
-本節用於記錄 DP340 × PVE Cluster 備份與還原演練的最終結果、實測數據、證據與正式簽核。
-正式 Pass／Fail 判定須配合 APM／PVE Job Log、還原點、RPO／RTO、Cluster／Ceph 狀態及測試資料 checksum 綜合確認。
+| 紀錄欄位 | 內容 |
+| --- | --- |
+| 日期、執行人、覆核人 | 待填 |
+| VMID、來源快照、目標節點與儲存 | 待填 |
+| 備份／還原開始與結束時間 | 待填 |
+| 邏輯資料量、實際傳輸量與速率 | 待填，標明單位 |
+| 異常、影響與後續負責人 | 待填 |
+| 最終通過／部分通過／未通過 | 待填，寫明理由 |
 
-### 7.1 演練結果總表
+<a id="operations"></a>
+## 演練後怎麼維護？
 
-| ID | 演練項目 | 預期結果 | 實際結果 | 判定 |
-|---|---|---|---|---|
-| 01 | 完整備份／共網壓力 | 備份成功、還原點可用；Corosync／Ceph 維持穩定 | 待填 | ☐ Pass ☐ Fail |
-| 02 | 增量備份 | 新還原點可用，測試資料可辨識 | 待填 | ☐ Pass ☐ Fail |
-| 03 | 原機還原 | 原節點還原成功；VM_Pool、服務、checksum 正常 | 待填 | ☐ Pass ☐ Fail |
-| 04 | 異機還原 | 異節點還原成功；VM_Pool、服務、checksum 正常 | 待填 | ☐ Pass ☐ Fail |
-| 05 | 穩定性／收尾 | 服務穩定；Cluster／Ceph 正常；證據完整 | 待填 | ☐ Pass ☐ Fail |
+保留完整工作日誌與設定版本，定期抽樣還原；版本、網路或 storage 改動後重新檢查。測試副本要關閉、隔離或依核准範圍清除，確認正式 VM、HA、排程與網路都回到預期狀態。
 
-### 7.2 實測數據
-
-| ID | 項目 | 資料量 | 耗時 | RPO | Boot RTO | Service RTO | 峰值頻寬 |
-|---|---|---:|---:|---:|---:|---:|---:|
-| 01 | 完整備份 | `___` GB | `___` min | — | — | — | `___` Gbps |
-| 02 | 增量備份 | 異動 `___` GB／傳輸 `___` GB | `___` min | — | — | — | `___` Gbps |
-| 03 | 原機還原 | `___` GB | `___` min | `___` | `___` | `___` | `___` Gbps |
-| 04 | 異機還原 | `___` GB | `___` min | `___` | `___` | `___` | `___` Gbps |
-| 05 | 穩定性觀察 | — | `___` min | — | — | — | — |
-
-> **RPO**：所選還原點與故障／演練時間之間的資料時間差。  
-> **Boot RTO**：從還原作業開始至 VM 可正常開機的時間。  
-> **Service RTO**：從還原作業開始至應用服務可正常提供服務的時間。
-
-### 7.3 證據索引
-
-| 證據類型 | 檔名／位置 | Job ID／SHA-256 | 備註 |
-|---|---|---|---|
-| DP340 完整備份 Job | 待填 | Job ID：`______` | APM Job Log |
-| DP340 增量備份 Job | 待填 | Job ID：`______` | APM Job Log |
-| 原機還原 Job | 待填 | Job ID：`______` | Same-Node Restore |
-| 異機還原 Job | 待填 | Job ID：`______` | Cross-Node Restore |
-| PVE Cluster 前／後狀態 | 待填 | — | `pvecm status` |
-| Ceph 前／後狀態 | 待填 | — | `ceph -s` |
-| VM_Pool 狀態 | 待填 | — | `pvesm status` |
-| 測試資料 checksum | 待填 | SHA-256：`______` | 還原前後比對 |
-| 備份演練影片 | YouTube／原始錄影檔 | SHA-256：`______` | 完整／增量備份 |
-| 還原演練影片 | YouTube／原始錄影檔 | SHA-256：`______` | 原機／異機還原 |
-
-### 7.4 問題與改善追蹤
-
-若演練過程出現異常、條件式通過或後續改善事項，統一記錄於下表。
-
-| 問題編號 | 問題／異常說明 | 影響 | 改善措施 | 負責人 | 到期日 | 狀態 |
-|---|---|---|---|---|---|---|
-| ISSUE-01 | — | — | — | — | — | ☐ Open ☐ Closed |
-| ISSUE-02 | — | — | — | — | — | ☐ Open ☐ Closed |
-| ISSUE-03 | — | — | — | — | — | ☐ Open ☐ Closed |
-
-### 7.5 最終演練結論
-
-| 項目 | 結果 |
-|---|---|
-| 完整備份 | ☐ Pass ☐ Fail |
-| 增量備份 | ☐ Pass ☐ Fail |
-| 原機還原 | ☐ Pass ☐ Fail |
-| 異機還原 | ☐ Pass ☐ Fail |
-| Cluster／Corosync 穩定性 | ☐ Pass ☐ Fail |
-| Ceph／VM_Pool 穩定性 | ☐ Pass ☐ Fail |
-| 測試資料完整性 | ☐ Pass ☐ Fail |
-| 證據完整性 | ☐ Pass ☐ Fail |
-| **整體演練結果** | **☐ Pass ☐ Conditional Pass ☐ Fail** |
-
-**結論／備註：**
-
-> `______`
-
-### 7.6 演練資訊
-
-| 項目 | 紀錄 |
-|---|---|
-| 演練編號 | `______` |
-| 演練日期 | `______` |
-| Proxmox VE | 9.2.11 |
-| ActiveProtect Manager | 2.0-88101 |
-| DP340 韌體版本 | `______` |
-| 測試 VM | `______` |
-| 來源節點 | `______` |
-| 異機還原目標節點 | `______` |
-| Storage | Ceph VM_Pool |
-
-### 7.7 Sign-off
-
-| 簽核角色 | 姓名 | 簽核結果 | 日期 | 簽名／備註 |
-|---|---|---|---|---|
-| 執行人 | `______` | ☐ 完成 | `______` | `______` |
-| 系統負責人 | `______` | ☐ 同意 ☐ 條件式同意 | `______` | `______` |
-| 見證／核准人 | `______` | ☐ 核准 ☐ 不核准 | `______` | `______` |
-
-> **簽核原則：**  
-> 所有必要測試案例、實測數據與證據完成後，方可進行最終 Sign-off。  
-> 若存在未關閉的重大 ISSUE，應列為 Conditional Pass 或 Fail，並完成改善及重新驗證。
-
-<h2 id="operations">8. 演練後維運建議</h2>
-
-<div class="kb-grid"><div class="kb-card"><h3>離峰備份</h3><p>Data 與 Corosync 共網且無 QoS；大型備份建議安排於離峰時段，先維持一次一個 Node，再依實測結果調整排程與同時工作數。</p></div><div class="kb-card"><h3>VM 定期還原</h3><p>至少每季輪流對受 DP340 保護的 VM 執行原機／異機還原；重大升級後追加 smoke test。</p></div><div class="kb-card"><h3>LXC 另行保護</h3><p>截至目前 APM 2.0 不支援 Proxmox VE LXC Container 備份，請以 PBS、vzdump 或其他方案建立獨立保留政策與還原演練。</p></div><div class="kb-card"><h3>Ceph</h3><p>監控 VM_Pool 容量與 OSD 健康；演練不與 recovery、rebalance 或重大 scrub 同時執行。</p></div><div class="kb-card"><h3>網路改善</h3><p>若 Corosync 指標惡化，評估備份限速、QoS，或新增介面／網段分離 Data 與 Corosync。</p></div><div class="kb-card"><h3>版本與權限</h3><p>API Token 採專用帳號、密碼庫與輪替；每次記錄 APM、DP340 韌體、PVE、Ceph 與交換器設定。</p></div></div>
-
----
-
-**目前版本基線：** ActiveProtect Manager 2.0-88101、Proxmox VE 9.2.11；DP340 韌體版本待補記。
-
-**重要限制（截至 2026-09-04）：** APM 2.0 的 Proxmox VE 備份目前不支援 LXC Container；LXC 備份與還原需另行規劃。後續版本請以 Synology 官方規格為準。
-
-**文件狀態：** 待完成完整備份、原機還原、異機還原與證據留存後簽核。
-
-**敏感資訊：** 文件、錄影與截圖不得包含 Token Secret、密碼、Private Key、Cookie、完整憑證或可重用 Session。
+[Ubuntu 從 PBS 還原的實測紀錄](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ubuntu-vm112-pbs-disaster-recovery/)示範了如何把「還原成功」和「完整應用驗收」分開描述。
