@@ -4,18 +4,18 @@ title: "把三台 PVE 的日誌集中到 Graylog"
 date: 2026-09-17
 categories: [PVE, Graylog, Syslog]
 permalink: /docs/pve/proxmox-graylog-syslog-pipeline-sop/
-last_modified_at: 2026-09-18
+last_modified_at: 2026-09-22
 ---
 
 # 把三台 PVE 的日誌集中到 Graylog
 
 日誌分散在三台主機時，要查「哪台出錯、哪個工作失敗」得逐台找。本次把 node10、node11、node12 的日誌送進 Graylog，再替訊息加上來源、類型與任務狀態，做成任務監控看板，並接上 PVE 任務失敗 Email 警報。
 
-> 紀錄期間：2026-09-17～2026-09-18；Graylog 7.1.9，部署於 LXC。三台來源、既有任務看板、Task Failed 規則模擬與 Gmail 實際收取測試信已有驗證；Event Definition 已啟用並儲存通知綁定。尚未完成「新的 PVE 故障 → 自動建立 Event → Email 收件」端到端測試。本文保留有紀錄的規則原始碼，沒有完整最新版規則匯出檔可供直接匯入。
+> 紀錄期間：2026-09-17～2026-09-22；Graylog 7.1.9，部署於 LXC。9/22 依 Proxmox VE 9.2.20 真實 log 修正 Task Failed，並以 logger 安全測試確認 Pipeline → Event Definition → Gmail 完整成功；多次驗證失敗加入 Group by source 後也完整驗證成功。PVE 服務異常維持已完成狀態。
 
-9/18 更新重點：完成「PVE 任務失敗警報」與「PVE 任務失敗通知」，排除 Gmail SMTP 驗證問題。本次文件更新只整理既有操作與測試結果，沒有重新操作 Graylog 或 PVE 主機。
+9/18 已完成告警設定與 Gmail SMTP 排錯；9/22 完成上述兩項改良與正式收信驗證。本次文件更新依操作紀錄整理，沒有重新操作 Graylog 或 PVE，也沒有為測試破壞 VM／CT／Ceph。本文仍不是最新版全部規則的匯出檔。
 
-> **2026-09-18 後續實測：**服務異常告警已 matched 並收到 Gmail；多次驗證失敗已建立且三筆測試訊息入庫，Last Matched 與真正告警信仍待確認。請接續閱讀 [PVE 告警實測紀錄](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-pve-alert-validation-2026-09-18/)。
+完整設定、真實 log 證據與 logger 安全測試分別記錄於 [PVE 告警實測紀錄（更新至 2026-09-22）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-pve-alert-validation-2026-09-18/)。
 
 ## 先認識四個名詞
 
@@ -39,7 +39,7 @@ last_modified_at: 2026-09-18
        →「PVE 任務失敗通知」→ Gmail
 ~~~
 
-最後三段是已儲存的告警設定。規則模擬和測試信各自成功，不代表已用一筆新的真實失敗事件跑完整條鏈路。
+9/22 已以新的 logger 合成訊息驗證最後三段與正式 Gmail 收信；這是告警鏈路驗收，不是真實 VM／CT 故障操作。
 
 ## 1. 先讓三台日誌都進得來
 
@@ -162,7 +162,7 @@ end
 | PVE - Task Started | 分類任務開始，與結束結果分開 |
 | PVE - Task Success | 分類成功結果 |
 | PVE - Task Warning | 分類警告結果 |
-| PVE - Task Failed | 已模擬驗證產生 pve_event_type=task_failed、pve_task_status=failed |
+| PVE - Task Failed | 9/22 修正非 `: OK` 的結束訊息分類；安全測試完整告警鏈路成功 |
 | PVE-Authentication Events | 分類認證事件；不等於已建立認證告警 |
 | Infrastructure - System Errors | 一般錯誤分類；不能取代任務結果判讀 |
 
@@ -211,14 +211,14 @@ message:"end task" AND message:failed
 
 這筆舊訊息已有 device_type=pve、event_category=system_error、pve_cluster=PVE-Cluster，但沒有 pve_event_type。它早於本次任務分類規則；新增 Pipeline 規則不會自動替已寫入索引的歷史訊息補欄位。因此沒有為了這筆舊資料改壞既有規則，也沒有把告警的正式搜尋範圍留在 7 天。
 
-以下是當時核對並通過 Rule Simulation 的 `PVE - Task Failed`：
+9/18 舊規則要求 `end task UPID:` 且包含 `failed:`，僅通過該歷史樣本模擬，會漏掉 PVE 9.2.20 的 `migration aborted`、`CT is locked (backup)`、`unable to get PID for CT ... (not running?)`。以下為 **2026-09-22 修正後的最終 `PVE - Task Failed`**：
 
 ~~~text
 rule "PVE - Task Failed"
 when
     has_field("message") &&
     contains(to_string($message.message), "end task UPID:") &&
-    contains(to_string($message.message), "failed:")
+    !ends_with(to_string($message.message), ": OK")
 then
     set_field("pve_event_type", "task_failed");
     set_field("pve_task_status", "failed");
@@ -231,7 +231,19 @@ Simulation 使用這筆真實失敗格式：
 node10 pvedaemon[4129114]: <root@pam> end task UPID:node10:00022D58:0191F4A8:6AAA40A2:vncproxy:100:root@pam: command '/usr/bin/termproxy' failed: exit code 1
 ~~~
 
-結果確實產生 `pve_event_type = task_failed` 與 `pve_task_status = failed`，因此規則保留不動。這項驗證證明此樣本可被規則辨識；不代表所有 PVE 失敗格式都已覆蓋，也不是新訊息通過完整 Stream／Pipeline／Alert 的驗收。
+結果確實產生 `pve_event_type = task_failed` 與 `pve_task_status = failed`，因此 9/18 當時未修改規則；9/22 已依新證據修正。這項驗證證明此樣本可被規則辨識；不代表所有 PVE 失敗格式都已覆蓋，也不是新訊息通過完整 Stream／Pipeline／Alert 的驗收。
+
+### 2026-09-22 修正理由與驗收
+
+真實 PVE 9.2.20 成功 Task 以 `: OK` 結尾；`PVE - Task Success` 已使用 `end task UPID:` 加上 `ends_with(..., ": OK")`，不需修改。Failed 改為所有包含 `end task UPID:` 且不是 `: OK` 結尾的訊息，避免維護一長串錯誤字串並解決漏報。
+
+node10 的安全測試使用以下合成訊息，沒有實際操作 VM／CT 999：
+
+~~~bash
+logger -p daemon.warning "end task UPID:node10:TEST:TEST:TEST:vzstart:999:root@pam: GRAYLOG-PVE-TASK-FAILED-TEST"
+~~~
+
+已確認 `device_type=pve`、`event_category=pve_task`、`pve_cluster=PVE-Cluster`、`pve_event_type=task_failed`、`pve_task_name=vzstart`、`pve_task_node=node10`、`pve_task_status=failed`、`pve_task_user=root@pam`、`pve_vmid=999`，並 Routed into streams `Infrastructure Syslog`。Event Definition Last Matched 更新為幾分鐘前，Gmail 正式告警已收到。真實 log 是修正依據，logger 是鏈路安全測試，沒有為測試破壞 VM／CT／Ceph。
 
 ## 5. 看板：先看整體，再看異常明細
 
@@ -282,7 +294,7 @@ pve_task_status:warning OR pve_task_status:failed
 
 當時填入的 Event Summary Template 是 `PVE 任務失敗：${source.message}`。**尚未用實際 Event 驗證這個變數能否帶出原始訊息**，因此不能宣稱信件已完整顯示故障原因；這項列入後續改善。
 
-建立與綁定完成時，Last Matched 仍是 Never，當時沒有新的失敗命中紀錄。這本身不能用來判定規則壞掉，也不能當作自動告警已通過的證據。後續須觀察一筆新事件是否落入搜尋時間範圍並產生通知。
+建立與綁定完成時，Last Matched 仍是 Never，當時沒有新的失敗命中紀錄。這本身不能用來判定規則壞掉，也不能當作自動告警已通過的證據。9/22 已以新 logger 測試訊息確認 Last Matched 更新與正式 Gmail 收信。
 
 ## 7. Gmail SMTP：從連線查到帳號驗證
 
@@ -358,25 +370,27 @@ Grace Period 設為 5 分鐘，用於限制重複通知；實際連續事件下�
 
 ## 目前完成與待辦
 
-目前已完成第一種 PVE 告警的設定與分段驗證，可以從這裡接下一階段；完整監控系統尚未驗收完成。
+截至 2026-09-22，三項核心告警已完成所述測試範圍；其他監控項目與通知明細仍待完善。
 
 | 範圍 | 目前進度／驗證界線 |
 | --- | --- |
 | Syslog／Stream | 三台 PVE 接收與 Infrastructure Syslog 已驗證 |
 | Pipeline | 主機、服務、任務、認證、系統錯誤分類已建立；既有五種服務事件測試與任務欄位紀錄保留 |
-| Task Failed | 歷史真實失敗已找到，Rule Simulation 產生兩個失敗欄位；未回填歷史索引 |
+| PVE 任務失敗警報 | 完整驗證成功：PVE 9.2.20 Rule 修正後，logger → Pipeline → Event → Gmail；未回填歷史索引 |
+| PVE 多次驗證失敗 | 完整驗證成功：Group by source，node10 三筆 → Last Matched → 正式 Gmail |
+| PVE 服務異常 | 維持已完成（9/18 Pipeline、Event、Gmail） |
 | Event Definition | PVE 任務失敗警報已啟用，每 5 分鐘查最近 5 分鐘，High |
-| Email | Gmail AUTH 成功且 Graylog 測試信實際收到 |
+| Email | Gmail AUTH、測試信及上述三項正式告警均已確認 |
 | 通知綁定 | 已儲存，Grace Period 5 minutes、Message Backlog 0 |
 | Dashboard | 既有任務看板八個 Widget 的紀錄保留；整體 Infrastructure Dashboard 待完善 |
-| 端到端測試 | 新故障經 Syslog、Pipeline、Event 到自動 Email 收件，仍待驗證 |
+| 端到端測試 | 9/22 logger 安全測試經 Syslog、Pipeline、Event 到正式 Gmail 已完成；不等同真實 VM／CT 故障操作 |
 
 後續依序處理：
 
-1. **其他重要 PVE alerts**：挑選需要人處理的服務異常、認證異常等事件；不用把每個分類都變成 Email。
+1. **其他重要 PVE alerts**：接續評估 Ceph、Cluster／Corosync、儲存空間、節點異常等事件；不用把每個分類都變成 Email。
 2. **改善 Email event details**：驗證 Summary Template，補齊 node、task、VM／CT ID、UPID 與錯誤內容；評估 Custom Fields、Backlog 與模板後再實測。
 3. **完善 Dashboard**：沿用既有任務看板，核對失敗、警告、啟動數，再加入節點、服務、登入等統計與異常明細。
-4. **端到端故障測試**：另行安排安全、可控制的測試事件，逐段記錄原始訊息、分類欄位、Event、實際收件時間，以及 Grace Period 下的重複通知情形。
+4. **後續測試範圍**：現有安全測試鏈路已完成；其他新增告警另行安排安全、可控制的測試事件，逐段記錄原始訊息、分類欄位、Event、實際收件時間，以及 Grace Period 下的重複通知情形。
 
 畫面 0 errors/s 只表示當下沒有顯示處理錯誤，不取代欄位抽查或告警測試。Synology、TP-Link 後續整合仍未列入完成範圍。
 

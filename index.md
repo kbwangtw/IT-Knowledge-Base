@@ -40,8 +40,8 @@ last_modified_at: 2026-09-22
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
-| [把三台 PVE 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop/) | 任務失敗告警已設定、Gmail 測試信已收到；完整故障觸發待驗證 |
-| [PVE 告警實測：服務異常已收信，驗證失敗待確認](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 2026-09-18 設定、測試命令與下次接續點 |
+| [把三台 PVE 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop/) | 9/22 修正 PVE 9.2.20 Task Failed；安全測試至正式 Gmail 已完成 |
+| [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 9/22 Group by source、Task Failed 修正、三項告警完整驗證 |
 | [PVE 一直被嘗試登入：確認 Fail2Ban 真的有擋](docs/pve/pve-cluster-fail2ban-hardening/) | 逐層核對日誌、封鎖時間與封包命中 |
 
 ## 硬體擴充與安裝
@@ -53,3 +53,5 @@ last_modified_at: 2026-09-22
 先看文章開頭的版本、日期和驗證範圍，再核對自己的節點、位址、VMID 與儲存名稱。指令是案例的一部分，執行前要知道它會查詢、改設定，還是停止服務。
 
 文章不公開密碼、私鑰或 token。原始版本與修改紀錄保留在 [GitHub 倉庫](https://github.com/kbwangtw/IT-Knowledge-Base)。
+
+2026-09-22 Graylog／PVE 更新：多次驗證失敗加入 Group by source，各節點獨立計數；Task Failed 改以非 : OK 的任務結束訊息判定。兩項均經安全測試確認 Event 與正式 Gmail；服務異常維持已完成。真實 log 證據與 logger 測試分開記錄。

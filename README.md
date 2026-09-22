@@ -14,7 +14,7 @@
 - [ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？](docs/pve/proxcenter-ceph-rolling-update.md)
 - [從 PBS 還原 ProxCenter：先複製一台，再確認能用](docs/pve/proxcenter-pbs-restore-dr-runbook.md)
 - [把三台 PVE 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop.md)
-- [PVE 告警實測：服務異常已收信，驗證失敗待確認](docs/pve/graylog-pve-alert-validation-2026-09-18.md)
+- [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18.md)
 - [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification.md)
 - [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](docs/pve/pve-cluster-fail2ban-hardening.md)
 - [用 DP340 備份 PVE：先把還原測試安排好](docs/pve/synology-dp340-pve-cluster-validation.md)
@@ -32,4 +32,6 @@
 
 Graylog 的可下載 Markdown 與文章同步；既有 Word 附件保留為歷史版本。網站使用 Markdown 維護，修改紀錄可從 Git 歷史追查。
 
-2026-09-18 補記 Graylog／PVE 任務失敗告警：已完成 Pipeline 失敗樣本模擬、Event Definition、Gmail SMTP 排錯與實際測試收信，並儲存通知綁定。新的 PVE 故障觸發自動 Email、其他重要告警、信件明細與 Infrastructure Dashboard 仍待後續驗證／完善。
+2026-09-18 補記 Graylog／PVE 任務失敗告警：已完成 Pipeline 失敗樣本模擬、Event Definition、Gmail SMTP 排錯與實際測試收信，並儲存通知綁定。當時完整鏈路尚待驗證；9/22 已完成 logger 安全測試觸發正式 Email。其他重要告警、信件明細與 Infrastructure Dashboard 仍待完善。
+
+2026-09-22 Graylog／PVE 更新：多次驗證失敗加入 Group by source，各節點獨立計數；Task Failed 改以非 : OK 的任務結束訊息判定。兩項均經安全測試確認 Event 與正式 Gmail；服務異常維持已完成。真實 log 證據與 logger 測試分開記錄。
