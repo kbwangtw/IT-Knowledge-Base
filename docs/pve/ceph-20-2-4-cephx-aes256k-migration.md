@@ -2,7 +2,7 @@
 layout: default
 title: "Ceph 換金鑰：為什麼 HEALTH_OK 還不夠？"
 date: 2026-09-14
-last_modified_at: 2026-09-18
+last_modified_at: 2026-09-22
 categories: [PVE, Ceph, Security]
 ---
 
@@ -10,15 +10,18 @@ categories: [PVE, Ceph, Security]
 
 這篇記錄 Ceph 20.2.4 的 CephX 金鑰遷移，以及後來發現的漏項。最重要的經驗是：**MON 接受新金鑰，不代表每個 OSD、PVE storage 和 CephFS 掛載都已拿到同一份有效副本。**
 
-這是一份有後續更正的歷史紀錄，不是一套可直接貼上執行的遷移腳本。尤其 OSD 的持久化金鑰來源與重開驗證還沒完成，不能以目前 HEALTH_OK 宣告全部結案。
+這是一份有後續更正的歷史紀錄，不是一套可直接貼上執行的遷移腳本。9/22 已修復 BlueStore 持久化金鑰，三顆 OSD 均 MON = LOCAL = BLUESTORE，解除 noout 後 HEALTH_OK；修復後整機重開及新備份／還原仍須另行驗證。
 
-## 先看三個日期，避免把結果混在一起
+> 9/22 更新：[BlueStore 根因、修復與防復發 SOP](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/)。下文保留 9/14～18 當時紀錄；「當時待查」不代表現在仍未查 label。
+
+## 先看各次事件日期，避免把結果混在一起
 
 | 日期 | 發生什麼 | 當時能確認到哪裡 |
 | --- | --- | --- |
 | 2026-09-14 | 遷移至 AES256K-only | Ceph 健康、三台管理 CLI 可用；漏驗 storage 副本 |
 | 2026-09-15 | PVE RBD 仍用舊 key，備份失敗 | 同步 VM_Pool.keyring 後，三台 active，VM／LXC 備份通過 |
 | 2026-09-17～18 | 重開後三顆 OSD 未上線，CephFS 也有金鑰差異 | 修復本機 OSD keyring 與 CephFS secret 後服務恢復；label 持久性待查 |
+| 2026-09-21～22 | 重開再次觸發故障；查明並修復 BlueStore osd_key | osd.0／2 存成路徑，osd.1 與 MON／local 不同；三顆修正後三層一致，HEALTH_OK |
 
 第三段的完整證據在[OSD／CephFS 復原紀錄](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-osd-cephfs-keyring-recovery/)。不能把 9/15 的備份成功當成 9/18 事故後已重新測過所有備份。
 
@@ -155,11 +158,11 @@ ceph-conf -n client.crash --lookup keyring
 
 舊文章曾把 keyring 檔案路徑當成 set-label-key 的 -v 值。**這段範例已撤下，不應沿用。** 官方工具說明中的 -v 是要儲存的值，不會替你讀取那個檔案並抽出金鑰。
 
-9/17～18 事故中，node10、node12 的 key 欄位確實出現路徑而非金鑰；node11 則是本機 key 與 MON 不同。這與舊範例的錯誤形態相符，但沒有取得完整操作歷史和實際 label，不能直接宣布原始肇因已證實。
+9/17～18 事故中，node10、node12 的 key 欄位確實出現路徑而非金鑰；node11 則是本機 key 與 MON 不同。當時未取得完整操作歷史和實際 label，因此只列為待查。9/22 已查明 osd.0／osd.2 的 BlueStore osd_key 確實保存 keyring 路徑，與 9/14 錯誤用法吻合；osd.1 的 BlueStore key 則與 MON／local 不一致。
 
-這次只修復本機 OSD keyring，**未查驗或寫入 BlueStore label，未做重開持久性測試**。後續必須核對實際裝置、版本、label 的 osd_key 與 ceph-volume 啟用流程，避免下次啟用又帶回錯誤內容。
+9/18 只修復本機 OSD keyring，當時未查驗或寫入 BlueStore label。9/22 已在逐顆停止 OSD 後，用經 MON 比對一致的 local key 修正 label，再啟動及驗證；三顆最終三層一致。修復後整機重開測試仍未列入已驗證結果。
 
-完整 label 可能含 secret，應只在本機受控環境比較。若需修改，另安排單顆 OSD 維護與備份；這裡不提供未經本環境驗證的通用寫入命令。
+完整 label 可能含 secret，應只在本機受控環境比較。已驗證的逐顆修復方式與 normalized hash 範例見 [9/22 修復紀錄](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/)。三層已一致時不需再寫 label。
 
 ## emergency admin 應該保留到什麼時候？
 
@@ -180,7 +183,7 @@ OSD 3 up / 3 in
 PG 97 active+clean
 ~~~
 
-9/18 再次恢復服務，三台 storage 正常，PVE 問號消失。這些支持目前服務恢復，卻不取代持久化金鑰、重開、新備份與應用還原驗證。
+9/18 再次恢復服務，三台 storage 正常，PVE 問號消失。9/22 進一步完成持久化金鑰修復、OSD 啟動與三層一致驗證；這些仍不取代修復後整機重開、新備份與應用還原驗證。
 
 下次維護的檢查重點是：盤點所有副本、只更動確認的對象、逐個驗證、出錯即停，以及保留可追溯結果。不要只為了讓 HEALTH_WARN 消失而加快切換。
 

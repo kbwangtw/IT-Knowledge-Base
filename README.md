@@ -6,6 +6,7 @@
 
 ## 全部文章
 
+- [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22.md)
 - [ML30 Gen11 擴充紀錄：哪些零件裝好了？哪些還要測？](docs/hardware/hpe/ml30-gen11/index.md)
 - [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP.md)
 - [Ceph 換金鑰：為什麼 HEALTH_OK 還不夠？](docs/pve/ceph-20-2-4-cephx-aes256k-migration.md)
@@ -22,6 +23,8 @@
 - [用 DP340 備份 Google Workspace：先授權，再逐項驗證](docs/synology/dp340-google-workspace-apm20-sop.md)
 
 ## 閱讀與維護方式
+
+2026-09-22 補記 Ceph BlueStore osd_key 根因、逐顆修復、三層 hash 一致與最終 HEALTH_OK，並更新遷移／復原舊文的後續狀態。修復後整機重開、新備份／還原與已曝光 OSD.1 key 的獨立輪替仍須另行驗證。
 
 原有 13 篇文章於 2026-09-18 完成白話整理，保留既有網址、圖片與影片。每篇的原始日期、環境版本、實測結果與待驗證項目分開呈現；演練計畫不等於完成報告。
 

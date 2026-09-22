@@ -2,7 +2,7 @@
 layout: default
 title: "PVE 出現問號、儲存變成 0：這次怎麼救回來？"
 date: 2026-09-18
-last_modified_at: 2026-09-18
+last_modified_at: 2026-09-22
 categories: [PVE, Ceph, Troubleshooting]
 permalink: /docs/pve/ceph-osd-cephfs-keyring-recovery/
 ---
@@ -11,7 +11,7 @@ permalink: /docs/pve/ceph-osd-cephfs-keyring-recovery/
 
 這次故障分成兩段：先讓三顆 OSD 重新通過認證，恢復 Ceph 儲存；再修正 CephFS 掛載使用的另一份金鑰。三台儲存最後都恢復 active，使用者確認問號消失。
 
-**服務已恢復；但造成錯誤金鑰的最早操作，以及下一次重開是否會再帶回錯誤內容，仍待確認。**
+**本篇記錄 9/17～18 的服務恢復；9/22 已另行查明並修復 BlueStore 持久化金鑰問題。** 詳見 [9/21～22 根因與修復結案](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/)。修復後整機重開及新備份／還原仍須另行驗證。
 
 > 事件日期：2026-09-17～18（UTC+8）。依實際終端輸出整理；未公開 IP、FSID、金鑰、完整 UPID 或原始截圖。node10～node12 與 OSD 編號保留作為案例對照。本文記錄的是本次服務恢復，不代表已完成重開機持久性或所有應用程式的還原測試。
 
@@ -225,9 +225,9 @@ fi
 
 HEALTH_OK 是叢集健康證據，不等於所有 VM 的應用程式資料都做過還原驗證。
 
-## 還沒結案的部分：下次重開會不會復發？
+## 9/18 留下的持久化問題：9/22 已補上根因與修復
 
-**目前服務已恢復，但持久性仍有一個待查項目。**
+**以下保留 9/18 當時的證據邊界；9/22 已完成 label 查證與修復。**
 
 整理文章時，在既有 [CephX 遷移紀錄](https://github.com/kbwangtw/IT-Knowledge-Base/blob/main/docs/pve/ceph-20-2-4-cephx-aes256k-migration.md) 發現，舊範例將 keyring 檔案路徑當成 BlueStore set-label-key 的 -v 值。官方工具文件說明 -v 是要儲存的值，並不是讀檔參數。這個舊範例已撤下並標示更正。[官方參數說明](https://docs.ceph.com/en/latest/man/8/ceph-bluestore-tool/)
 
@@ -235,10 +235,12 @@ HEALTH_OK 是叢集健康證據，不等於所有 VM 的應用程式資料都做
 
 後續應核對實際裝置、部署版本、BlueStore label 的 osd_key 與 OSD 啟用流程，判斷是否可能在下一次啟用時重新帶入錯誤金鑰。相關讀取結果可能含 secret，應只在本機比對，不公開完整 label。若需修改 label，應另訂維護計畫，停止對應 OSD 並完成裝置與備份確認；本次沒有做 label 寫入，也沒有做重開機驗證。
 
-因此結論應分成兩句：
+9/18 當時的結論分成兩句：
 
 - **已證實且修復：**本機 OSD 金鑰格式／內容問題，以及 CephFS 掛載金鑰不一致。
 - **尚未證實：**最早造成金鑰變更的操作，以及磁碟持久化來源是否也需要修正。
+
+9/22 後續已確認：9/14 的 set-label-key -v 路徑誤用造成 osd.0／osd.2 label 保存路徑，osd.1 則保存與 MON／local 不同的 key。逐顆停止後以正確 local key 修正，三顆 MON = LOCAL = BLUESTORE；最後 unset noout、HEALTH_OK、3 up／3 in、97 PG 具有 active+clean 狀態。這是新增的後續證據，不改寫 9/18 的操作範圍。完整流程與尚待驗證項目見 [9/22 紀錄](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/)。
 
 ## 把這次經驗變成下次的檢查表
 
