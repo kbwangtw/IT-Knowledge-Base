@@ -274,6 +274,15 @@ getent passwd | grep -E 'wazuh|filebeat'
 getent group  | grep -E 'wazuh|filebeat'
 ~~~
 
+本案結果：其他目錄都已不存在，只剩 `/var/log/filebeat`、`/var/log/wazuh-indexer`，已用 `rm -rf` 清除。另留下系統帳號 `wazuh-indexer`（UID 999、GID 990、shell 為 nologin）。確認沒有檔案仍屬於它之後再刪除：
+
+~~~bash
+find / -xdev -uid 999 2>/dev/null | head     # -xdev：不跨掛載點，避免掃到 /etc/pve、CephFS
+ls -ld /home/wazuh-indexer 2>&1
+userdel wazuh-indexer                        # 同名主群組通常會一併刪除
+getent passwd wazuh-indexer; getent group wazuh-indexer   # 應無輸出
+~~~
+
 ## 2. 下載 Ubuntu 22.04 範本
 
 在任一節點執行（範本存在 `local` 這類儲存，若是節點本機儲存，建立 CT 時要選同一節點）：
