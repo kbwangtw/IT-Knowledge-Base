@@ -105,14 +105,27 @@ echo never > /sys/kernel/mm/transparent_hugepage/enabled
 
 ## 3. 安裝 Wazuh（All-in-One）
 
-回到容器內執行。官方提供一鍵安裝腳本，會依序裝好 Indexer、Manager、Dashboard 並自動產生憑證：
+回到容器內執行。官方提供一鍵安裝腳本，會依序裝好 Indexer、Manager、Dashboard 並自動產生憑證。
+
+**先到 [Quickstart 頁面](https://documentation.wazuh.com/current/quickstart.html) 複製當下版本的實際指令，不要直接照抄本文寫死的網址**——下載路徑會隨發版更動（例如版本號從 `4.x` 換成實際的 `4.9`、`4.11` 之類），本文的網址只是示範格式，照抄舊網址很可能抓到 404 或空物件的錯誤頁面。
 
 ~~~bash
-curl -sO https://packages.wazuh.com/4.x/wazuh-install.sh
-bash wazuh-install.sh -a
+# 範例格式，實際網址請以 Quickstart 頁面當下顯示的為準
+curl -fsSO https://packages.wazuh.com/<版本>/wazuh-install.sh
 ~~~
 
-安裝過程請對照 [Quickstart 頁面](https://documentation.wazuh.com/current/quickstart.html) 上當下版本的實際指令（URL 中的版本路徑會隨發版更新），不要直接照抄本文的網址而不核對。
+`-f` 這個參數很重要：網址錯誤時 curl 會直接回報失敗，而不是把伺服器回傳的錯誤頁面（例如 S3 的 `NoSuchKey` XML）原封不動存成 `wazuh-install.sh`，讓你誤以為下載成功、實際執行時才發現是假檔案。
+
+下載完先確認拿到的真的是 script，再執行：
+
+~~~bash
+head -3 wazuh-install.sh
+# 應該看到 #!/bin/bash 或類似 shebang，
+# 如果看到 <?xml version="1.0" ...> 代表網址錯了，回頭核對 Quickstart 頁面
+
+chmod +x wazuh-install.sh
+./wazuh-install.sh -a
+~~~
 
 安裝完成後畫面會顯示 `admin` 帳號的密碼，**只會顯示一次**，務必立刻記下來。同一層目錄會產生 `wazuh-install-files.tar.gz`，裡面含有憑證與密碼記錄檔，這個檔案要備份到容器外面（例如存到 PBS 備份範圍或另外複製一份），容器如果重建就拿不回來了。之後忘記密碼可以用官方的 `wazuh-passwords-tool.sh` 重設，但前提是 `wazuh-install-files.tar.gz` 還在。
 
@@ -171,6 +184,8 @@ https://<容器IP>/
 | Dashboard 打不開但服務都是 running | 防火牆沒放行 443，或容器網路設定問題 | 從容器內 `curl -k https://localhost` 先排除服務本身問題，再往外查防火牆 |
 | Agent 顯示 Never connected | Port 1514/1515 沒開，或 Agent 端填錯 Manager IP | 在 Manager 端 `netstat -lntp \| grep -E '1514\|1515'` 確認有在監聽 |
 | 密碼忘記、找不到 `wazuh-install-files.tar.gz` | 安裝當下沒備份這個檔案 | 只能靠官方重設流程處理，之後務必把這個檔案納入備份範圍 |
+| `curl -sO` 下載回來的 `wazuh-install.sh` 執行時出現 `syntax error`，內容是 `<?xml version="1.0"...>` | 網址路徑錯誤（例如版本號沒改對），伺服器回傳 S3 錯誤頁面，但 `-s` 靜音模式讓 curl 照樣存檔，沒有提示失敗 | `head -3 wazuh-install.sh` 檢查是不是 shebang 開頭；改用 `curl -fsSO`，並到 [Quickstart 頁面](https://documentation.wazuh.com/current/quickstart.html) 重新複製當下版本的正確網址 |
+| 下指令變成 `-bash: wazuh-install.sh: command not found` | 目前目錄沒有在 `PATH` 裡，直接打檔名執行不了 | 加 `./` 前綴執行（`./wazuh-install.sh -a`），或用 `bash wazuh-install.sh -a` |
 
 ## 後續建議
 
