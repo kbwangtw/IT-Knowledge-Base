@@ -21,7 +21,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 1 | PVE 節點設定 `vm.max_map_count` | 已完成 | 2026-09-29：三台已移除誤寫入的 99-wazuh.conf；值皆 ≥ 262144 |
 | 1b | 清除 node10 主機上的 Wazuh | 待決定 | 2026-09-29：node10 主機上跑著完整 Wazuh 4.14.8 All-in-one（見 1-2）；node11、node12 乾淨 |
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
-| 3 | 建立 LXC | 待核對 | 2026-09-29：已建立 CT 112（Ubuntu 22.04，swap 512 MiB）；`pct config 112` 核對中 |
+| 3 | 建立 LXC | 修正中 | 2026-09-29：CT 112 位於 node12；缺 nesting=1、onboot=0、rootfs 60G，需調整（見 3-4） |
 | 4 | 容器內基本設定 | 待做 | |
 | 5 | 安裝 Wazuh All-in-one | 待做 | |
 | 6 | 驗證服務與登入 Dashboard | 待做 | |
@@ -256,6 +256,27 @@ pct config <CTID>      # 核對 cores、memory、swap、rootfs、net0、unprivil
 pct start <CTID>
 pct status <CTID>
 pct enter <CTID>       # 進入容器
+~~~
+
+### 3-4 本案核對結果（2026-09-29，CT 112 位於 node12）
+
+| 設定行 | 實際 | 判定 |
+| --- | --- | --- |
+| `cores: 4`／`memory: 8192`／`swap: 512` | 同規劃 | ✅ |
+| `unprivileged: 1` | 1 | ✅ |
+| `rootfs: VM_Pool:vm-112-disk-0,size=60G` | 在 VM_Pool，但只有 60G | ⚠️ 加大到 80G |
+| `features` | **沒有這一行** | ❌ 缺 nesting=1 |
+| `onboot: 0` | 0 | ⚠️ 節點重開後不會自動啟動 |
+| `net0: ...firewall=1...` | 網卡已啟用 PVE Firewall | ℹ️ 若 CT 防火牆的 Input Policy 是 DROP，要先放行 443／1514／1515，否則 Agent 連不上 |
+| `ip6=auto` | 自動取得 IPv6 | ℹ️ 不影響；不用 IPv6 可改成不設定 |
+
+修正指令（在 node12 執行）：
+
+~~~bash
+pct set 112 --features nesting=1 --onboot 1
+pct resize 112 rootfs 80G        # 只能加大；可在開機狀態執行
+pct reboot 112                   # nesting 需重開才生效；未開機則用 pct start 112
+pct config 112 | grep -E 'features|onboot|rootfs'
 ~~~
 
 ## 4. 容器內基本設定
