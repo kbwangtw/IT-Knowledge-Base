@@ -22,7 +22,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 1b | 清除 node10 主機上的 Wazuh | 已實測 | 2026-09-29：node10 已完整移除 Wazuh 4.14.8，套件、服務、Port、套件庫皆清空，`vm.max_map_count` 回到 1048576；殘留日誌目錄與 wazuh-indexer 帳號也已清除（見 1-4） |
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
 | 3 | 建立 LXC | 已實測 | 2026-09-29：CT 112 位於 node12；已補 nesting=1、onboot=1，rootfs 線上加大為 80G（見 3-4） |
-| 4 | 容器內基本設定 | 進行中 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，確認 IPv6 連線中；時區由 UTC 改為 Asia/Taipei |
+| 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
 | 5 | 安裝 Wazuh All-in-one | 待做 | |
 | 6 | 驗證服務與登入 Dashboard | 待做 | |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 待做 | |
@@ -437,6 +437,8 @@ curl -6 -sS -m 10 -o /dev/null -w 'IPv6: %{http_code} %{time_total}s\n' https://
 - 環境沒有要用 IPv6：在 node12 移除 CT 的 IPv6 設定（`pct set 112 --net0 name=eth0,bridge=vmbr0,firewall=1,gw=<GW>,hwaddr=<原MAC>,ip=<IP>/24,type=veth`，保留原 MAC），再重開 CT。
 - 只想讓 apt 走 IPv4：`echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4`。
 
+本案決定：**略過 IPv6 測試**，直接安裝。若安裝時下載卡住或出現連線逾時，先套用上面「apt 強制 IPv4」的設定，再依第 5 節的失敗處理重跑。
+
 ### 4-2 時區與時間（2026-09-29 實測）
 
 | 項目 | 實際 | 判讀 |
@@ -468,9 +470,33 @@ Wazuh Indexer 內部以 UTC 儲存時間，Dashboard 依瀏覽器時區顯示；
 
 使用官方安裝助手。2026-09-29 從 Wazuh 套件庫取得的版本是 4.14.8，因此網址使用 `4.14`；日後請以 [Quickstart](https://documentation.wazuh.com/current/quickstart.html) 當下的版本號為準：
 
+**(1) 更新系統並安裝工具**
+
+~~~bash
+apt update && apt -y full-upgrade
+apt -y install curl gnupg apt-transport-https ca-certificates tmux
+~~~
+
+**(2) 在 tmux 裡執行安裝**：安裝要 10～20 分鐘，若 SSH／Console 中途斷線，前景程式會被中斷、留下裝到一半的元件。tmux 讓程式在斷線後繼續執行：
+
+~~~bash
+tmux new -s wazuh          # 開一個名為 wazuh 的工作階段
+# 斷線後重新連回：pct enter 112 → tmux attach -t wazuh
+~~~
+
+**(3) 下載並執行安裝助手**
+
 ~~~bash
 cd /root
 curl -sO https://packages.wazuh.com/4.14/wazuh-install.sh
+bash ./wazuh-install.sh -a
+~~~
+
+**(4) 安裝失敗時**：先看 `/var/log/wazuh-install.log` 最後幾十行找原因，修正後用安裝助手的移除選項清掉半套元件再重裝：
+
+~~~bash
+tail -50 /var/log/wazuh-install.log
+bash ./wazuh-install.sh -u      # 移除本機已安裝的 Wazuh 元件
 bash ./wazuh-install.sh -a
 ~~~
 
