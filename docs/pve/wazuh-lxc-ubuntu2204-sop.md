@@ -18,7 +18,8 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | # | 步驟 | 狀態 | 實測紀錄 |
 | --- | --- | --- | --- |
 | 0 | 規劃資源與網路 | 已實測 | 2026-09-29：PVE 9.2.20、kernel 7.0.14-19-pve、Quorate: Yes；rootfs 選 VM_Pool（RBD），CT ID 112 |
-| 1 | PVE 節點設定 `vm.max_map_count` | 調查中 | 2026-09-29：三台已移除誤寫入的 99-wazuh.conf；node10 另發現 wazuh-indexer 的 sysctl 檔，疑似主機曾安裝過 Wazuh，調查中（見 1-1） |
+| 1 | PVE 節點設定 `vm.max_map_count` | 已完成 | 2026-09-29：三台已移除誤寫入的 99-wazuh.conf；值皆 ≥ 262144 |
+| 1b | 清除 node10 主機上的 Wazuh | 待決定 | 2026-09-29：node10 主機上跑著完整 Wazuh 4.14.8 All-in-one（見 1-2）；node11、node12 乾淨 |
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
 | 3 | 建立 LXC | 待核對 | 2026-09-29：已建立 CT 112（Ubuntu 22.04，swap 512 MiB）；`pct config 112` 核對中 |
 | 4 | 容器內基本設定 | 待做 | |
@@ -146,7 +147,7 @@ sysctl vm.max_map_count
 
 `sysctl --system` 會把 `/etc`、`/run`、`/usr/lib` 各目錄的檔案合在一起**依檔名排序**，後載入的覆蓋前面的。`wazuh-indexer.conf` 以 w 開頭，排序在所有數字開頭的檔案之後，所以最後生效的是 262144。
 
-**待查：** PVE 主機上出現 wazuh-indexer 的設定檔，代表這台節點曾經安裝過（或安裝到一半）Wazuh Indexer。Wazuh 應該只裝在 CT 112 裡；主機上若有殘留服務，會占用記憶體，也會開啟不必要的 Port。確認方式：
+**進一步追查：** PVE 主機上出現 wazuh-indexer 的設定檔，代表這台節點可能安裝過 Wazuh。Wazuh 應該只裝在 CT 112 裡；主機上若有殘留服務，會占用記憶體，也會開啟不必要的 Port。確認方式：
 
 ~~~bash
 dpkg -l | grep -i wazuh
@@ -160,6 +161,27 @@ ls /etc/apt/sources.list.d/ | grep -i wazuh
 - 改 kernel 參數前，先用 `grep` 找出目前由哪些檔案設定、哪一個最後生效。
 - sysctl 設定檔依「檔名」排序，不是依「目錄」排序。
 - 主機上出現不認識的設定檔時，先查是哪個套件留下的（`dpkg -S <檔案路徑>`），不要直接刪除。
+
+### 1-2 發現：node10 主機上跑著完整的 Wazuh（2026-09-29）
+
+| 檢查 | node10 結果 |
+| --- | --- |
+| 套件 | wazuh-dashboard、wazuh-indexer、wazuh-manager，皆為 4.14.8-1 |
+| 服務 | 三個服務都 active (running) |
+| Port | 1514、1515、55000 對所有介面開放；9200、9300 只聽 127.0.0.1 |
+| 套件庫 | `/etc/apt/sources.list.d/wazuh.list` 存在 |
+| node11、node12 | 沒有 Wazuh 套件 |
+
+也就是說，node10 主機本身就是一台 Wazuh All-in-one。這解釋了 node10 的 `vm.max_map_count` 為何一開始就是 262144。
+
+**為什麼不該留在 PVE 主機上：**
+
+- Indexer 的 Java heap 會占用數 GB 記憶體，和 VM、Ceph OSD 搶資源。
+- 1514／1515／55000 對外開放，擴大主機的攻擊面。
+- Wazuh 套件庫留在主機上，日後 `apt full-upgrade` 可能連帶升級，影響 PVE 更新流程。
+- 無法享有 CT 的備份、快照、遷移與 HA。
+
+處理方式待決定並完成後補記。
 
 ## 2. 下載 Ubuntu 22.04 範本
 
@@ -261,11 +283,11 @@ timedatectl
 
 ## 5. 安裝 Wazuh All-in-one
 
-使用官方安裝助手。`4.x` 請換成 [Quickstart](https://documentation.wazuh.com/current/quickstart.html) 頁面上當下的版本號（例：`4.12`）：
+使用官方安裝助手。2026-09-29 從 Wazuh 套件庫取得的版本是 4.14.8，因此網址使用 `4.14`；日後請以 [Quickstart](https://documentation.wazuh.com/current/quickstart.html) 當下的版本號為準：
 
 ~~~bash
 cd /root
-curl -sO https://packages.wazuh.com/4.x/wazuh-install.sh
+curl -sO https://packages.wazuh.com/4.14/wazuh-install.sh
 bash ./wazuh-install.sh -a
 ~~~
 
