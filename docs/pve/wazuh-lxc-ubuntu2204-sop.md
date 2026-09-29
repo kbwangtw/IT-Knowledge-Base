@@ -18,7 +18,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | # | 步驟 | 狀態 | 實測紀錄 |
 | --- | --- | --- | --- |
 | 0 | 規劃資源與網路 | 已實測 | 2026-09-29：PVE 9.2.20、kernel 7.0.14-19-pve、Quorate: Yes；rootfs 選 VM_Pool（RBD），CT ID 112 |
-| 1 | PVE 節點設定 `vm.max_map_count` | 修正中 | 2026-09-29：三台原值已是 1048576，不需設定；誤寫入的 99-wazuh.conf 將值降為 262144，須移除並復原（見步驟 1 的實測紀錄） |
+| 1 | PVE 節點設定 `vm.max_map_count` | 調查中 | 2026-09-29：三台已移除誤寫入的 99-wazuh.conf；node10 另發現 wazuh-indexer 的 sysctl 檔，疑似主機曾安裝過 Wazuh，調查中（見 1-1） |
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
 | 3 | 建立 LXC | 待核對 | 2026-09-29：已建立 CT 112（Ubuntu 22.04，swap 512 MiB）；`pct config 112` 核對中 |
 | 4 | 容器內基本設定 | 待做 | |
@@ -132,17 +132,34 @@ sysctl vm.max_map_count
 
 ### 1-1 本案實測與修正（2026-09-29）
 
-三台節點原值都已是 `vm.max_map_count = 1048576`（`sysctl --system` 輸出可見由既有的系統設定檔提供），其實不需要設定。但當時直接執行了「寫入 99-wazuh.conf」，而 `99-` 開頭的檔案最後載入，會覆蓋前面的設定，結果三台都被**調小**成 262144。
+**第一次檢查：** node11、node12 原值是 `1048576`，node10 是 `262144`，全部都已經 ≥ 262144，其實不需要設定。但當時直接執行了「寫入 99-wazuh.conf」，node11、node12 因此被**調小**成 262144。
 
-修正方式（每台執行）：
+**移除 99-wazuh.conf 後，node10 仍是 262144。** 用 `grep` 查設定來源：
+
+| 設定檔 | 值 | 來源判讀 |
+| --- | --- | --- |
+| `/usr/lib/sysctl.d/10-pve-ct-inotify-limits.conf` | 262144 | PVE 內建 |
+| `/usr/lib/sysctl.d/50-default.conf` | 1048576 | systemd 內建 |
+| `/etc/sysctl.d/99-wazuh-indexer.conf` | 262144 | **Wazuh Indexer 留下的檔案** |
+| `/usr/lib/sysctl.d/wazuh-indexer.conf` | 262144 | **Wazuh Indexer 套件提供的檔案** |
+| `/etc/sysctl.d/99-wazuh.conf` | 262144 | 本次誤寫入，已移除 |
+
+`sysctl --system` 會把 `/etc`、`/run`、`/usr/lib` 各目錄的檔案合在一起**依檔名排序**，後載入的覆蓋前面的。`wazuh-indexer.conf` 以 w 開頭，排序在所有數字開頭的檔案之後，所以最後生效的是 262144。
+
+**待查：** PVE 主機上出現 wazuh-indexer 的設定檔，代表這台節點曾經安裝過（或安裝到一半）Wazuh Indexer。Wazuh 應該只裝在 CT 112 裡；主機上若有殘留服務，會占用記憶體，也會開啟不必要的 Port。確認方式：
 
 ~~~bash
-rm -f /etc/sysctl.d/99-wazuh.conf
-sysctl --system | grep max_map_count
-sysctl vm.max_map_count      # 應回到 1048576
+dpkg -l | grep -i wazuh
+systemctl list-units --all | grep -i wazuh
+ss -tlnp | grep -E ':9200|:9300|:1514|:1515|:55000|:443 '
+ls /etc/apt/sources.list.d/ | grep -i wazuh
 ~~~
 
-學到的事：sysctl 設定檔依檔名排序載入，後載入的覆蓋前面的。改 kernel 參數前，先用 `grep` 找出目前由哪個檔案設定。
+學到的事：
+
+- 改 kernel 參數前，先用 `grep` 找出目前由哪些檔案設定、哪一個最後生效。
+- sysctl 設定檔依「檔名」排序，不是依「目錄」排序。
+- 主機上出現不認識的設定檔時，先查是哪個套件留下的（`dpkg -S <檔案路徑>`），不要直接刪除。
 
 ## 2. 下載 Ubuntu 22.04 範本
 
