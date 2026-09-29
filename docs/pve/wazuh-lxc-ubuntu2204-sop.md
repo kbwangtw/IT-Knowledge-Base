@@ -441,7 +441,7 @@ curl -6 -sS -m 10 -o /dev/null -w 'IPv6: %{http_code} %{time_total}s\n' https://
 
 | 項目 | 實際 | 判讀 |
 | --- | --- | --- |
-| Time zone | Etc/UTC | ⚠️ 範本預設 UTC，改為 Asia/Taipei |
+| Time zone | Etc/UTC → Asia/Taipei | ✅ 已修正 |
 | System clock synchronized | yes | ✅ |
 | NTP service | inactive | ✅ LXC 正常現象 |
 | RTC time | n/a | ✅ LXC 正常現象 |
@@ -459,6 +459,8 @@ chronyc tracking | grep -E 'Reference|System time|Leap'
 timedatectl set-timezone Asia/Taipei
 timedatectl | grep 'Time zone'
 ~~~
+
+本案結果：`Time zone: Asia/Taipei (CST, +0800)`。
 
 Wazuh Indexer 內部以 UTC 儲存時間，Dashboard 依瀏覽器時區顯示；容器時區主要影響 `/var/ossec/logs` 等本機日誌的時間，與 PVE、Graylog 一致較方便對照。
 
