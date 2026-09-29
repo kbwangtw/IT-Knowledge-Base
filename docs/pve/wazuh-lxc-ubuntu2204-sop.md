@@ -19,7 +19,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | --- | --- | --- | --- |
 | 0 | 規劃資源與網路 | 已實測 | 2026-09-29：PVE 9.2.20、kernel 7.0.14-19-pve、Quorate: Yes；rootfs 選 VM_Pool（RBD），CT ID 112 |
 | 1 | PVE 節點設定 `vm.max_map_count` | 已完成 | 2026-09-29：三台已移除誤寫入的 99-wazuh.conf；值皆 ≥ 262144 |
-| 1b | 清除 node10 主機上的 Wazuh | 執行中 | 2026-09-29：node10 主機上跑著完整 Wazuh 4.14.8 All-in-one（見 1-2）；node11、node12 乾淨 |
+| 1b | 清除 node10 主機上的 Wazuh | 已實測 | 2026-09-29：node10 已完整移除 Wazuh 4.14.8，套件、服務、Port、套件庫皆清空，`vm.max_map_count` 回到 1048576（見 1-4） |
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
 | 3 | 建立 LXC | 修正中 | 2026-09-29：CT 112 位於 node12；缺 nesting=1、onboot=0、rootfs 60G，需調整（見 3-4） |
 | 4 | 容器內基本設定 | 待做 | |
@@ -245,6 +245,20 @@ apt autoremove --dry-run                                 # 只列出、不執行
 ~~~
 
 PVE 主機上不要直接執行 `apt autoremove -y`，先用 `--dry-run` 看清單，避免移除 PVE 需要的套件。
+
+#### 1-4 移除結果（2026-09-29，node10）
+
+| 檢查 | 結果 |
+| --- | --- |
+| Wazuh／filebeat 套件 | 無 |
+| Wazuh／filebeat 服務 | 無 |
+| 443／1514／1515／9200／9300／55000 | 無程序監聽 |
+| Wazuh 套件庫 | 已移除 |
+| `vm.max_map_count` | 1048576（回到 systemd 預設） |
+| 記憶體 | total 62 GiB、used 11 GiB、available 50 GiB |
+| `apt autoremove --dry-run` | 只列出 libmpfr6、libsigsegv2 兩個小型函式庫；判定保留不處理 |
+
+未留下移除前的 Agent 清單與記憶體數據，因此無法比較移除前後差異，也無法確認是否曾有 Agent 連到 node10。若之後發現有主機的 Agent 斷線，改指向 CT 112 即可。
 
 ## 2. 下載 Ubuntu 22.04 範本
 
