@@ -19,7 +19,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | --- | --- | --- | --- |
 | 0 | 規劃資源與網路 | 已實測 | 2026-09-29：PVE 9.2.20、kernel 7.0.14-19-pve、Quorate: Yes；rootfs 選 VM_Pool（RBD），CT ID 112 |
 | 1 | PVE 節點設定 `vm.max_map_count` | 已完成 | 2026-09-29：三台已移除誤寫入的 99-wazuh.conf；值皆 ≥ 262144 |
-| 1b | 清除 node10 主機上的 Wazuh | 已實測 | 2026-09-29：node10 已完整移除 Wazuh 4.14.8，套件、服務、Port、套件庫皆清空，`vm.max_map_count` 回到 1048576（見 1-4） |
+| 1b | 清除 node10 主機上的 Wazuh | 已實測 | 2026-09-29：node10 已完整移除 Wazuh 4.14.8，套件、服務、Port、套件庫皆清空，`vm.max_map_count` 回到 1048576；殘留日誌目錄與 wazuh-indexer 帳號也已清除（見 1-4） |
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
 | 3 | 建立 LXC | 修正中 | 2026-09-29：CT 112 位於 node12；缺 nesting=1、onboot=0、rootfs 60G，需調整（見 3-4） |
 | 4 | 容器內基本設定 | 待做 | |
@@ -282,6 +282,8 @@ ls -ld /home/wazuh-indexer 2>&1
 userdel wazuh-indexer                        # 同名主群組通常會一併刪除
 getent passwd wazuh-indexer; getent group wazuh-indexer   # 應無輸出
 ~~~
+
+本案結果：`find` 無輸出、`/home/wazuh-indexer` 不存在；`userdel` 後帳號與群組皆已刪除，兩個日誌目錄也確認不存在。**node10 主機上的 Wazuh 已完全清除。**
 
 ## 2. 下載 Ubuntu 22.04 範本
 
