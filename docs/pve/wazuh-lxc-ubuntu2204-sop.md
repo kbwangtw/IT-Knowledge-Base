@@ -21,7 +21,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 1 | PVE 節點設定 `vm.max_map_count` | 已完成 | 2026-09-29：三台已移除誤寫入的 99-wazuh.conf；值皆 ≥ 262144 |
 | 1b | 清除 node10 主機上的 Wazuh | 已實測 | 2026-09-29：node10 已完整移除 Wazuh 4.14.8，套件、服務、Port、套件庫皆清空，`vm.max_map_count` 回到 1048576；殘留日誌目錄與 wazuh-indexer 帳號也已清除（見 1-4） |
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
-| 3 | 建立 LXC | 修正中 | 2026-09-29：CT 112 位於 node12；缺 nesting=1、onboot=0、rootfs 60G，需調整（見 3-4） |
+| 3 | 建立 LXC | 已實測 | 2026-09-29：CT 112 位於 node12；已補 nesting=1、onboot=1，rootfs 線上加大為 80G（見 3-4） |
 | 4 | 容器內基本設定 | 待做 | |
 | 5 | 安裝 Wazuh All-in-one | 待做 | |
 | 6 | 驗證服務與登入 Dashboard | 待做 | |
@@ -381,6 +381,8 @@ pct reboot 112                   # nesting 需重開才生效；未開機則用 
 pct config 112 | grep -E 'features|onboot|rootfs'
 ~~~
 
+本案實測：CT 為 running、未鎖定。`pct set` 無輸出（成功）；`pct resize` 先擴大 RBD 映像，再由 resize2fs 線上擴充檔案系統至 20971520 個 4k 區塊（= 80 GiB）。訊息中的 `is mounted on /tmp` 是 PVE 為了線上擴充而暫時掛載，屬正常現象。修正後 `features: nesting=1`、`onboot: 1`、`size=80G`；nesting 需重開 CT 才生效。
+
 ## 4. 容器內基本設定
 
 以下在容器內執行：
@@ -393,6 +395,11 @@ getent hosts packages.wazuh.com
 
 # 核對 kernel 參數有從主機帶進來
 sysctl vm.max_map_count
+
+# 確認 systemd 正常（nesting 生效的間接指標）與磁碟容量
+systemctl is-system-running        # running 最好；degraded 時用 systemctl --failed 查原因
+systemctl --failed
+df -h /
 
 # 更新系統與必要工具
 apt update && apt -y full-upgrade
