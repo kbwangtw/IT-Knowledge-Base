@@ -17,8 +17,8 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 
 | # | 步驟 | 狀態 | 實測紀錄 |
 | --- | --- | --- | --- |
-| 0 | 規劃資源與網路 | 進行中 | |
-| 1 | PVE 節點設定 `vm.max_map_count` | 待做 | |
+| 0 | 規劃資源與網路 | 已實測 | 2026-09-29：PVE 9.2.20、kernel 7.0.14-19-pve、Quorate: Yes；rootfs 選 VM_Pool（RBD），CT ID 待確認 |
+| 1 | PVE 節點設定 `vm.max_map_count` | 修正中 | 2026-09-29：三台原值已是 1048576，不需設定；誤寫入的 99-wazuh.conf 將值降為 262144，須移除並復原（見步驟 1 的實測紀錄） |
 | 2 | 下載 Ubuntu 22.04 範本 | 待做 | |
 | 3 | 建立 LXC | 待做 | |
 | 4 | 容器內基本設定 | 待做 | |
@@ -53,16 +53,18 @@ All-in-one 的 Indexer 是 Java 程式，吃記憶體與磁碟 I/O。以下是�
 
 | 項目 | 預定值 | 說明 |
 | --- | --- | --- |
-| CT ID | `<CTID>`（例：120） | 不可和現有 VM／CT 重複 |
+| CT ID | `<CTID>` | 不可和現有 VM／CT 重複；以叢集查詢結果為準 |
 | Hostname | `wazuh` | |
 | vCPU | 4 | 官方 All-in-one 最低建議量級；少於 4 核安裝可能被擋 |
 | RAM | 8 GiB | Indexer 預設會拿約一半記憶體當 Java heap |
-| Swap | 0 | 資料庫類服務不建議用 swap |
+| Swap | 0～512 MiB | 資料庫類服務不建議依賴 swap；pct 的 `--swap` 單位是 MiB |
 | Rootfs | 80 GiB 以上 | 告警資料會持續累積；放在叢集共用儲存（如 Ceph RBD）才能遷移／HA |
 | 類型 | Unprivileged（非特權） | 安全性較好；本案所需設定都在 PVE 主機端完成 |
 | Features | `nesting=1` | Ubuntu 22.04 的 systemd 需要 |
-| IP | `192.0.2.30/24`（示範位址） | 請換成自己的；建議固定 IP，Agent 會寫死這個位址 |
+| IP | `192.0.2.32/24`（示範位址） | 請換成自己的；建議固定 IP，Agent 會寫死這個位址 |
 | Gateway | `192.0.2.1`（示範位址） | |
+| DNS | `192.0.2.20`、`192.0.2.21`（示範位址） | 兩台 DNS，用空白分隔 |
+| Agent 數量 | 30 台以內 | 此規模 4 vCPU／8 GiB 足夠；超過再擴充 |
 
 > 官方要求以官方文件為準：[Wazuh Quickstart](https://documentation.wazuh.com/current/quickstart.html)。撰寫本文時無法連線官方頁面核對最新版號與規格表，操作前請先開啟確認。
 
@@ -76,27 +78,69 @@ pvesm status                       # 看儲存名稱、類型、剩餘空間
 pvecm status                       # 確認叢集 Quorate: Yes
 ~~~
 
+**CT ID 一定要用叢集查詢確認，不能憑印象。** `nextid` 回傳的是「最小的可用 ID」；例如回傳 114，代表 100～113 可能都已被占用。想用別的號碼時，先查叢集全部資源：
+
+~~~bash
+pvesh get /cluster/resources --type vm --output-format json \
+  | grep -o '"vmid":[0-9]*' | sort -t: -k2 -n
+~~~
+
+**確認 rootfs 儲存允許放容器。** RBD 儲存要在 Content 勾選 `Container`（rootdir）才能放 CT：
+
+~~~bash
+pvesm status --content rootdir     # 有列出 VM_Pool 才能選它當 rootfs
+grep -A6 '^rbd: VM_Pool' /etc/pve/storage.cfg
+~~~
+
+### 0-3 本案實測（2026-09-29）
+
+| 項目 | 結果 |
+| --- | --- |
+| PVE 版本 | pve-manager 9.2.20，kernel 7.0.14-19-pve |
+| 叢集 | Quorate: Yes |
+| `nextid` | 114 |
+| 可用共用儲存 | VM_Pool（rbd，可用約 1.46 TiB）、cephfs、PBS31（備份用） |
+| rootfs 選擇 | VM_Pool |
+
 ## 1. PVE 節點設定 `vm.max_map_count`
 
 **為什麼要在主機做？** LXC 和主機共用同一個 Linux kernel。Wazuh Indexer 要求 `vm.max_map_count` 至少 262144，而這個值屬於 kernel，非特權容器裡改不了，只能在 PVE 主機上改。
 
 **為什麼每一台都要做？** 容器將來可能遷移或被 HA 拉到其他節點；只改一台的話，換節點後 Indexer 會起不來。
 
-在 **每一台** PVE 節點執行：
+**先檢查，不夠才設定。** 在 **每一台** PVE 節點執行：
 
 ~~~bash
-# 先看目前值
+# 1. 看目前值，以及是哪個設定檔給的
 sysctl vm.max_map_count
+grep -rs max_map_count /etc/sysctl.conf /etc/sysctl.d /run/sysctl.d /usr/lib/sysctl.d
 
-# 寫入永久設定並立即套用
-echo "vm.max_map_count=262144" > /etc/sysctl.d/99-wazuh.conf
-sysctl --system | grep max_map_count
+# 2. 只有小於 262144 才寫入
+cur=$(sysctl -n vm.max_map_count)
+if [ "$cur" -lt 262144 ]; then
+  echo "vm.max_map_count=262144" > /etc/sysctl.d/99-wazuh.conf
+  sysctl --system > /dev/null
+fi
 
-# 再確認一次
+# 3. 確認
 sysctl vm.max_map_count
 ~~~
 
-預期結果：`vm.max_map_count = 262144`。若原本就大於 262144，保持原值即可，不要調小。
+預期結果：值 ≥ 262144。**原本就更大時什麼都不用做，千萬不要調小。**
+
+### 1-1 本案實測與修正（2026-09-29）
+
+三台節點原值都已是 `vm.max_map_count = 1048576`（`sysctl --system` 輸出可見由既有的系統設定檔提供），其實不需要設定。但當時直接執行了「寫入 99-wazuh.conf」，而 `99-` 開頭的檔案最後載入，會覆蓋前面的設定，結果三台都被**調小**成 262144。
+
+修正方式（每台執行）：
+
+~~~bash
+rm -f /etc/sysctl.d/99-wazuh.conf
+sysctl --system | grep max_map_count
+sysctl vm.max_map_count      # 應回到 1048576
+~~~
+
+學到的事：sysctl 設定檔依檔名排序載入，後載入的覆蓋前面的。改 kernel 參數前，先用 `grep` 找出目前由哪個檔案設定。
 
 ## 2. 下載 Ubuntu 22.04 範本
 
@@ -124,9 +168,9 @@ pct create <CTID> local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
   --cores 4 \
   --memory 8192 \
   --swap 0 \
-  --rootfs <共用儲存名稱>:80 \
-  --net0 name=eth0,bridge=vmbr0,ip=192.0.2.30/24,gw=192.0.2.1 \
-  --nameserver 192.0.2.1 \
+  --rootfs VM_Pool:80 \
+  --net0 name=eth0,bridge=vmbr0,ip=192.0.2.32/24,gw=192.0.2.1 \
+  --nameserver "192.0.2.20 192.0.2.21" \
   --unprivileged 1 \
   --features nesting=1 \
   --ostype ubuntu \
@@ -144,10 +188,10 @@ pct create <CTID> local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
 | General | CT ID／Hostname | `<CTID>`／`wazuh`；勾選 Unprivileged container、Nesting |
 | General | Password 或 SSH public key | 建議用 SSH 金鑰 |
 | Template | Template | ubuntu-22.04-standard |
-| Disks | Storage／Size | 共用儲存／80 |
+| Disks | Storage／Size | VM_Pool／80 |
 | CPU | Cores | 4 |
 | Memory | Memory／Swap | 8192／0 |
-| Network | Bridge／IPv4 | vmbr0／Static `192.0.2.30/24`，Gateway `192.0.2.1` |
+| Network | Bridge／IPv4 | vmbr0／Static `192.0.2.32/24`，Gateway `192.0.2.1` |
 | DNS | DNS servers | 依環境 |
 | Confirm | Start after created | 先不勾，確認設定後再開機 |
 
@@ -208,7 +252,7 @@ systemctl status wazuh-indexer wazuh-manager wazuh-dashboard --no-pager
 ss -tlnp | grep -E ':443|:1514|:1515|:9200|:55000'
 ~~~
 
-從管理電腦瀏覽 `https://192.0.2.30`，以 `admin` 登入。憑證是自簽，瀏覽器會出現警告，確認網址無誤後繼續。
+從管理電腦瀏覽 `https://192.0.2.32`，以 `admin` 登入。憑證是自簽，瀏覽器會出現警告，確認網址無誤後繼續。
 
 驗收標準：三個服務都 `active (running)`、Port 都在監聽、Dashboard 能登入並看到 Wazuh Server 本身（agent 000）。
 
@@ -258,7 +302,7 @@ apt update
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
-- 所有節點 `vm.max_map_count` 必須一致，否則 HA／遷移後 Indexer 可能起不來。
+- 所有節點 `vm.max_map_count` 都必須 ≥ 262144，否則 HA／遷移後 Indexer 可能起不來。
 - 資料量成長很快，需規劃 Index 保留天數（Index State Management），並監控 rootfs 用量。
 - Indexer 對儲存 I/O 敏感；放在 Ceph 上時，觀察 Ceph 延遲是否因此上升。
 - 文中 IP 皆為文件示範位址（192.0.2.0/24），指令執行前請替換。
