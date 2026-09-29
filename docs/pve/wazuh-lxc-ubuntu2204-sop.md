@@ -22,7 +22,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 1b | 清除 node10 主機上的 Wazuh | 已實測 | 2026-09-29：node10 已完整移除 Wazuh 4.14.8，套件、服務、Port、套件庫皆清空，`vm.max_map_count` 回到 1048576；殘留日誌目錄與 wazuh-indexer 帳號也已清除（見 1-4） |
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
 | 3 | 建立 LXC | 已實測 | 2026-09-29：CT 112 位於 node12；已補 nesting=1、onboot=1，rootfs 線上加大為 80G（見 3-4） |
-| 4 | 容器內基本設定 | 待做 | |
+| 4 | 容器內基本設定 | 進行中 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，確認 IPv6 連線中 |
 | 5 | 安裝 Wazuh All-in-one | 待做 | |
 | 6 | 驗證服務與登入 Dashboard | 待做 | |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 待做 | |
@@ -410,6 +410,32 @@ timedatectl
 ~~~
 
 若 `packages.wazuh.com` 解析不到，先處理 DNS 或對外防火牆，後續安裝需要連線到此網址。
+
+### 4-1 本案實測（2026-09-29）
+
+| 檢查 | 結果 | 判定 |
+| --- | --- | --- |
+| `systemctl is-system-running` | running；`--failed` 0 個 | ✅ nesting 生效 |
+| `df -h /` | 79G，已用 907M | ✅ |
+| `free -h` | 8.0Gi／swap 512Mi | ✅ |
+| `vm.max_map_count` | 1048576（來自 node12） | ✅ |
+| eth0 | 192.0.2.32/24（示範位址），ping Gateway 0% loss | ✅ |
+| `getent hosts packages.wazuh.com` | **只列出 IPv6 位址** | ⚠️ 需確認 |
+
+`getent hosts` 會優先顯示 IPv6（AAAA）結果。CT 的 net0 設定 `ip6=auto`，若自動取得了 IPv6 位址、卻沒有真正通往外部的 IPv6 路由，curl 與 apt 會先嘗試 IPv6，造成下載緩慢、逾時或失敗。安裝前分別測試 IPv4 與 IPv6：
+
+~~~bash
+getent ahostsv4 packages.wazuh.com | head -3      # 有沒有 IPv4 位址
+ip -6 addr show eth0 scope global                 # 有沒有取得全域 IPv6
+ip -6 route show default                          # 有沒有 IPv6 預設路由
+curl -4 -sS -o /dev/null -w 'IPv4: %{http_code} %{time_total}s\n' https://packages.wazuh.com/4.14/wazuh-install.sh
+curl -6 -sS -m 10 -o /dev/null -w 'IPv6: %{http_code} %{time_total}s\n' https://packages.wazuh.com/4.14/wazuh-install.sh
+~~~
+
+判讀：兩者都是 200 代表正常；IPv4 200、IPv6 失敗或逾時時，擇一處理：
+
+- 環境沒有要用 IPv6：在 node12 移除 CT 的 IPv6 設定（`pct set 112 --net0 name=eth0,bridge=vmbr0,firewall=1,gw=<GW>,hwaddr=<原MAC>,ip=<IP>/24,type=veth`，保留原 MAC），再重開 CT。
+- 只想讓 apt 走 IPv4：`echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4`。
 
 ## 5. 安裝 Wazuh All-in-one
 
