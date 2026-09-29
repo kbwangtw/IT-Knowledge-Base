@@ -19,7 +19,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | --- | --- | --- | --- |
 | 0 | 規劃資源與網路 | 已實測 | 2026-09-29：PVE 9.2.20、kernel 7.0.14-19-pve、Quorate: Yes；rootfs 選 VM_Pool（RBD），CT ID 112 |
 | 1 | PVE 節點設定 `vm.max_map_count` | 已完成 | 2026-09-29：三台已移除誤寫入的 99-wazuh.conf；值皆 ≥ 262144 |
-| 1b | 清除 node10 主機上的 Wazuh | 待決定 | 2026-09-29：node10 主機上跑著完整 Wazuh 4.14.8 All-in-one（見 1-2）；node11、node12 乾淨 |
+| 1b | 清除 node10 主機上的 Wazuh | 執行中 | 2026-09-29：node10 主機上跑著完整 Wazuh 4.14.8 All-in-one（見 1-2）；node11、node12 乾淨 |
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
 | 3 | 建立 LXC | 修正中 | 2026-09-29：CT 112 位於 node12；缺 nesting=1、onboot=0、rootfs 60G，需調整（見 3-4） |
 | 4 | 容器內基本設定 | 待做 | |
@@ -181,7 +181,70 @@ ls /etc/apt/sources.list.d/ | grep -i wazuh
 - Wazuh 套件庫留在主機上，日後 `apt full-upgrade` 可能連帶升級，影響 PVE 更新流程。
 - 無法享有 CT 的備份、快照、遷移與 HA。
 
-處理方式待決定並完成後補記。
+**處理決定（2026-09-29）：完整移除**，改在 CT 112 重新安裝。
+
+#### 1-3 移除 PVE 主機上的 Wazuh（在 node10 執行）
+
+**(1) 移除前清點**：記下有哪些 Agent 註冊在這台，日後要把它們改指到 CT 112。
+
+~~~bash
+/var/ossec/bin/agent_control -l
+dpkg -l | grep -E 'wazuh|filebeat'     # All-in-one 通常還會裝 filebeat
+free -h
+~~~
+
+**(2) 停止並停用服務**
+
+~~~bash
+systemctl disable --now wazuh-dashboard wazuh-manager wazuh-indexer
+systemctl disable --now filebeat 2>/dev/null
+~~~
+
+**(3) 移除套件與資料目錄**（依 Dashboard → Manager → Filebeat → Indexer 順序）
+
+~~~bash
+apt-get remove --purge -y wazuh-dashboard
+rm -rf /var/lib/wazuh-dashboard /usr/share/wazuh-dashboard /etc/wazuh-dashboard
+
+apt-get remove --purge -y wazuh-manager
+rm -rf /var/ossec
+
+apt-get remove --purge -y filebeat     # 若 (1) 沒看到 filebeat 可略過
+rm -rf /var/lib/filebeat /usr/share/filebeat /etc/filebeat
+
+apt-get remove --purge -y wazuh-indexer
+rm -rf /var/lib/wazuh-indexer /usr/share/wazuh-indexer /etc/wazuh-indexer
+
+systemctl daemon-reload
+~~~
+
+`rm -rf` 前請逐字核對路徑，特別注意不要多打空白（例如 `/ var`）。
+
+**(4) 移除套件庫、sysctl 檔與安裝殘留**
+
+~~~bash
+rm -f /etc/apt/sources.list.d/wazuh.list /usr/share/keyrings/wazuh.gpg
+rm -f /etc/sysctl.d/99-wazuh-indexer.conf
+rm -f /root/wazuh-install.sh /root/wazuh-install-files.tar /var/log/wazuh-install.log
+apt update
+sysctl --system > /dev/null
+~~~
+
+`wazuh-install-files.tar` 內含舊安裝的全部密碼，舊系統移除後即無用途，直接刪除。
+
+**(5) 驗證乾淨**
+
+~~~bash
+dpkg -l | grep -E 'wazuh|filebeat'                      # 應無輸出（或只剩 rc 狀態，可再 purge）
+systemctl list-units --all | grep -iE 'wazuh|filebeat'   # 應無輸出
+ss -tlnp | grep -E ':443 |:1514|:1515|:9200|:9300|:55000' # 應無 Wazuh 程序
+ls /etc/apt/sources.list.d/ | grep -i wazuh              # 應無輸出
+sysctl vm.max_map_count                                  # 應回到 1048576
+free -h                                                  # 和 (1) 比較，記憶體應釋放
+apt autoremove --dry-run                                 # 只列出、不執行；確認清單都是 Wazuh 相依套件再決定
+~~~
+
+PVE 主機上不要直接執行 `apt autoremove -y`，先用 `--dry-run` 看清單，避免移除 PVE 需要的套件。
 
 ## 2. 下載 Ubuntu 22.04 範本
 
