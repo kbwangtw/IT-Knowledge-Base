@@ -18,8 +18,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | # | 步驟 | 狀態 | 實測紀錄 |
 | --- | --- | --- | --- |
 | 0 | 規劃資源與網路 | 已實測 | 2026-09-29：PVE 9.2.20、kernel 7.0.14-19-pve、Quorate: Yes；rootfs 選 VM_Pool（RBD），CT ID 112 |
-| 1 | PVE 節點設定 `vm.max_map_count` | 已完成 | 2026-09-29：三台已移除誤寫入的 99-wazuh.conf；值皆 ≥ 262144 |
-| 1b | 清除 node10 主機上的 Wazuh | 已實測 | 2026-09-29：node10 已完整移除 Wazuh 4.14.8，套件、服務、Port、套件庫皆清空，`vm.max_map_count` 回到 1048576；殘留日誌目錄與 wazuh-indexer 帳號也已清除（見 1-4） |
+| 1 | PVE 節點設定 `vm.max_map_count` | 已實測 | 2026-09-29：三台值皆 ≥ 262144 |
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
 | 3 | 建立 LXC | 已實測 | 2026-09-29：CT 112 位於 node12；已補 nesting=1、onboot=1，rootfs 線上加大為 80G（見 3-4） |
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
@@ -131,159 +130,9 @@ sysctl vm.max_map_count
 
 預期結果：值 ≥ 262144。**原本就更大時什麼都不用做，千萬不要調小。**
 
-### 1-1 本案實測與修正（2026-09-29）
+### 1-1 本案實測（2026-09-29）
 
-**第一次檢查：** node11、node12 原值是 `1048576`，node10 是 `262144`，全部都已經 ≥ 262144，其實不需要設定。但當時直接執行了「寫入 99-wazuh.conf」，node11、node12 因此被**調小**成 262144。
-
-**移除 99-wazuh.conf 後，node10 仍是 262144。** 用 `grep` 查設定來源：
-
-| 設定檔 | 值 | 來源判讀 |
-| --- | --- | --- |
-| `/usr/lib/sysctl.d/10-pve-ct-inotify-limits.conf` | 262144 | PVE 內建 |
-| `/usr/lib/sysctl.d/50-default.conf` | 1048576 | systemd 內建 |
-| `/etc/sysctl.d/99-wazuh-indexer.conf` | 262144 | **Wazuh Indexer 留下的檔案** |
-| `/usr/lib/sysctl.d/wazuh-indexer.conf` | 262144 | **Wazuh Indexer 套件提供的檔案** |
-| `/etc/sysctl.d/99-wazuh.conf` | 262144 | 本次誤寫入，已移除 |
-
-`sysctl --system` 會把 `/etc`、`/run`、`/usr/lib` 各目錄的檔案合在一起**依檔名排序**，後載入的覆蓋前面的。`wazuh-indexer.conf` 以 w 開頭，排序在所有數字開頭的檔案之後，所以最後生效的是 262144。
-
-**進一步追查：** PVE 主機上出現 wazuh-indexer 的設定檔，代表這台節點可能安裝過 Wazuh。Wazuh 應該只裝在 CT 112 裡；主機上若有殘留服務，會占用記憶體，也會開啟不必要的 Port。確認方式：
-
-~~~bash
-dpkg -l | grep -i wazuh
-systemctl list-units --all | grep -i wazuh
-ss -tlnp | grep -E ':9200|:9300|:1514|:1515|:55000|:443 '
-ls /etc/apt/sources.list.d/ | grep -i wazuh
-~~~
-
-學到的事：
-
-- 改 kernel 參數前，先用 `grep` 找出目前由哪些檔案設定、哪一個最後生效。
-- sysctl 設定檔依「檔名」排序，不是依「目錄」排序。
-- 主機上出現不認識的設定檔時，先查是哪個套件留下的（`dpkg -S <檔案路徑>`），不要直接刪除。
-
-### 1-2 發現：node10 主機上跑著完整的 Wazuh（2026-09-29）
-
-| 檢查 | node10 結果 |
-| --- | --- |
-| 套件 | wazuh-dashboard、wazuh-indexer、wazuh-manager，皆為 4.14.8-1 |
-| 服務 | 三個服務都 active (running) |
-| Port | 1514、1515、55000 對所有介面開放；9200、9300 只聽 127.0.0.1 |
-| 套件庫 | `/etc/apt/sources.list.d/wazuh.list` 存在 |
-| node11、node12 | 沒有 Wazuh 套件 |
-
-也就是說，node10 主機本身就是一台 Wazuh All-in-one。這解釋了 node10 的 `vm.max_map_count` 為何一開始就是 262144。
-
-**為什麼不該留在 PVE 主機上：**
-
-- Indexer 的 Java heap 會占用數 GB 記憶體，和 VM、Ceph OSD 搶資源。
-- 1514／1515／55000 對外開放，擴大主機的攻擊面。
-- Wazuh 套件庫留在主機上，日後 `apt full-upgrade` 可能連帶升級，影響 PVE 更新流程。
-- 無法享有 CT 的備份、快照、遷移與 HA。
-
-**處理決定（2026-09-29）：完整移除**，改在 CT 112 重新安裝。
-
-#### 1-3 移除 PVE 主機上的 Wazuh（在 node10 執行）
-
-**(1) 移除前清點**：記下有哪些 Agent 註冊在這台，日後要把它們改指到 CT 112。
-
-~~~bash
-/var/ossec/bin/agent_control -l
-dpkg -l | grep -E 'wazuh|filebeat'     # All-in-one 通常還會裝 filebeat
-free -h
-~~~
-
-**(2) 停止並停用服務**
-
-~~~bash
-systemctl disable --now wazuh-dashboard wazuh-manager wazuh-indexer
-systemctl disable --now filebeat 2>/dev/null
-~~~
-
-**(3) 移除套件與資料目錄**（依 Dashboard → Manager → Filebeat → Indexer 順序）
-
-~~~bash
-apt-get remove --purge -y wazuh-dashboard
-rm -rf /var/lib/wazuh-dashboard /usr/share/wazuh-dashboard /etc/wazuh-dashboard
-
-apt-get remove --purge -y wazuh-manager
-rm -rf /var/ossec
-
-apt-get remove --purge -y filebeat     # 若 (1) 沒看到 filebeat 可略過
-rm -rf /var/lib/filebeat /usr/share/filebeat /etc/filebeat
-
-apt-get remove --purge -y wazuh-indexer
-rm -rf /var/lib/wazuh-indexer /usr/share/wazuh-indexer /etc/wazuh-indexer
-
-systemctl daemon-reload
-~~~
-
-`rm -rf` 前請逐字核對路徑，特別注意不要多打空白（例如 `/ var`）。
-
-**(4) 移除套件庫、sysctl 檔與安裝殘留**
-
-~~~bash
-rm -f /etc/apt/sources.list.d/wazuh.list /usr/share/keyrings/wazuh.gpg
-rm -f /etc/sysctl.d/99-wazuh-indexer.conf
-rm -f /root/wazuh-install.sh /root/wazuh-install-files.tar /var/log/wazuh-install.log
-apt update
-sysctl --system > /dev/null
-~~~
-
-`wazuh-install-files.tar` 內含舊安裝的全部密碼，舊系統移除後即無用途，直接刪除。
-
-**(5) 驗證乾淨**
-
-~~~bash
-dpkg -l | grep -E 'wazuh|filebeat'                      # 應無輸出（或只剩 rc 狀態，可再 purge）
-systemctl list-units --all | grep -iE 'wazuh|filebeat'   # 應無輸出
-ss -tlnp | grep -E ':443 |:1514|:1515|:9200|:9300|:55000' # 應無 Wazuh 程序
-ls /etc/apt/sources.list.d/ | grep -i wazuh              # 應無輸出
-sysctl vm.max_map_count                                  # 應回到 1048576
-free -h                                                  # 和 (1) 比較，記憶體應釋放
-apt autoremove --dry-run                                 # 只列出、不執行；確認清單都是 Wazuh 相依套件再決定
-~~~
-
-PVE 主機上不要直接執行 `apt autoremove -y`，先用 `--dry-run` 看清單，避免移除 PVE 需要的套件。
-
-#### 1-4 移除結果（2026-09-29，node10）
-
-| 檢查 | 結果 |
-| --- | --- |
-| Wazuh／filebeat 套件 | 無 |
-| Wazuh／filebeat 服務 | 無 |
-| 443／1514／1515／9200／9300／55000 | 無程序監聽 |
-| Wazuh 套件庫 | 已移除 |
-| `vm.max_map_count` | 1048576（回到 systemd 預設） |
-| 移除前清點 | Agent 只有 000（node10 自己）；另有 filebeat 7.10.2-2 |
-| 記憶體（移除前 → 後） | used 13 → 11 GiB、buff/cache 27 → 15 GiB、available 48 → 50 GiB |
-| 磁碟釋放 | 套件約 3.4 GB（dashboard 1,049 MB、manager 1,152 MB、indexer 1,105 MB、filebeat 73.6 MB），另加資料目錄 |
-| `apt autoremove --dry-run` | 只列出 libmpfr6、libsigsegv2 兩個小型函式庫；判定保留不處理 |
-
-移除前沒有任何外部 Agent 註冊到 node10，因此這次移除不會造成其他主機斷線。
-
-`apt purge` 過程出現 `directory ... not empty so not removed` 警告：套件只刪自己安裝的檔案，執行期間產生的資料與日誌會留下。其中 `/var/lib/wazuh-indexer`、`/etc/wazuh-indexer`、`/etc/filebeat`、`/usr/share/filebeat` 已由後續 `rm -rf` 清除；`/var/log/wazuh-indexer` 不在原清單內，需補清：
-
-~~~bash
-ls -d /var/log/wazuh-indexer /var/log/filebeat /var/lib/wazuh-indexer /etc/wazuh-indexer \
-      /etc/filebeat /usr/share/filebeat /var/ossec 2>&1
-rm -rf /var/log/wazuh-indexer /var/log/filebeat
-
-# 套件建立的系統帳號（有列出才處理）
-getent passwd | grep -E 'wazuh|filebeat'
-getent group  | grep -E 'wazuh|filebeat'
-~~~
-
-本案結果：其他目錄都已不存在，只剩 `/var/log/filebeat`、`/var/log/wazuh-indexer`，已用 `rm -rf` 清除。另留下系統帳號 `wazuh-indexer`（UID 999、GID 990、shell 為 nologin）。確認沒有檔案仍屬於它之後再刪除：
-
-~~~bash
-find / -xdev -uid 999 2>/dev/null | head     # -xdev：不跨掛載點，避免掃到 /etc/pve、CephFS
-ls -ld /home/wazuh-indexer 2>&1
-userdel wazuh-indexer                        # 同名主群組通常會一併刪除
-getent passwd wazuh-indexer; getent group wazuh-indexer   # 應無輸出
-~~~
-
-本案結果：`find` 無輸出、`/home/wazuh-indexer` 不存在；`userdel` 後帳號與群組皆已刪除，兩個日誌目錄也確認不存在。**node10 主機上的 Wazuh 已完全清除。**
+三台節點的 `vm.max_map_count` 均 ≥ 262144，符合 Wazuh Indexer 需求。
 
 ## 2. 下載 Ubuntu 22.04 範本
 
