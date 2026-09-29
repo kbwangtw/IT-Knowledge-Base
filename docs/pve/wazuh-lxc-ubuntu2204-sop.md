@@ -255,10 +255,24 @@ PVE 主機上不要直接執行 `apt autoremove -y`，先用 `--dry-run` 看清�
 | 443／1514／1515／9200／9300／55000 | 無程序監聽 |
 | Wazuh 套件庫 | 已移除 |
 | `vm.max_map_count` | 1048576（回到 systemd 預設） |
-| 記憶體 | total 62 GiB、used 11 GiB、available 50 GiB |
+| 移除前清點 | Agent 只有 000（node10 自己）；另有 filebeat 7.10.2-2 |
+| 記憶體（移除前 → 後） | used 13 → 11 GiB、buff/cache 27 → 15 GiB、available 48 → 50 GiB |
+| 磁碟釋放 | 套件約 3.4 GB（dashboard 1,049 MB、manager 1,152 MB、indexer 1,105 MB、filebeat 73.6 MB），另加資料目錄 |
 | `apt autoremove --dry-run` | 只列出 libmpfr6、libsigsegv2 兩個小型函式庫；判定保留不處理 |
 
-未留下移除前的 Agent 清單與記憶體數據，因此無法比較移除前後差異，也無法確認是否曾有 Agent 連到 node10。若之後發現有主機的 Agent 斷線，改指向 CT 112 即可。
+移除前沒有任何外部 Agent 註冊到 node10，因此這次移除不會造成其他主機斷線。
+
+`apt purge` 過程出現 `directory ... not empty so not removed` 警告：套件只刪自己安裝的檔案，執行期間產生的資料與日誌會留下。其中 `/var/lib/wazuh-indexer`、`/etc/wazuh-indexer`、`/etc/filebeat`、`/usr/share/filebeat` 已由後續 `rm -rf` 清除；`/var/log/wazuh-indexer` 不在原清單內，需補清：
+
+~~~bash
+ls -d /var/log/wazuh-indexer /var/log/filebeat /var/lib/wazuh-indexer /etc/wazuh-indexer \
+      /etc/filebeat /usr/share/filebeat /var/ossec 2>&1
+rm -rf /var/log/wazuh-indexer /var/log/filebeat
+
+# 套件建立的系統帳號（有列出才處理）
+getent passwd | grep -E 'wazuh|filebeat'
+getent group  | grep -E 'wazuh|filebeat'
+~~~
 
 ## 2. 下載 Ubuntu 22.04 範本
 
