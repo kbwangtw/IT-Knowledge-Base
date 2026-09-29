@@ -17,10 +17,10 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 
 | # | 步驟 | 狀態 | 實測紀錄 |
 | --- | --- | --- | --- |
-| 0 | 規劃資源與網路 | 已實測 | 2026-09-29：PVE 9.2.20、kernel 7.0.14-19-pve、Quorate: Yes；rootfs 選 VM_Pool（RBD），CT ID 待確認 |
+| 0 | 規劃資源與網路 | 已實測 | 2026-09-29：PVE 9.2.20、kernel 7.0.14-19-pve、Quorate: Yes；rootfs 選 VM_Pool（RBD），CT ID 112 |
 | 1 | PVE 節點設定 `vm.max_map_count` | 修正中 | 2026-09-29：三台原值已是 1048576，不需設定；誤寫入的 99-wazuh.conf 將值降為 262144，須移除並復原（見步驟 1 的實測紀錄） |
-| 2 | 下載 Ubuntu 22.04 範本 | 待做 | |
-| 3 | 建立 LXC | 待做 | |
+| 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
+| 3 | 建立 LXC | 待核對 | 2026-09-29：已建立 CT 112（Ubuntu 22.04，swap 512 MiB）；`pct config 112` 核對中 |
 | 4 | 容器內基本設定 | 待做 | |
 | 5 | 安裝 Wazuh All-in-one | 待做 | |
 | 6 | 驗證服務與登入 Dashboard | 待做 | |
@@ -101,6 +101,8 @@ grep -A6 '^rbd: VM_Pool' /etc/pve/storage.cfg
 | `nextid` | 114 |
 | 可用共用儲存 | VM_Pool（rbd，可用約 1.46 TiB）、cephfs、PBS31（備份用） |
 | rootfs 選擇 | VM_Pool |
+| CT ID | 112（`nextid` 回傳 114，是因為 112 已被這台新 CT 使用） |
+| Swap | 512 MiB |
 
 ## 1. PVE 節點設定 `vm.max_map_count`
 
@@ -167,7 +169,7 @@ pct create <CTID> local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
   --hostname wazuh \
   --cores 4 \
   --memory 8192 \
-  --swap 0 \
+  --swap 512 \
   --rootfs VM_Pool:80 \
   --net0 name=eth0,bridge=vmbr0,ip=192.0.2.32/24,gw=192.0.2.1 \
   --nameserver "192.0.2.20 192.0.2.21" \
@@ -190,12 +192,25 @@ pct create <CTID> local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
 | Template | Template | ubuntu-22.04-standard |
 | Disks | Storage／Size | VM_Pool／80 |
 | CPU | Cores | 4 |
-| Memory | Memory／Swap | 8192／0 |
+| Memory | Memory／Swap | 8192／512 |
 | Network | Bridge／IPv4 | vmbr0／Static `192.0.2.32/24`，Gateway `192.0.2.1` |
 | DNS | DNS servers | 依環境 |
 | Confirm | Start after created | 先不勾，確認設定後再開機 |
 
 ### 3-3 開機前檢查並啟動
+
+`pct config` 應看到下列關鍵行（數值依規劃）：
+
+| 設定行 | 預期 | 不符合時 |
+| --- | --- | --- |
+| `cores: 4` | 4 | `pct set <CTID> --cores 4` |
+| `memory: 8192` | 8192 | `pct set <CTID> --memory 8192` |
+| `swap: 512` | 512 | `pct set <CTID> --swap 512` |
+| `rootfs: VM_Pool:vm-<CTID>-disk-0,size=80G` | 在 VM_Pool、≥ 80G | 容量不足：`pct resize <CTID> rootfs 80G`（只能加大） |
+| `unprivileged: 1` | 1 | 無法直接切換；需重建或備份還原時改選 |
+| `features: nesting=1` | 含 nesting=1 | `pct set <CTID> --features nesting=1`（需重開 CT） |
+| `net0: ...ip=.../24,gw=...` | 固定 IP | `pct set <CTID> --net0 ...` |
+| `onboot: 1` | 1 | `pct set <CTID> --onboot 1` |
 
 ~~~bash
 pct config <CTID>      # 核對 cores、memory、swap、rootfs、net0、unprivileged、features
