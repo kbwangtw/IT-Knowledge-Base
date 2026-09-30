@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
+| 9 | 第一台 Agent（建議先接一台 PVE 節點） | 進行中 | 2026-09-30：三台 PVE 節點安裝前檢查通過（Debian 13.7、1514／1515 OK），先裝 node11 |
 
 ## 先認識四個名詞
 
@@ -827,6 +827,8 @@ dpkg -l | grep -i wazuh                        # 應無輸出
 timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && echo "1514 OK"
 timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "1515 OK"
 ~~~
+
+本案結果（2026-09-30）：node10、node11、node12 皆為 Debian 13.7，沒有 Wazuh 套件，1514／1515 皆 OK。安裝順序：先 node11 驗證成功，再依序安裝 node10、node12。
 
 `/dev/tcp/<IP>/<Port>` 是 bash 內建的連線測試，不需要另外安裝 nc。兩個 Port 都要 OK，否則 Agent 無法註冊或回報。
 
