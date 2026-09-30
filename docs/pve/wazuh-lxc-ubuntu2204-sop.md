@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 4 台 Debian 13 容器（004 IPAM、005 librenms、006 Graylog、007 ProxCenter）皆 Active；DNS 容器、WireGuard、Windows 待接 |
+| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 6 台 Debian 13 容器（004～009）皆 Active；WireGuard（關機中）、Windows 待接 |
 
 ## 先認識四個名詞
 
@@ -1028,6 +1028,20 @@ pct delsnapshot <CTID> pre-wazuh-agent
 ~~~
 
 回復方式：`pct rollback <CTID> pre-wazuh-agent`（會回到快照當下，快照之後的變更全部消失）。
+
+本案結果（2026-09-30）：AdGuard（100，node10）與 Pi-hole（101，node12）先做快照再安裝；安裝後 `AdGuardHome`、`pihole-FTL` 皆 active；Manager 顯示 `ID: 008, Name: AdGuard, Active`、`ID: 009, Name: Pihole, Active`。快照待觀察一兩天、DNS 正常後刪除。
+
+#### Debian 13 容器總驗收（2026-09-30）
+
+| ID | 名稱 | CT | 節點 | 狀態 |
+| --- | --- | --- | --- | --- |
+| 004 | IPAM | 103 | node10 | Active |
+| 005 | librenms | 102 | node10 | Active |
+| 006 | Graylog | 105 | node10 | Active |
+| 007 | ProxCenter | 110 | node10 | Active |
+| 008 | AdGuard | 100 | node10 | Active |
+| 009 | Pihole | 101 | node12 | Active |
+| — | wireguard | 109 | node10 | 關機中，未安裝 |
 
 說明：
 
