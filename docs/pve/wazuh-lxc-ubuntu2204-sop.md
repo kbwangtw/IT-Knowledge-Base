@@ -882,6 +882,14 @@ Dashboard → Agents management → Summary 應看到新 Agent，狀態為 **Act
 | Manager `agent_control -l` | `ID: 001, Name: node11, IP: any, Active` ✅ |
 | Dashboard Endpoints | Active 1；node11、IP 192.0.2.11、群組 default、Debian GNU/Linux 13、v4.14.8、active ✅ |
 
+#### 本案實測：node12（2026-09-30）
+
+依修正後順序操作：`apt-get install -y lsb-release`（新安裝 12.1-1，來自 Debian trixie 官方套件庫）→ 下載 .deb（13,227,800 bytes）→ 帶環境變數全新安裝 → `grep` 顯示 `<address>192.0.2.32</address>` → 啟動，`is-active` 為 active。
+
+**結論：先裝好 lsb-release，再帶環境變數做全新安裝，Manager 位址會正確寫入。** node11 的 `MANAGER_IP` 問題來自「相依套件缺少、安裝被中斷，之後由 apt 補完設定」的順序，不是環境變數本身失效。
+
+node10 原本已有 lsb-release（12.1-1），apt 只將它標記為手動安裝。
+
 Dashboard 上的「Cluster node: node01」是 Wazuh Manager 叢集的節點名稱（安裝預設值），不是 PVE 節點名稱。
 
 ### 9-4 回復方式（要移除 Agent 時）
