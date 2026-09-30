@@ -1230,6 +1230,20 @@ certutil -ping
 
 結果應與安裝前一致。確認後才進行下一台。
 
+**本案實測：DC02（2026-09-30）**
+
+| 檢查 | 安裝前 | 安裝後 |
+| --- | --- | --- |
+| 1515 連線 | — | `TcpTestSucceeded : True` |
+| `<address>` | — | 192.0.2.32 ✅ |
+| 服務 | — | `NET START Wazuh` 成功；WazuhSvc Running |
+| Agent log | — | 16:45:19 `Connected to the server` |
+| `dcdiag /q` | 無輸出 | **無輸出** ✅ |
+| 複寫 | 0／5 失敗 | **0／5 失敗**、0 錯誤 ✅ |
+| DNS、Kdc、Netlogon、NTDS | Running | **Running** ✅ |
+
+安裝前後一致，Agent 未影響 AD。複寫的「最大差異值」由約 30 分鐘變成約 52 分鐘，只代表這段期間沒有 AD 變更需要複寫，不是異常。
+
 #### 注意
 
 - 網域控制站的 Security 事件記錄量很大（登入、Kerberos 票證等），接上後告警與 Indexer 使用量會明顯增加，需觀察 CT 112 的 rootfs 與 CPU。
