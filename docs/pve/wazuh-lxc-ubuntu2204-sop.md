@@ -23,7 +23,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 3 | 建立 LXC | 已實測 | 2026-09-29：CT 112 位於 node12；已補 nesting=1、onboot=1，rootfs 線上加大為 80G（見 3-4） |
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
-| 6 | 驗證服務與登入 Dashboard | 進行中 | 2026-09-30：4 個服務皆 active、5 個 Port 正常；Filebeat、Dashboard 登入確認中 |
+| 6 | 驗證服務與登入 Dashboard | 進行中 | 2026-09-30：4 個服務皆 active、5 個 Port 正常、Filebeat→Indexer 連線 OK；Dashboard 登入確認中 |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 待做 | |
 | 8 | 備份與 HA | 待做 | |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
@@ -399,7 +399,7 @@ ss -tlnp | grep -E ':443|:1514|:1515|:9200|:55000'
 | --- | --- |
 | `systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard` | 4 個皆 `active` ✅ |
 | Port 監聽 | 1514（wazuh-remoted）、1515（wazuh-authd）、443（node）、55000（python3，IPv4＋IPv6）對所有介面；9200（java）只聽 127.0.0.1 ✅ |
-| `filebeat test output` | 待確認 |
+| `filebeat test output` | 連 `https://127.0.0.1:9200`：連線、TLS 1.2 握手（憑證鏈驗證啟用）、`talk to server... OK`，回報版本 7.10.2 ✅ |
 | Dashboard 登入 | 待確認 |
 
 ## 7. 安全收尾
