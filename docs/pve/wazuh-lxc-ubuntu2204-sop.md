@@ -1277,6 +1277,39 @@ certutil -ping
 - 網域控制站的 Security 事件記錄量很大（登入、Kerberos 票證等），接上後告警與 Indexer 使用量會明顯增加，需觀察 CT 112 的 rootfs 與 CPU。
 - 快照觀察 1～2 天後刪除：`qm delsnapshot <VMID> pre-wazuh-agent`。
 
+### 9-10 Proxmox Backup Server（PBS31）
+
+PBS 是獨立主機，不在 PVE 的 VM／CT 清單中；做法與 PVE 節點相同（9-2、9-2a），直接在 PBS 上以 root 執行。
+
+~~~bash
+# 1. 環境確認
+proxmox-backup-manager versions
+cat /etc/debian_version
+dpkg -l | grep -i wazuh || echo "尚未安裝"
+timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "port OK"
+
+# 2. 先裝相依套件，再帶環境變數全新安裝（不新增 Wazuh 套件庫）
+apt-get install -y lsb-release
+cd /tmp
+wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.8-1_amd64.deb
+WAZUH_MANAGER='192.0.2.32' dpkg -i ./wazuh-agent_4.14.8-1_amd64.deb
+
+# 3. 啟動前確認位址
+grep -A2 '<server>' /var/ossec/etc/ossec.conf
+
+# 4. 啟動
+systemctl daemon-reload
+systemctl enable --now wazuh-agent
+systemctl is-active wazuh-agent
+rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
+~~~
+
+注意：
+
+- 避開排程備份時段（本案每天 21:00）安裝，雖然 Agent 不會重啟 PBS 服務，仍以不干擾備份為原則。
+- **不要把 datastore 目錄加入 FIM**：備份資料量大、變動頻繁，會產生大量事件並拖慢掃描。預設 FIM 只監控系統目錄，不包含 datastore。
+- 安裝後確認 PBS 服務不受影響：`systemctl is-active proxmox-backup proxmox-backup-proxy`。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
