@@ -933,6 +933,20 @@ rm -rf /var/ossec
 pct list        # 在每台節點各執行一次
 ~~~
 
+本案清單（2026-09-30 `pct list`）：
+
+| CT ID | 名稱 | 節點 | 狀態 | 安裝順序 |
+| --- | --- | --- | --- | --- |
+| 103 | IPAM | node10 | running | ① 試裝 |
+| 102 | librenms | node10 | running | ② |
+| 105 | Graylog | node10 | running | ② |
+| 110 | ProxCenter | node10 | running | ② |
+| 100 | AdGuard | node10 | running | ③ DNS |
+| 101 | Pihole | node12 | running | ③ DNS |
+| 109 | wireguard | node10 | **stopped** | 暫緩，開機後再裝（`pct exec` 無法操作關機中的容器） |
+
+node11 目前沒有容器。
+
 以一台容器為例（`<CTID>` 換成實際 ID），在該容器所在的節點執行：
 
 ~~~bash
