@@ -1137,7 +1137,7 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 | `<address>` | `ossec.conf` 第 11 行為 192.0.2.32 ✅ |
 | 啟動 | `NET START Wazuh` → 「Wazuh 服務已經啟動成功」 |
 | 服務 | `Get-Service`：Status Running、Name **WazuhSvc**、DisplayName **Wazuh** |
-| log | 剛啟動時 `Connected` 尚未出現（註冊需要數十秒） |
+| log | 剛啟動時 `Connected` 尚未出現；稍後 16:04:02 `Connected to the server ([192.0.2.32]:1514/tcp)` ✅。同時段的 `Ignore 'registry' entry ...` 是預設設定中排除的登錄機碼，屬正常訊息 |
 | Manager | `ID: 012, Name: WinClient, Active` ✅ |
 
 #### Agent 總驗收（2026-09-30）
