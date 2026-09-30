@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）皆 Active；UBClient、Windows 待接 |
+| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）與 UBClient（011）皆 Active；Windows 待接 |
 
 ## 先認識四個名詞
 
@@ -1088,6 +1088,46 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 ~~~
 
 `sudo 變數=值 指令`：sudo 允許在指令前指定環境變數並傳給該指令；寫成 `WAZUH_MANAGER=... sudo dpkg ...` 則變數可能被 sudo 過濾掉。`/var/ossec` 只有 root 能讀，查設定檔也要 `sudo`。
+
+#### 本案實測：UBClient（VM 104，2026-09-30）
+
+| 項目 | 結果 |
+| --- | --- |
+| 作業系統 | `lsb_release -a` 顯示 **Ubuntu 24.04.4 LTS（noble）**；PVE 標籤寫 ub22.04，標籤需更新 |
+| `No LSB modules are available.` | Ubuntu 的正常訊息，不影響 |
+| SSH | 桌面版預設沒有 SSH 伺服器，先安裝 `openssh-server` 再連線操作 |
+| Port | `port OK` |
+| 安裝 | sudo 密碼輸入錯誤 3 次後重來；未加 sudo 時 dpkg 回報需要超級使用者權限；加上 sudo 後全新安裝成功 |
+| `<address>` | 192.0.2.32 ✅ |
+| 服務 | enable 並 active |
+| Manager | `ID: 011, Name: ubclient, Active` |
+
+sudo 輸入錯誤發生在 Agent 安裝之前；logcollector 預設只讀取啟動後的新紀錄，所以那幾次失敗不會出現在 Wazuh。要驗證 Agent 是否正常回報，可在安裝後故意輸錯一次 sudo 或 SSH 密碼，再到 Dashboard 搜尋。
+
+### 9-8 Windows（WinClient）
+
+以系統管理員身分開啟 PowerShell：
+
+~~~powershell
+# 1. 確認連得到 Manager
+Test-NetConnection 192.0.2.32 -Port 1514
+Test-NetConnection 192.0.2.32 -Port 1515
+
+# 2. 下載並安裝（指定 4.14.8，與 Manager 相同）
+Invoke-WebRequest -Uri https://packages.wazuh.com/4.x/windows/wazuh-agent-4.14.8-1.msi -OutFile $env:TEMP\wazuh-agent.msi
+Start-Process msiexec.exe -ArgumentList "/i `"$env:TEMP\wazuh-agent.msi`" /q WAZUH_MANAGER=`"192.0.2.32`"" -Wait
+
+# 3. 啟動前確認位址
+Select-String -Path 'C:\Program Files (x86)\ossec-agent\ossec.conf' -Pattern '<address>'
+
+# 4. 啟動並確認
+NET START Wazuh
+Get-Service | Where-Object DisplayName -like 'Wazuh*'
+Get-Content 'C:\Program Files (x86)\ossec-agent\ossec.log' -Tail 20 | Select-String 'Connected|ERROR'
+Remove-Item $env:TEMP\wazuh-agent.msi
+~~~
+
+說明：`Start-Process ... -Wait` 會等安裝完成才回到提示字元；直接執行 `msiexec` 會立刻返回，下一步可能在安裝完成前就執行。
 
 ## 風險與注意事項
 
