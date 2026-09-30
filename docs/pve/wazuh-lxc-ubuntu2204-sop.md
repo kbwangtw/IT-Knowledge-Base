@@ -625,8 +625,10 @@ systemctl restart wazuh-manager
 
 ~~~bash
 pvesh get /cluster/backup --output-format yaml     # 看既有的排程備份工作（是否已包含 112 或 all）
-vzdump 112 --storage PBS31 --mode snapshot --notes-template '{{guestname}} Wazuh 4.14 安裝完成'
+vzdump 112 --storage PBS31 --mode snapshot --protected 1 --notes-template '{{guestname}} Wazuh 4.14 安裝完成'
 ~~~
+
+`vzdump` 要在 **CT 目前所在的節點**執行。`--protected 1` 讓這份備份不會被 prune 保留策略自動刪除；不再需要時，到 PBS31 取消保護即可。
 
 | 模式 | 說明 | 本案選擇 |
 | --- | --- | --- |
@@ -637,6 +639,18 @@ vzdump 112 --storage PBS31 --mode snapshot --notes-template '{{guestname}} Wazuh
 Indexer 持續寫入，snapshot 模式得到的是「像突然斷電那一刻」的狀態（crash-consistent）。OpenSearch 通常能自行恢復，但**只有做過還原測試才算數**。
 
 ### 8-2 加入排程備份
+
+本案現況（2026-09-30）：既有排程工作已涵蓋全部 guest，CT 112 自動納入，不需另外設定。
+
+| 項目 | 值 |
+| --- | --- |
+| 範圍 | `all: 1`（全部 VM／CT） |
+| 時間 | 每天 21:00 |
+| 模式 | snapshot（fleecing 未啟用） |
+| 目的地 | PBS31 |
+| 保留 | keep-last 3、keep-daily 7 |
+| 備註範本 | `{{guestname}}` |
+
 
 Datacenter → Backup：若既有工作是「All」則已自動包含；否則編輯工作把 112 加入，或新增一個工作（Storage：PBS31、Mode：Snapshot）。保留策略依 PBS 的 prune 設定。
 
