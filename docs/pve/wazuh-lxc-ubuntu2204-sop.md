@@ -1031,6 +1031,8 @@ pct delsnapshot <CTID> pre-wazuh-agent
 
 本案結果（2026-09-30）：AdGuard（100，node10）與 Pi-hole（101，node12）先做快照再安裝；安裝後 `AdGuardHome`、`pihole-FTL` 皆 active；Manager 顯示 `ID: 008, Name: AdGuard, Active`、`ID: 009, Name: Pihole, Active`。快照待觀察一兩天、DNS 正常後刪除。
 
+WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking wazuh-agent (4.14.8-1) over (4.14.8-1)`，代表容器內**原本已裝過 Agent**，這次是同版本覆蓋安裝；設定檔位址正確、服務 active，`wg show` 顯示 wg0 不受影響。安裝前可先用 `pct exec <CTID> -- dpkg -l wazuh-agent` 確認，避免重複安裝。
+
 #### Debian 13 容器總驗收（2026-09-30）
 
 | ID | 名稱 | CT | 節點 | 狀態 |
@@ -1041,7 +1043,7 @@ pct delsnapshot <CTID> pre-wazuh-agent
 | 007 | ProxCenter | 110 | node10 | Active |
 | 008 | AdGuard | 100 | node10 | Active |
 | 009 | Pihole | 101 | node12 | Active |
-| — | wireguard | 109 | node10 | 關機中，未安裝 |
+| — | wireguard | 109 | node10 | 開機後安裝，Manager 端確認中 |
 
 說明：
 
