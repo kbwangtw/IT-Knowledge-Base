@@ -983,6 +983,12 @@ pct exec <CTID> -- rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 
 `Pending` 表示已註冊、Manager 尚未收到第一次完整回報，通常數十秒內會轉為 Active。容器 log 時間為 UTC（容器時區未改），與節點台灣時間相差 8 小時，屬顯示差異。
 
+#### 本案實測：librenms（CT 102，2026-09-30）
+
+手動逐步安裝。07:08:14 `Connected to the server`；logcollector 同樣自動讀取 `/var/log/nginx/error.log`；Manager 顯示 `ID: 005, Name: librenms, Active`。
+
+已安裝的容器不要放進批次迴圈：同版本覆蓋安裝沒有好處，還可能讓 Agent 重啟。
+
 #### 批次安裝其餘容器
 
 試裝成功後，用迴圈處理同一節點上的其他容器。位址不正確的容器不會被啟動：
