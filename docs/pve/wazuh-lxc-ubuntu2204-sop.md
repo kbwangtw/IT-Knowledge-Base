@@ -4,14 +4,14 @@ title: "在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）"
 date: 2026-09-29
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-sop/
-last_modified_at: 2026-09-29
+last_modified_at: 2026-09-30
 ---
 
 # 在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）
 
 Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「安全判讀」：主機完整性檢查（FIM）、弱點偵測、設定稽核與入侵告警。本文記錄在 PVE Cluster 上建立一台 Ubuntu 22.04 LXC，以 All-in-one（Indexer + Server + Dashboard 同一台）方式安裝 Wazuh 的步驟。
 
-> 文件狀態：**草稿，邊做邊寫**（2026-09-29 起）。下方「進度表」會隨實際操作更新；尚未標示「已實測」的步驟，都只是預定作法，不是完成報告。
+> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 與三台 PVE 節點的 Agent 皆完成驗證；測試用 Linux 與 Windows Agent 尚未接入，完成後補記。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
 
 ## 進度表
 
@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 第一台 Agent（建議先接一台 PVE 節點） | 進行中 | 2026-09-30：三台 PVE 節點 Agent 皆 Active（001 node11、002 node10、003 node12）；測試用 Linux、Windows 待接 |
+| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點 Agent 皆 Active（001 node11、002 node10、003 node12）；測試用 Linux、Windows 待接 |
 
 ## 先認識四個名詞
 
@@ -796,7 +796,7 @@ ha-manager status | grep -E 'ct:112|lrm'
 
 注意：加入 HA 後，要關機或遷移請透過 HA（GUI 或 `ha-manager`），直接 `pct shutdown` 可能被 HA 自動拉起來。
 
-## 9. 第一台 Agent
+## 9. 接上 Agent
 
 本案順序（2026-09-30 決定）：先接一台 PVE 節點（node11），再接測試用 Linux VM／CT，最後接 Windows 管理電腦。node11 目前沒有 HA 資源、負載最輕，Agent 有狀況時影響最小。
 
@@ -925,6 +925,7 @@ rm -rf /var/ossec
 - 所有節點 `vm.max_map_count` 都必須 ≥ 262144，否則 HA／遷移後 Indexer 可能起不來。
 - 資料量成長很快，需規劃 Index 保留天數（Index State Management），並監控 rootfs 用量。
 - Indexer 對儲存 I/O 敏感；放在 Ceph 上時，觀察 Ceph 延遲是否因此上升。
+- PVE 節點裝上 Agent 後告警量會明顯增加（`/etc/pve` 變更、套件異動、CIS 設定稽核），先觀察再調校，不要一次關閉大量規則。
 - 文中 IP 皆為文件示範位址（192.0.2.0/24），指令執行前請替換。
 
 ## 參考資料
