@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 6 台 Debian 13 容器（004～009）皆 Active；WireGuard（關機中）、Windows 待接 |
+| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）皆 Active；UBClient、Windows 待接 |
 
 ## 先認識四個名詞
 
@@ -1031,7 +1031,7 @@ pct delsnapshot <CTID> pre-wazuh-agent
 
 本案結果（2026-09-30）：AdGuard（100，node10）與 Pi-hole（101，node12）先做快照再安裝；安裝後 `AdGuardHome`、`pihole-FTL` 皆 active；Manager 顯示 `ID: 008, Name: AdGuard, Active`、`ID: 009, Name: Pihole, Active`。快照待觀察一兩天、DNS 正常後刪除。
 
-WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking wazuh-agent (4.14.8-1) over (4.14.8-1)`，代表容器內**原本已裝過 Agent**，這次是同版本覆蓋安裝；設定檔位址正確、服務 active，`wg show` 顯示 wg0 不受影響。安裝前可先用 `pct exec <CTID> -- dpkg -l wazuh-agent` 確認，避免重複安裝。
+WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking wazuh-agent (4.14.8-1) over (4.14.8-1)`，代表容器內**原本已裝過 Agent**，這次是同版本覆蓋安裝；設定檔位址正確、服務 active，`wg show` 顯示 wg0 不受影響。Manager 端只有一筆 `ID: 010, Name: wireguard, Active`，沒有重複註冊。另以 `apt autoremove`（先 `--dry-run` 確認）移除容器內用不到的 `linux-image-6.12.73+deb13-rt-amd64`，釋放 111 MB；容器使用主機 kernel，不需要自己的 kernel 套件。安裝前可先用 `pct exec <CTID> -- dpkg -l wazuh-agent` 確認，避免重複安裝。
 
 #### Debian 13 容器總驗收（2026-09-30）
 
@@ -1043,7 +1043,7 @@ WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking
 | 007 | ProxCenter | 110 | node10 | Active |
 | 008 | AdGuard | 100 | node10 | Active |
 | 009 | Pihole | 101 | node12 | Active |
-| — | wireguard | 109 | node10 | 開機後安裝，Manager 端確認中 |
+| 010 | wireguard | 109 | node10 | Active |
 
 說明：
 
@@ -1059,6 +1059,18 @@ UBClient 是 VM，不是容器，`pct push`／`pct exec` 不適用，要登入 V
 ~~~bash
 qm list        # 各節點執行，找 UBClient 的 VMID 與狀態
 ~~~
+
+本案 VM 清單（2026-09-30 `qm list`）：
+
+| VMID | 名稱 | 節點 | 狀態 |
+| --- | --- | --- | --- |
+| 104 | UBClient | node11 | running |
+| 108 | WinClient | node11 | running |
+| 107 | DC02 | node11 | running |
+| 106 | DC01 | node12 | running |
+| 111 | CA | node12 | running |
+
+node10 沒有 VM。
 
 VM 內（一般使用者需 `sudo`）：
 
