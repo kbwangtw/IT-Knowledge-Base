@@ -429,6 +429,8 @@ ls -l /root/wazuh-install-files.tar
 
 用 `read -s` 輸入密碼，畫面不顯示、也不會留在 bash history：
 
+`read` 引號內的文字只是**提示字**，照抄即可；按 Enter 後，在「新的 admin 密碼:」後面輸入密碼（畫面不會顯示），再按 Enter。**不要把密碼寫進引號裡**，否則密碼會顯示在畫面上並留在 history。執行工具前先用 `echo "長度：${#NEWPW}"` 確認不是 0。
+
 ~~~bash
 read -rsp '新的 admin 密碼: ' NEWPW; echo
 bash /usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh -u admin -p "$NEWPW"
