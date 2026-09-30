@@ -25,7 +25,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
-| 8 | 備份與 HA | 進行中 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；HA 待做 |
+| 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
 
 ## 先認識四個名詞
@@ -784,11 +784,50 @@ ha-manager status | grep -E 'ct:112|lrm'
 
 節點故障時，HA 會在 fencing 完成後（通常約 2～3 分鐘）於其他節點重新啟動 CT 112。LXC 是重新開機而非線上接手，服務會中斷數分鐘。
 
+**本案實測（2026-09-30）**：`ha-manager add ct:112 --state started --max_restart 1 --max_relocate 1` 後，`ha-manager status` 顯示 `service ct:112 (node10, started)`，三台 LRM 狀態與加入前相同；加入 HA 過程未重開 CT。
+
+加入後 node10 上有 4 個 HA 資源（ct:100、110、112、113）。node10 故障時會同時在其他節點重啟，目前 node11 可用記憶體約 44 GiB，容量足夠；資源增加後可考慮用 HA 規則分散。
+
+| 想做的事 | 不要用 | 改用 |
+| --- | --- | --- |
+| 關機 | `pct shutdown 112` | GUI Shutdown，或 `ha-manager set ct:112 --state stopped` |
+| 遷移 | `pct migrate 112 ...` | GUI Migrate，或 `ha-manager migrate ct:112 <節點>` |
+| 維護時暫停 HA 管理 | — | `ha-manager set ct:112 --state ignored` |
+
 注意：加入 HA 後，要關機或遷移請透過 HA（GUI 或 `ha-manager`），直接 `pct shutdown` 可能被 HA 自動拉起來。
 
 ## 9. 第一台 Agent
 
-建議先把一台 PVE 節點接進來，驗證 1514／1515 通、告警有進 Dashboard，再擴大範圍。詳細步驟待實作時補上。
+### 9-1 版本原則
+
+Agent 版本不可高於 Manager（本案 4.14.8）。安裝時指定版本號，避免裝到比 Manager 新的版本。
+
+### 9-2 Linux（Debian／Ubuntu）：下載 .deb 安裝，不加套件庫
+
+PVE 節點或其他重要主機建議用這個方式：直接安裝 .deb，不在主機上新增 Wazuh 套件庫，日後 `apt upgrade` 不會連帶升級 Agent。
+
+~~~bash
+cd /tmp
+wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.8-1_amd64.deb
+WAZUH_MANAGER='192.0.2.32' WAZUH_AGENT_NAME='<主機名稱>' dpkg -i ./wazuh-agent_4.14.8-1_amd64.deb
+systemctl daemon-reload
+systemctl enable --now wazuh-agent
+systemctl is-active wazuh-agent
+~~~
+
+也可在 Dashboard 的 **Deploy new agent** 精靈選擇作業系統與 Manager 位址，產生對應指令後核對版本再執行。
+
+### 9-3 驗證
+
+~~~bash
+# Agent 端
+grep -iE 'connected|error' /var/ossec/logs/ossec.log | tail -5
+
+# Manager 端（CT 112 內）
+/var/ossec/bin/agent_control -l
+~~~
+
+Dashboard → Agents management → Summary 應看到新 Agent，狀態為 **Active**。
 
 ## 風險與注意事項
 
