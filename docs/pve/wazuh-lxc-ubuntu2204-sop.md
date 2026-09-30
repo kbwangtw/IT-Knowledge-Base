@@ -919,6 +919,49 @@ rm -rf /var/ossec
 
 預設的檔案完整性監控（FIM）會掃 `/etc`，其中包含叢集檔案系統 `/etc/pve`。`/etc/pve` 的變更會同步到每台節點，三台都裝 Agent 時同一個變更會產生三份告警。先以預設值觀察一段時間，再決定是否在 Agent 的 `ossec.conf` 加入 `<ignore>/etc/pve</ignore>`，或改由 Manager 端規則處理。FIM 只記錄雜湊值，除非啟用 `report_changes`，不會保存檔案內容。
 
+### 9-6 Debian 13 LXC 容器：從 PVE 節點推送安裝
+
+本案 Debian 13 的服務都跑在 LXC 容器裡（AdGuard、Graylog、IPAM、LibreNMS、Pi-hole、ProxCenter、WireGuard）。做法是在 PVE 節點把 .deb 推進容器、用 `pct exec` 安裝：
+
+- 容器內不需要 wget／curl，也不必能連到 packages.wazuh.com。
+- 所有指令都在節點上執行，容易逐台複製。
+- 同樣不在容器內新增 Wazuh 套件庫。
+
+`pct push`／`pct exec` 只能操作**目前在這台節點上**的容器，先確認 CT ID 與所在節點：
+
+~~~bash
+pct list        # 在每台節點各執行一次
+~~~
+
+以一台容器為例（`<CTID>` 換成實際 ID），在該容器所在的節點執行：
+
+~~~bash
+# 1. 節點上準備 .deb（已下載過可略過）
+cd /tmp && [ -f wazuh-agent_4.14.8-1_amd64.deb ] || wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.8-1_amd64.deb
+
+# 2. 容器能連到 Manager
+pct exec <CTID> -- bash -c "timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo 'port OK'"
+
+# 3. 推送 .deb，先裝相依套件，再全新安裝
+pct push <CTID> /tmp/wazuh-agent_4.14.8-1_amd64.deb /tmp/wazuh-agent_4.14.8-1_amd64.deb
+pct exec <CTID> -- apt-get install -y lsb-release
+pct exec <CTID> -- env WAZUH_MANAGER='192.0.2.32' dpkg -i /tmp/wazuh-agent_4.14.8-1_amd64.deb
+
+# 4. 啟動前確認位址
+pct exec <CTID> -- grep -A2 '<server>' /var/ossec/etc/ossec.conf
+
+# 5. 啟動、驗證、清掉安裝檔
+pct exec <CTID> -- bash -c 'systemctl daemon-reload && systemctl enable --now wazuh-agent && systemctl is-active wazuh-agent'
+pct exec <CTID> -- rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
+~~~
+
+說明：
+
+- `pct exec <CTID> -- env 變數=值 指令`：`pct exec` 不經過 shell，要用 `env` 把環境變數帶給 dpkg。
+- 沒有指定 `WAZUH_AGENT_NAME` 時，Agent 以容器的 hostname 註冊。
+- 先挑一台影響最小的容器試裝，確認 Dashboard 出現 Active 後再逐台安裝。DNS（AdGuard、Pi-hole）與 VPN（WireGuard）這類基礎服務排在後面。
+- 容器與主機共用 kernel，Agent 在容器內看到的是容器自己的檔案與行程；rootcheck 等模組在容器內可能出現與實體主機不同的結果，接上後觀察再調校。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
