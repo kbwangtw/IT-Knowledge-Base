@@ -24,7 +24,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
-| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 待做 | |
+| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 進行中 | 2026-09-30：管理與 Agent 皆在同一網段，防火牆規則規劃完成 |
 | 8 | 備份與 HA | 待做 | |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
 
@@ -423,14 +423,38 @@ ls -l /root/wazuh-install-files.tar
 
 建議另存一份到離線、受控的位置（例如內部加密儲存），不要放到雲端或本倉庫。注意：CT 112 的 PBS 備份也會包含這個檔案，備份的存取權限要一併管控。
 
-需要更換 admin 密碼時，使用 Indexer 內附的工具（密碼需 8～64 字元，含大小寫、數字與符號）：
+#### 更換 admin 密碼
+
+密碼規則：8～64 字元，須同時包含大寫、小寫、數字，以及 `.*+?-` 其中一個符號（其他符號可能被工具拒絕）。
+
+用 `read -s` 輸入密碼，畫面不顯示、也不會留在 bash history：
 
 ~~~bash
-bash /usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh -u admin -p '<新密碼>'
-filebeat test output       # 改完確認 Filebeat 仍能連到 Indexer
+read -rsp '新的 admin 密碼: ' NEWPW; echo
+bash /usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh -u admin -p "$NEWPW"
+unset NEWPW
 ~~~
 
-在指令前加一個空白，Ubuntu 預設（HISTCONTROL=ignoreboth）就不會把這行記進 bash history。
+改完驗證：
+
+~~~bash
+filebeat test output          # 最後要出現 talk to server... OK
+systemctl is-active filebeat wazuh-dashboard
+~~~
+
+再用新密碼登入 Dashboard。
+
+**為什麼要測 Filebeat？** All-in-one 的 Filebeat 預設用 admin 帳號寫入 Indexer，密碼存在 Filebeat keystore。All-in-one 環境下工具通常會一併更新；若 `talk to server` 失敗，手動更新 keystore：
+
+~~~bash
+read -rsp '新的 admin 密碼: ' NEWPW; echo
+echo "$NEWPW" | filebeat keystore add password --stdin --force
+unset NEWPW
+systemctl restart filebeat
+filebeat test output
+~~~
+
+Dashboard 連 Indexer 用的是另一個內部帳號（kibanaserver），改 admin 不影響 Dashboard 服務本身。
 
 ### 7-2 暫停 Wazuh 套件自動更新
 
@@ -441,18 +465,60 @@ sed -i "s/^deb /#deb /" /etc/apt/sources.list.d/wazuh.list
 apt update
 ~~~
 
-### 7-3 限制誰能連
+### 7-3 限制誰能連（PVE Firewall）
 
-建議在 PVE Firewall（CT → Firewall）只開放必要來源：
+本案管理電腦與 Agent 都在同一個網段（示範：`192.0.2.0/24`）。規劃：
 
-| Port | 允許來源 |
+| Port | 用途 | 允許來源 |
+| --- | --- | --- |
+| 443/tcp | Dashboard | 管理網段 |
+| 1514/tcp | Agent 傳送資料 | Agent 網段 |
+| 1515/tcp | Agent 註冊 | Agent 網段 |
+| 22/tcp | SSH | 管理網段 |
+| ICMP | ping 排錯 | 管理網段 |
+| 55000/tcp | Wazuh API | **不開放**：Dashboard 在本機以 127.0.0.1 呼叫 API，外部不需要 |
+
+**(1) 先確認現況**（在任一節點）：
+
+~~~bash
+cat /etc/pve/firewall/cluster.fw 2>/dev/null | head -20   # 資料中心層級：[OPTIONS] 是否 enable: 1
+cat /etc/pve/firewall/112.fw 2>/dev/null                  # CT 層級：是否已有規則
+~~~
+
+PVE 防火牆分三層：資料中心 → 節點 → VM／CT。**資料中心層級沒有啟用時，CT 的規則不會生效**。啟用資料中心防火牆會影響所有節點（包括 8006 管理介面與 SSH），屬於另一項變更，須另行規劃，不在本 SOP 內直接開啟。
+
+**(2) 寫入 CT 規則**（檔案在叢集檔案系統上，任一節點寫入即同步）：
+
+~~~bash
+cat > /etc/pve/firewall/112.fw <<'FWEOF'
+[OPTIONS]
+enable: 1
+policy_in: DROP
+policy_out: ACCEPT
+
+[RULES]
+IN ACCEPT -source 192.0.2.0/24 -p tcp -dport 443 # Wazuh Dashboard
+IN ACCEPT -source 192.0.2.0/24 -p tcp -dport 1514 # Wazuh agent events
+IN ACCEPT -source 192.0.2.0/24 -p tcp -dport 1515 # Wazuh agent enrollment
+IN SSH(ACCEPT) -source 192.0.2.0/24 # SSH
+IN Ping(ACCEPT) -source 192.0.2.0/24 # ICMP ping
+FWEOF
+pve-firewall compile > /dev/null && echo "syntax OK"
+~~~
+
+`policy_in: DROP` 表示「沒有明確允許的連入一律丟棄」。網卡需有 `firewall=1`（本案已設定）規則才會套用。
+
+**(3) 驗證**（從管理網段的電腦）：
+
+| 測試 | 預期 |
 | --- | --- |
-| 443/tcp | 管理網段 |
-| 1514/tcp、1515/tcp | 需要裝 Agent 的主機網段 |
-| 55000/tcp | 管理網段（沒有用 API 可不開） |
-| 22/tcp | 管理網段 |
+| 瀏覽 `https://<Wazuh IP>` | 可登入 |
+| `Test-NetConnection <Wazuh IP> -Port 1514`（Windows）或 `nc -zv <Wazuh IP> 1514`（Linux） | 成功 |
+| 同上測 55000 | **失敗**（已被擋） |
 
-開啟防火牆前，先加好管理網段的允許規則，避免把自己擋在外面。
+**回復方式**：規則有誤時，把 `112.fw` 的 `enable: 1` 改成 `enable: 0` 即停用。即使網路規則寫錯，仍可在節點上用 `pct enter 112` 進入容器。
+
+**判讀限制**：管理與 Agent 都在同一網段時，這組規則的主要效果是關閉 55000 與其他未列出的 Port，並阻擋其他網段（如 VPN、其他 VLAN）連入；同網段內的主機仍可連 443／1514／1515。
 
 ## 8. 備份與 HA
 
