@@ -1093,7 +1093,7 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 
 | 項目 | 結果 |
 | --- | --- |
-| 作業系統 | `lsb_release -a` 顯示 **Ubuntu 24.04.4 LTS（noble）**；PVE 標籤寫 ub22.04，標籤需更新 |
+| 作業系統 | `lsb_release -a` 顯示 **Ubuntu 24.04.4 LTS（noble）**；PVE 標籤原寫 ub22.04，已於 2026-09-30 更正為 ub24.04 |
 | `No LSB modules are available.` | Ubuntu 的正常訊息，不影響 |
 | SSH | 桌面版預設沒有 SSH 伺服器，先安裝 `openssh-server` 再連線操作 |
 | Port | `port OK` |
