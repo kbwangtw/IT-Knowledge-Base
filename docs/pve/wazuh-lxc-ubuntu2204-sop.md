@@ -1165,6 +1165,56 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 
 服務內部名稱為 `WazuhSvc`，顯示名稱為 `Wazuh`；`NET START`／`NET STOP` 用顯示名稱或內部名稱皆可，PowerShell 可用 `Restart-Service WazuhSvc`。
 
+### 9-9 網域控制站與 CA（DC01、DC02、CA）
+
+安裝方式與 9-8 相同（MSI + PowerShell），差別在安裝前後的檢查。
+
+| VMID | 名稱 | 節點 |
+| --- | --- | --- |
+| 106 | DC01 | node12 |
+| 107 | DC02 | node11 |
+| 111 | CA | node12 |
+
+#### (1) 安裝前：快照與 VM-GenerationID
+
+~~~bash
+qm config <VMID> | grep -E 'vmgenid|ostype'
+qm snapshot <VMID> pre-wazuh-agent --description "安裝 Wazuh Agent 前"
+~~~
+
+**網域控制站的快照回復有風險。** 多台 DC 的環境中，把其中一台回復到舊快照，可能造成 **USN rollback**：這台 DC 的複寫紀錄倒退，與其他 DC 不一致。Windows Server 2012 以後搭配 hypervisor 的 **VM-GenerationID**（PVE 的 `vmgenid` 設定）可以偵測回復並保護 AD，因此要先確認 `vmgenid` 存在。即使有保護，**DC 的快照只作為最後手段**；Agent 有問題時優先解除安裝，而不是回復快照。
+
+#### (2) 安裝前：記錄 AD 健康基準（在 DC 上，系統管理員 PowerShell）
+
+~~~powershell
+netdom query fsmo                       # 哪台 DC 持有 FSMO 角色
+repadmin /replsummary                   # 複寫摘要，fails 應為 0
+dcdiag /q                               # 只列出錯誤；沒有輸出代表健康
+Get-Service NTDS,DNS,Netlogon,Kdc | Format-Table Name,Status
+~~~
+
+先記下安裝前的結果，安裝後才能比較。安裝順序：先裝**沒有 FSMO 角色**的 DC，確認正常後再裝持有 FSMO 的 DC，最後裝 CA。
+
+CA 的基準：
+
+~~~powershell
+Get-Service CertSvc | Format-Table Name,Status
+certutil -ping
+~~~
+
+#### (3) 安裝
+
+依 9-8 的步驟執行（Test-NetConnection → 下載 MSI → `Start-Process ... -Wait` → 確認 `<address>` → `NET START Wazuh`）。
+
+#### (4) 安裝後：再跑一次 (2) 的檢查並比較
+
+結果應與安裝前一致。確認後才進行下一台。
+
+#### 注意
+
+- 網域控制站的 Security 事件記錄量很大（登入、Kerberos 票證等），接上後告警與 Indexer 使用量會明顯增加，需觀察 CT 112 的 rootfs 與 CPU。
+- 快照觀察 1～2 天後刪除：`qm delsnapshot <VMID> pre-wazuh-agent`。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
