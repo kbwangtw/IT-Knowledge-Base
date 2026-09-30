@@ -1050,6 +1050,31 @@ pct delsnapshot <CTID> pre-wazuh-agent
 - 先挑一台影響最小的容器試裝，確認 Dashboard 出現 Active 後再逐台安裝。DNS（AdGuard、Pi-hole）與 VPN（WireGuard）這類基礎服務排在後面。
 - 容器與主機共用 kernel，Agent 在容器內看到的是容器自己的檔案與行程；rootcheck 等模組在容器內可能出現與實體主機不同的結果，接上後觀察再調校。
 
+### 9-7 Ubuntu VM（UBClient）
+
+UBClient 是 VM，不是容器，`pct push`／`pct exec` 不適用，要登入 VM 內安裝（SSH 或 PVE Console）。先在節點確認 VM 狀態：
+
+~~~bash
+qm list        # 各節點執行，找 UBClient 的 VMID 與狀態
+~~~
+
+VM 內（一般使用者需 `sudo`）：
+
+~~~bash
+lsb_release -a                                  # Ubuntu 預設已有 lsb-release
+timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "port OK"
+cd /tmp
+wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.8-1_amd64.deb
+sudo WAZUH_MANAGER='192.0.2.32' dpkg -i ./wazuh-agent_4.14.8-1_amd64.deb
+sudo grep -A2 '<server>' /var/ossec/etc/ossec.conf
+sudo systemctl daemon-reload
+sudo systemctl enable --now wazuh-agent
+systemctl is-active wazuh-agent
+rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
+~~~
+
+`sudo 變數=值 指令`：sudo 允許在指令前指定環境變數並傳給該指令；寫成 `WAZUH_MANAGER=... sudo dpkg ...` 則變數可能被 sudo 過濾掉。`/var/ossec` 只有 root 能讀，查設定檔也要 `sudo`。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
