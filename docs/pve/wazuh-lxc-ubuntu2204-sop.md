@@ -24,7 +24,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
-| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 進行中 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 已改為只聽 127.0.0.1 |
+| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 待做 | |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
 
@@ -604,7 +604,7 @@ tail -5 /var/ossec/logs/api.log
 | `wazuh-manager` | active ✅ |
 | `ss` | 只剩 `127.0.0.1:55000`（原本的 `0.0.0.0` 與 `[::]` 已消失）✅ |
 | `api.log` | `RBAC database integrity check finished successfully`、`Listening on ['127.0.0.1']:55000` ✅ |
-| Dashboard 與外部 55000 測試 | 待確認 |
+| 外部測試（管理電腦 PowerShell） | `Test-NetConnection -Port 55000` → `TcpTestSucceeded : False`（Ping 仍 True）；`-Port 443` → `True` ✅ |
 
 升級 Wazuh 後要再檢查一次這行設定是否保留。
 
@@ -619,9 +619,57 @@ systemctl restart wazuh-manager
 
 ## 8. 備份與 HA
 
-- 將 CT 加入既有 PBS 備份排程；Indexer 持續寫入，建議用 snapshot 模式，並另排一次還原測試。
-- 要加入 HA 前，確認：rootfs 在共用儲存、所有節點都已完成步驟 1、`nesting=1` 已設定。
-- 做一次手動遷移（`pct migrate` 或 GUI Migrate），確認換節點後 Indexer 能正常啟動。
+### 8-1 先做一次手動備份
+
+安裝與安全設定完成後，先留一個「乾淨狀態」的備份點。在 CT 所在節點：
+
+~~~bash
+pvesh get /cluster/backup --output-format yaml     # 看既有的排程備份工作（是否已包含 112 或 all）
+vzdump 112 --storage PBS31 --mode snapshot --notes-template '{{guestname}} Wazuh 4.14 安裝完成'
+~~~
+
+| 模式 | 說明 | 本案選擇 |
+| --- | --- | --- |
+| snapshot | 不停機；先對 RBD 做快照再備份 | ✅ 日常排程 |
+| suspend | 短暫凍結 CT | — |
+| stop | 關機備份，資料一致性最高，會停機數分鐘 | 需要「完全一致」的備份點時使用 |
+
+Indexer 持續寫入，snapshot 模式得到的是「像突然斷電那一刻」的狀態（crash-consistent）。OpenSearch 通常能自行恢復，但**只有做過還原測試才算數**。
+
+### 8-2 加入排程備份
+
+Datacenter → Backup：若既有工作是「All」則已自動包含；否則編輯工作把 112 加入，或新增一個工作（Storage：PBS31、Mode：Snapshot）。保留策略依 PBS 的 prune 設定。
+
+### 8-3 還原測試
+
+還原成**另一個 CT ID**，並在開機前斷開網路，避免和正式機 IP 衝突：
+
+~~~bash
+pvesm list PBS31 --vmid 112                              # 找到備份的 volid
+pct restore <新CTID> <volid> --storage VM_Pool
+pct set <新CTID> --net0 name=eth0,bridge=vmbr0,ip=192.0.2.99/24,gw=192.0.2.1,link_down=1
+pct start <新CTID>
+pct exec <新CTID> -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
+~~~
+
+驗收後刪除測試 CT：`pct stop <新CTID> && pct destroy <新CTID>`。
+
+### 8-4 遷移測試與 HA
+
+LXC 不支援線上遷移，只能「重啟式遷移」，會中斷約 1～2 分鐘加上服務啟動時間：
+
+~~~bash
+pct migrate 112 <目標節點> --restart
+# 遷移後在目標節點
+pct exec 112 -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
+~~~
+
+加入 HA 前確認：rootfs 在共用儲存（VM_Pool）、所有節點 `vm.max_map_count` ≥ 262144、`nesting=1` 已設定、手動遷移測試成功。
+
+~~~bash
+ha-manager add ct:112 --state started
+ha-manager status
+~~~
 
 ## 9. 第一台 Agent
 
