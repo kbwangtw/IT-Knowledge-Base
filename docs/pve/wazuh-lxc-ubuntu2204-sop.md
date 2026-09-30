@@ -704,6 +704,8 @@ exit
 
 結論：snapshot 模式的備份可完整還原，Indexer 啟動後資料一致，告警索引與筆數都在。從 PBS 還原約 2 分鐘，加上服務啟動約 1～2 分鐘，可作為 RTO 參考。
 
+測試完成後已刪除 CT 114（`pct destroy 114 --purge`）。
+
 操作提醒：`pct enter` 會開新的 shell，和後面的指令一起貼上時，後面幾行會排在節點的 shell，等離開容器後才在**節點上**執行。`pct enter` 要單獨執行。
 
 驗收標準：4 個服務 active、叢集健康 green（或 yellow 並能說明原因）、可以看到還原前的告警索引。
@@ -746,10 +748,43 @@ pct exec 112 -- ss -tlnp | grep -E ':443 |:1514|:1515|:55000'
 
 加入 HA 前確認：rootfs 在共用儲存（VM_Pool）、所有節點 `vm.max_map_count` ≥ 262144、`nesting=1` 已設定、手動遷移測試成功。
 
+**加入前先看 HA 現況**（任一節點）：
+
 ~~~bash
-ha-manager add ct:112 --state started
-ha-manager status
+ha-manager status          # quorum、master、各節點 lrm 狀態、既有 HA 資源
+ha-manager config          # 既有 HA 資源清單
+ha-manager rules config 2>/dev/null   # PVE 9 的 HA 規則（取代舊版 HA groups）
 ~~~
+
+**盲點：HA 會啟用節點的 watchdog 自我隔離（fencing）。** 節點上一旦有 HA 資源，該節點的 LRM 會變成 active 並啟動 watchdog；之後若這台節點失去 quorum（例如叢集網路中斷），它會**自動重開機**以保護資料。如果叢集原本已經有 HA 資源，這是既有行為；如果 CT 112 是第一個 HA 資源，等於替叢集新增了這項機制，需要先確認叢集網路穩定。
+
+**本案現況（2026-09-30）**：
+
+| 項目 | 狀態 |
+| --- | --- |
+| quorum | OK；HA master 為 node12；fencing armed |
+| LRM | node10 active／watchdog active；node11 idle／standby；node12 active／watchdog active |
+| 既有 HA 資源 | ct:100、ct:110、ct:113（node10）；ct:101（node12），皆 started |
+| HA 規則 | 未設定 |
+
+CT 112 目前在 node10，而 node10 的 LRM 本來就是 active，加入 HA 不會新增 fencing 行為。
+
+加入 HA：
+
+~~~bash
+ha-manager add ct:112 --state started --max_restart 1 --max_relocate 1
+ha-manager status | grep -E 'ct:112|lrm'
+~~~
+
+| 參數 | 意思 |
+| --- | --- |
+| `--state started` | HA 會確保它維持開機 |
+| `--max_restart 1` | 在原節點啟動失敗時，重試 1 次 |
+| `--max_relocate 1` | 仍失敗時，最多搬到其他節點 1 次 |
+
+節點故障時，HA 會在 fencing 完成後（通常約 2～3 分鐘）於其他節點重新啟動 CT 112。LXC 是重新開機而非線上接手，服務會中斷數分鐘。
+
+注意：加入 HA 後，要關機或遷移請透過 HA（GUI 或 `ha-manager`），直接 `pct shutdown` 可能被 HA 自動拉起來。
 
 ## 9. 第一台 Agent
 
