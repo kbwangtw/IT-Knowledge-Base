@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC01／DC02／CA 待觀察後安裝 |
+| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02、DC01、CA 已安裝連線，AD／CA 前後檢查一致 |
 
 ## 先認識四個名詞
 
@@ -1161,7 +1161,7 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 | Windows VM | 012 | WinClient | PowerShell，MSI + `WAZUH_MANAGER` |
 | Ubuntu 24.04 容器 | 013 | ai | 節點上 `pct push` + `pct exec`（安裝前先以 `dpkg -l` 確認未安裝） |
 
-共 13 個 Agent，全部 Active。尚未安裝：DC01、DC02、CA（核心服務，觀察 WinClient 後再逐台安裝，裝前先做快照）。
+DC02、DC01、CA 已依 9-9 安裝並連線，安裝前後 AD／CA 檢查一致；Manager 端 ID 待確認後補記。
 
 服務內部名稱為 `WazuhSvc`，顯示名稱為 `Wazuh`；`NET START`／`NET STOP` 用顯示名稱或內部名稱皆可，PowerShell 可用 `Restart-Service WazuhSvc`。
 
@@ -1256,6 +1256,17 @@ certutil -ping
 | 複寫 | 0／5 失敗 | **0／5 失敗**、0 錯誤 ✅ |
 | DNS、Kdc、Netlogon、NTDS | Running | **Running** ✅ |
 | FSMO | 5 個角色在 DC01 | **5 個角色仍在 DC01** ✅ |
+
+**本案實測：CA（2026-09-30）**
+
+| 檢查 | 安裝前 | 安裝後 |
+| --- | --- | --- |
+| 1514／1515 連線 | — | 皆 `TcpTestSucceeded : True` |
+| `<address>` | — | 192.0.2.32 ✅ |
+| 服務 | — | `NET START Wazuh` 成功；WazuhSvc Running |
+| Agent log | — | 16:54:52 `Connected to the server` |
+| CertSvc | Running | **Running** ✅ |
+| `certutil -ping` | 成功（15 ms） | **成功（16 ms）** ✅ |
 
 複寫的「最大差異值」由約 30 分鐘變成約 52 分鐘，只代表這段期間沒有 AD 變更需要複寫，不是異常。
 
