@@ -809,6 +809,7 @@ Agent 版本不可高於 Manager（本案 4.14.8）。安裝時指定版本號�
 PVE 節點或其他重要主機建議用這個方式：直接安裝 .deb，不在主機上新增 Wazuh 套件庫，日後 `apt upgrade` 不會連帶升級 Agent。
 
 ~~~bash
+apt-get install -y lsb-release        # Agent 的相依套件；PVE 9（Debian 13）預設沒有安裝
 cd /tmp
 wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.8-1_amd64.deb
 WAZUH_MANAGER='192.0.2.32' WAZUH_AGENT_NAME='<主機名稱>' dpkg -i ./wazuh-agent_4.14.8-1_amd64.deb
@@ -831,6 +832,28 @@ timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "1515 OK"
 本案結果（2026-09-30）：node10、node11、node12 皆為 Debian 13.7，沒有 Wazuh 套件，1514／1515 皆 OK。安裝順序：先 node11 驗證成功，再依序安裝 node10、node12。
 
 `/dev/tcp/<IP>/<Port>` 是 bash 內建的連線測試，不需要另外安裝 nc。兩個 Port 都要 OK，否則 Agent 無法註冊或回報。
+
+#### 本案踩到的相依性問題（2026-09-30，node11）
+
+第一次 `dpkg -i` 出現：
+
+~~~text
+dpkg: dependency problems prevent configuration of wazuh-agent:
+ wazuh-agent depends on lsb-release; however:
+  Package lsb-release is not installed.
+~~~
+
+`dpkg -i` 只安裝指定的檔案，不會自動下載相依套件，所以套件被解開但停在「未設定」狀態。處理方式：
+
+~~~bash
+apt-get install -s lsb-release          # 模擬：確認只會新增 lsb-release
+apt-get install -y lsb-release          # 從 Debian 官方套件庫安裝；apt 會順便完成 wazuh-agent 的設定
+WAZUH_MANAGER='192.0.2.32' WAZUH_AGENT_NAME='node11' dpkg -i ./wazuh-agent_4.14.8-1_amd64.deb   # 重跑一次，讓安裝腳本讀到環境變數
+grep -A2 '<server>' /var/ossec/etc/ossec.conf    # <address> 必須是 Manager IP，不能是 MANAGER_IP
+grep '<agent_name>' /var/ossec/etc/ossec.conf
+~~~
+
+重跑 `dpkg -i` 的原因：`apt-get install lsb-release` 在完成 wazuh-agent 設定時沒有帶 `WAZUH_MANAGER` 等環境變數，設定檔裡的 Manager 位址可能仍是預設值。
 
 ### 9-3 驗證
 
