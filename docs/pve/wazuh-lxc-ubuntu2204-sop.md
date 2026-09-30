@@ -11,7 +11,7 @@ last_modified_at: 2026-09-30
 
 Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「安全判讀」：主機完整性檢查（FIM）、弱點偵測、設定稽核與入侵告警。本文記錄在 PVE Cluster 上建立一台 Ubuntu 22.04 LXC，以 All-in-one（Indexer + Server + Dashboard 同一台）方式安裝 Wazuh 的步驟。
 
-> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 與三台 PVE 節點的 Agent 皆完成驗證；測試用 Linux 與 Windows Agent 尚未接入，完成後補記。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
+> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 完成驗證；Agent 已涵蓋 PVE 節點、Debian 13 容器、Ubuntu VM 與 Windows VM，共 12 台 Active。網域控制站與 CA 尚未安裝。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
 
 ## 進度表
 
@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點 Agent 皆 Active（001 node11、002 node10、003 node12）；測試用 Linux、Windows 待接 |
+| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）皆 Active；DC01／DC02／CA 待觀察後安裝 |
 
 ## 先認識四個名詞
 
@@ -918,6 +918,240 @@ rm -rf /var/ossec
 ### 9-5 PVE 節點的告警調校（接上後觀察）
 
 預設的檔案完整性監控（FIM）會掃 `/etc`，其中包含叢集檔案系統 `/etc/pve`。`/etc/pve` 的變更會同步到每台節點，三台都裝 Agent 時同一個變更會產生三份告警。先以預設值觀察一段時間，再決定是否在 Agent 的 `ossec.conf` 加入 `<ignore>/etc/pve</ignore>`，或改由 Manager 端規則處理。FIM 只記錄雜湊值，除非啟用 `report_changes`，不會保存檔案內容。
+
+### 9-6 Debian 13 LXC 容器：從 PVE 節點推送安裝
+
+本案 Debian 13 的服務都跑在 LXC 容器裡（AdGuard、Graylog、IPAM、LibreNMS、Pi-hole、ProxCenter、WireGuard）。做法是在 PVE 節點把 .deb 推進容器、用 `pct exec` 安裝：
+
+- 容器內不需要 wget／curl，也不必能連到 packages.wazuh.com。
+- 所有指令都在節點上執行，容易逐台複製。
+- 同樣不在容器內新增 Wazuh 套件庫。
+
+`pct push`／`pct exec` 只能操作**目前在這台節點上**的容器，先確認 CT ID 與所在節點：
+
+~~~bash
+pct list        # 在每台節點各執行一次
+~~~
+
+本案清單（2026-09-30 `pct list`）：
+
+| CT ID | 名稱 | 節點 | 狀態 | 安裝順序 |
+| --- | --- | --- | --- | --- |
+| 103 | IPAM | node10 | running | ① 試裝 |
+| 102 | librenms | node10 | running | ② |
+| 105 | Graylog | node10 | running | ② |
+| 110 | ProxCenter | node10 | running | ② |
+| 100 | AdGuard | node10 | running | ③ DNS |
+| 101 | Pihole | node12 | running | ③ DNS |
+| 109 | wireguard | node10 | **stopped** | 暫緩，開機後再裝（`pct exec` 無法操作關機中的容器） |
+
+node11 目前沒有容器。
+
+以一台容器為例（`<CTID>` 換成實際 ID），在該容器所在的節點執行：
+
+~~~bash
+# 1. 節點上準備 .deb（已下載過可略過）
+cd /tmp && [ -f wazuh-agent_4.14.8-1_amd64.deb ] || wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.8-1_amd64.deb
+
+# 2. 容器能連到 Manager
+pct exec <CTID> -- bash -c "timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo 'port OK'"
+
+# 3. 推送 .deb，先裝相依套件，再全新安裝
+pct push <CTID> /tmp/wazuh-agent_4.14.8-1_amd64.deb /tmp/wazuh-agent_4.14.8-1_amd64.deb
+pct exec <CTID> -- apt-get install -y lsb-release
+pct exec <CTID> -- env WAZUH_MANAGER='192.0.2.32' dpkg -i /tmp/wazuh-agent_4.14.8-1_amd64.deb
+
+# 4. 啟動前確認位址
+pct exec <CTID> -- grep -A2 '<server>' /var/ossec/etc/ossec.conf
+
+# 5. 啟動、驗證、清掉安裝檔
+pct exec <CTID> -- bash -c 'systemctl daemon-reload && systemctl enable --now wazuh-agent && systemctl is-active wazuh-agent'
+pct exec <CTID> -- rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
+~~~
+
+#### 本案實測：IPAM（CT 103，2026-09-30）
+
+| 步驟 | 結果 |
+| --- | --- |
+| Port 測試 | `port OK` |
+| lsb-release | 容器內已有（12.1-1） |
+| `dpkg -i` | 全新安裝，無相依性錯誤 |
+| `<address>` | 192.0.2.32 ✅ |
+| 服務 | enable 並 active |
+| Agent log | logcollector 自動開始讀取 `/var/log/nginx/error.log`；07:04:25 `Connected to the server` |
+| Manager | 剛註冊時為 `ID: 004, Name: IPAM, Pending`，稍後轉為 `Active` |
+
+`Pending` 表示已註冊、Manager 尚未收到第一次完整回報，通常數十秒內會轉為 Active。容器 log 時間為 UTC（容器時區未改），與節點台灣時間相差 8 小時，屬顯示差異。
+
+#### 本案實測：librenms（CT 102，2026-09-30）
+
+手動逐步安裝。07:08:14 `Connected to the server`；logcollector 同樣自動讀取 `/var/log/nginx/error.log`；Manager 顯示 `ID: 005, Name: librenms, Active`。
+
+已安裝的容器不要放進批次迴圈：同版本覆蓋安裝沒有好處，還可能讓 Agent 重啟。
+
+#### 批次安裝其餘容器
+
+試裝成功後，用迴圈處理同一節點上的其他容器。位址不正確的容器不會被啟動：
+
+~~~bash
+DEB=/tmp/wazuh-agent_4.14.8-1_amd64.deb
+MGR=192.0.2.32
+for id in 102 105 110; do
+  echo "===== CT $id ====="
+  pct exec $id -- bash -c "timeout 3 bash -c '</dev/tcp/$MGR/1514' && timeout 3 bash -c '</dev/tcp/$MGR/1515'" \
+    || { echo "CT $id：連不到 Manager，跳過"; continue; }
+  pct push $id $DEB $DEB
+  pct exec $id -- apt-get install -y lsb-release
+  pct exec $id -- env WAZUH_MANAGER=$MGR dpkg -i $DEB
+  if pct exec $id -- grep -q "<address>$MGR</address>" /var/ossec/etc/ossec.conf; then
+    pct exec $id -- bash -c 'systemctl daemon-reload && systemctl enable --now wazuh-agent && systemctl is-active wazuh-agent'
+  else
+    echo "CT $id：Manager 位址不正確，未啟動"
+  fi
+  pct exec $id -- rm -f $DEB
+done
+~~~
+
+本案結果：以迴圈安裝 Graylog（105）、ProxCenter（110），Manager 顯示 `ID: 006, Name: Graylog, Active`、`ID: 007, Name: ProxCenter, Active`。
+
+#### DNS 容器：先做快照
+
+AdGuard（100）與 Pi-hole（101）是全網路依賴的服務。安裝 Agent 不會重啟 DNS 服務，但保險起見先做快照，出問題可以立即回復：
+
+~~~bash
+pct snapshot <CTID> pre-wazuh-agent --description "安裝 Wazuh Agent 前"
+# 安裝完成並確認 DNS 正常後
+pct exec <CTID> -- systemctl is-active AdGuardHome     # AdGuard
+pct exec <CTID> -- systemctl is-active pihole-FTL      # Pi-hole
+# 觀察一段時間沒問題再刪除快照
+pct delsnapshot <CTID> pre-wazuh-agent
+~~~
+
+回復方式：`pct rollback <CTID> pre-wazuh-agent`（會回到快照當下，快照之後的變更全部消失）。
+
+本案結果（2026-09-30）：AdGuard（100，node10）與 Pi-hole（101，node12）先做快照再安裝；安裝後 `AdGuardHome`、`pihole-FTL` 皆 active；Manager 顯示 `ID: 008, Name: AdGuard, Active`、`ID: 009, Name: Pihole, Active`。快照待觀察一兩天、DNS 正常後刪除。
+
+WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking wazuh-agent (4.14.8-1) over (4.14.8-1)`，代表容器內**原本已裝過 Agent**，這次是同版本覆蓋安裝；設定檔位址正確、服務 active，`wg show` 顯示 wg0 不受影響。Manager 端只有一筆 `ID: 010, Name: wireguard, Active`，沒有重複註冊。另以 `apt autoremove`（先 `--dry-run` 確認）移除容器內用不到的 `linux-image-6.12.73+deb13-rt-amd64`，釋放 111 MB；容器使用主機 kernel，不需要自己的 kernel 套件。安裝前可先用 `pct exec <CTID> -- dpkg -l wazuh-agent` 確認，避免重複安裝。
+
+#### Debian 13 容器總驗收（2026-09-30）
+
+| ID | 名稱 | CT | 節點 | 狀態 |
+| --- | --- | --- | --- | --- |
+| 004 | IPAM | 103 | node10 | Active |
+| 005 | librenms | 102 | node10 | Active |
+| 006 | Graylog | 105 | node10 | Active |
+| 007 | ProxCenter | 110 | node10 | Active |
+| 008 | AdGuard | 100 | node10 | Active |
+| 009 | Pihole | 101 | node12 | Active |
+| 010 | wireguard | 109 | node10 | Active |
+
+說明：
+
+- `pct exec <CTID> -- env 變數=值 指令`：`pct exec` 不經過 shell，要用 `env` 把環境變數帶給 dpkg。
+- 沒有指定 `WAZUH_AGENT_NAME` 時，Agent 以容器的 hostname 註冊。
+- 先挑一台影響最小的容器試裝，確認 Dashboard 出現 Active 後再逐台安裝。DNS（AdGuard、Pi-hole）與 VPN（WireGuard）這類基礎服務排在後面。
+- 容器與主機共用 kernel，Agent 在容器內看到的是容器自己的檔案與行程；rootcheck 等模組在容器內可能出現與實體主機不同的結果，接上後觀察再調校。
+
+### 9-7 Ubuntu VM（UBClient）
+
+UBClient 是 VM，不是容器，`pct push`／`pct exec` 不適用，要登入 VM 內安裝（SSH 或 PVE Console）。先在節點確認 VM 狀態：
+
+~~~bash
+qm list        # 各節點執行，找 UBClient 的 VMID 與狀態
+~~~
+
+本案 VM 清單（2026-09-30 `qm list`）：
+
+| VMID | 名稱 | 節點 | 狀態 |
+| --- | --- | --- | --- |
+| 104 | UBClient | node11 | running |
+| 108 | WinClient | node11 | running |
+| 107 | DC02 | node11 | running |
+| 106 | DC01 | node12 | running |
+| 111 | CA | node12 | running |
+
+node10 沒有 VM。
+
+VM 內（一般使用者需 `sudo`）：
+
+~~~bash
+lsb_release -a                                  # Ubuntu 預設已有 lsb-release
+timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "port OK"
+cd /tmp
+wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.8-1_amd64.deb
+sudo WAZUH_MANAGER='192.0.2.32' dpkg -i ./wazuh-agent_4.14.8-1_amd64.deb
+sudo grep -A2 '<server>' /var/ossec/etc/ossec.conf
+sudo systemctl daemon-reload
+sudo systemctl enable --now wazuh-agent
+systemctl is-active wazuh-agent
+rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
+~~~
+
+`sudo 變數=值 指令`：sudo 允許在指令前指定環境變數並傳給該指令；寫成 `WAZUH_MANAGER=... sudo dpkg ...` 則變數可能被 sudo 過濾掉。`/var/ossec` 只有 root 能讀，查設定檔也要 `sudo`。
+
+#### 本案實測：UBClient（VM 104，2026-09-30）
+
+| 項目 | 結果 |
+| --- | --- |
+| 作業系統 | `lsb_release -a` 顯示 **Ubuntu 24.04.4 LTS（noble）**；PVE 標籤寫 ub22.04，標籤需更新 |
+| `No LSB modules are available.` | Ubuntu 的正常訊息，不影響 |
+| SSH | 桌面版預設沒有 SSH 伺服器，先安裝 `openssh-server` 再連線操作 |
+| Port | `port OK` |
+| 安裝 | sudo 密碼輸入錯誤 3 次後重來；未加 sudo 時 dpkg 回報需要超級使用者權限；加上 sudo 後全新安裝成功 |
+| `<address>` | 192.0.2.32 ✅ |
+| 服務 | enable 並 active |
+| Manager | `ID: 011, Name: ubclient, Active` |
+
+sudo 輸入錯誤發生在 Agent 安裝之前；logcollector 預設只讀取啟動後的新紀錄，所以那幾次失敗不會出現在 Wazuh。要驗證 Agent 是否正常回報，可在安裝後故意輸錯一次 sudo 或 SSH 密碼，再到 Dashboard 搜尋。
+
+### 9-8 Windows（WinClient）
+
+以系統管理員身分開啟 PowerShell：
+
+~~~powershell
+# 1. 確認連得到 Manager
+Test-NetConnection 192.0.2.32 -Port 1514
+Test-NetConnection 192.0.2.32 -Port 1515
+
+# 2. 下載並安裝（指定 4.14.8，與 Manager 相同）
+Invoke-WebRequest -Uri https://packages.wazuh.com/4.x/windows/wazuh-agent-4.14.8-1.msi -OutFile $env:TEMP\wazuh-agent.msi
+Start-Process msiexec.exe -ArgumentList "/i `"$env:TEMP\wazuh-agent.msi`" /q WAZUH_MANAGER=`"192.0.2.32`"" -Wait
+
+# 3. 啟動前確認位址
+Select-String -Path 'C:\Program Files (x86)\ossec-agent\ossec.conf' -Pattern '<address>'
+
+# 4. 啟動並確認
+NET START Wazuh
+Get-Service | Where-Object DisplayName -like 'Wazuh*'
+Get-Content 'C:\Program Files (x86)\ossec-agent\ossec.log' -Tail 20 | Select-String 'Connected|ERROR'
+Remove-Item $env:TEMP\wazuh-agent.msi
+~~~
+
+說明：`Start-Process ... -Wait` 會等安裝完成才回到提示字元；直接執行 `msiexec` 會立刻返回，下一步可能在安裝完成前就執行。
+
+#### 本案實測：WinClient（VM 108，2026-09-30）
+
+| 項目 | 結果 |
+| --- | --- |
+| 下載與安裝 | `Invoke-WebRequest` 與 `Start-Process ... -Wait` 皆無錯誤訊息 |
+| `<address>` | `ossec.conf` 第 11 行為 192.0.2.32 ✅ |
+| 啟動 | `NET START Wazuh` → 「Wazuh 服務已經啟動成功」 |
+| 服務 | `Get-Service`：Status Running、Name **WazuhSvc**、DisplayName **Wazuh** |
+| log | 剛啟動時 `Connected` 尚未出現；稍後 16:04:02 `Connected to the server ([192.0.2.32]:1514/tcp)` ✅。同時段的 `Ignore 'registry' entry ...` 是預設設定中排除的登錄機碼，屬正常訊息 |
+| Manager | `ID: 012, Name: WinClient, Active` ✅ |
+
+#### Agent 總驗收（2026-09-30）
+
+| 類型 | ID | 名稱 | 安裝方式 |
+| --- | --- | --- | --- |
+| PVE 節點 | 001～003 | node11、node10、node12 | 節點上下載 .deb，`dpkg -i` |
+| Debian 13 容器 | 004～010 | IPAM、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
+| Ubuntu VM | 011 | ubclient | SSH 登入，`sudo 變數=值 dpkg -i` |
+| Windows VM | 012 | WinClient | PowerShell，MSI + `WAZUH_MANAGER` |
+
+共 12 個 Agent，全部 Active。尚未安裝：DC01、DC02、CA（核心服務，觀察 WinClient 後再逐台安裝，裝前先做快照）、ai（Ubuntu 24.04 容器）。
+
+服務內部名稱為 `WazuhSvc`，顯示名稱為 `Wazuh`；`NET START`／`NET STOP` 用顯示名稱或內部名稱皆可，PowerShell 可用 `Restart-Service WazuhSvc`。
 
 ## 風險與注意事項
 
