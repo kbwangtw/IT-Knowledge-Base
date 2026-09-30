@@ -22,8 +22,8 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
 | 3 | 建立 LXC | 已實測 | 2026-09-29：CT 112 位於 node12；已補 nesting=1、onboot=1，rootfs 線上加大為 80G（見 3-4） |
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
-| 5 | 安裝 Wazuh All-in-one | 待做 | |
-| 6 | 驗證服務與登入 Dashboard | 待做 | |
+| 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
+| 6 | 驗證服務與登入 Dashboard | 進行中 | |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 待做 | |
 | 8 | 備份與 HA | 待做 | |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
@@ -360,6 +360,26 @@ bash ./wazuh-install.sh -a
 - 所有元件密碼另存於 `/root/wazuh-install-files.tar` 的 `wazuh-passwords.txt`。
 
 安裝助手若因硬體檢查中止，先回頭確認 CPU／RAM 是否達標。`-i`（忽略檢查）只在確認資源足夠、且理解風險時才使用。
+
+### 5-1 本案實測（2026-09-30）
+
+安裝在 CT 112 的 tmux 工作階段中執行。第一次誤打 `./wazuh-install.sh`（未加 `bash`、未加 `-a`）出現 `Permission denied`，改用 `bash ./wazuh-install.sh -a` 後正常安裝。
+
+安裝輸出後段的關鍵時間點：
+
+| 時間 | 事件 |
+| --- | --- |
+| 08:45:17 | Wazuh indexer 安裝完成，服務啟動 |
+| 08:45:26 | Indexer 叢集安全設定初始化完成 |
+| 08:46:15 | Wazuh manager 安裝完成，漏洞偵測設定完成 |
+| 08:46:30 | wazuh-manager 服務啟動 |
+| 08:46:42 | Filebeat 安裝完成並啟動 |
+| 08:48:39 | wazuh-dashboard 服務啟動 |
+| 08:48:43 | 內部使用者密碼更新，備份存於 `/etc/wazuh-indexer/internalusers-backup` |
+| 08:49:13 | Dashboard web 應用初始化完成；顯示 admin 帳號與密碼（已存入密碼管理工具，未記錄於本文） |
+| 08:49:16 | 移除安裝過程暫用的 gawk，`Installation finished` |
+
+從 Indexer 完成到整體結束約 4 分鐘；Dashboard 安裝約 2 分鐘是其中最久的一段。
 
 ## 6. 驗證服務與登入 Dashboard
 
