@@ -1217,7 +1217,7 @@ certutil -ping
 | 複寫 | `repadmin /replsummary`：DC01、DC02 作為來源與目的地皆為 0／5 失敗，最大差異值約 30～32 分鐘 |
 | DC 服務 | DNS、Kdc、Netlogon、NTDS 皆 Running |
 | CA | CertSvc Running；`certutil -ping` 連到 ITBH-Root-CA 的 ICertRequest2 介面，15 ms 回應 |
-| `dcdiag /q` | DC02：無輸出（健康）；DC01：待補 |
+| `dcdiag /q` | DC01、DC02 皆無輸出（健康） |
 | DC02 服務（16:30） | DNS、Kdc、Netlogon、NTDS 皆 Running；複寫 0／5 失敗 |
 
 依此決定順序：**DC02 → DC01 → CA**。
@@ -1242,7 +1242,22 @@ certutil -ping
 | 複寫 | 0／5 失敗 | **0／5 失敗**、0 錯誤 ✅ |
 | DNS、Kdc、Netlogon、NTDS | Running | **Running** ✅ |
 
-安裝前後一致，Agent 未影響 AD。複寫的「最大差異值」由約 30 分鐘變成約 52 分鐘，只代表這段期間沒有 AD 變更需要複寫，不是異常。
+安裝前後一致，Agent 未影響 AD。
+
+**本案實測：DC01（持有全部 FSMO，2026-09-30）**
+
+| 檢查 | 安裝前 | 安裝後 |
+| --- | --- | --- |
+| 1514／1515 連線 | — | 皆 `TcpTestSucceeded : True` |
+| `<address>` | — | 192.0.2.32 ✅ |
+| 服務 | — | `NET START Wazuh` 成功；WazuhSvc Running |
+| Agent log | — | 16:48:32 `Connected to the server` |
+| `dcdiag /q` | 無輸出 | **無輸出** ✅ |
+| 複寫 | 0／5 失敗 | **0／5 失敗**、0 錯誤 ✅ |
+| DNS、Kdc、Netlogon、NTDS | Running | **Running** ✅ |
+| FSMO | 5 個角色在 DC01 | **5 個角色仍在 DC01** ✅ |
+
+複寫的「最大差異值」由約 30 分鐘變成約 52 分鐘，只代表這段期間沒有 AD 變更需要複寫，不是異常。
 
 #### 注意
 
