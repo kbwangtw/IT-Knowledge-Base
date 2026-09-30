@@ -43,7 +43,7 @@ last_modified_at: 2026-09-30
 | [把三台 PVE 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop/) | 9/22 修正 PVE 9.2.20 Task Failed；安全測試至正式 Gmail 已完成 |
 | [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 9/22 Group by source、Task Failed 修正、三項告警完整驗證 |
 | [PVE 一直被嘗試登入：確認 Fail2Ban 真的有擋](docs/pve/pve-cluster-fail2ban-hardening/) | 逐層核對日誌、封鎖時間與封包命中 |
-| [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop/) | 9/30 主要流程已實測：LXC 規劃、All-in-one 安裝、密碼與 API 收斂、PBS 備份還原、HA、12 台 Agent（PVE 節點、Debian 容器、Ubuntu 與 Windows VM）|
+| [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop/) | 9/30 主要流程已實測：LXC 規劃、All-in-one 安裝、密碼與 API 收斂、PBS 備份還原、HA、16 台 Agent（PVE 節點、Linux 容器、Ubuntu／Windows VM、AD 與 CA）|
 
 ## 硬體擴充與安裝
 

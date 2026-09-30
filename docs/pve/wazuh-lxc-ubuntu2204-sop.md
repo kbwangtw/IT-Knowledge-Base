@@ -11,7 +11,7 @@ last_modified_at: 2026-09-30
 
 Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「安全判讀」：主機完整性檢查（FIM）、弱點偵測、設定稽核與入侵告警。本文記錄在 PVE Cluster 上建立一台 Ubuntu 22.04 LXC，以 All-in-one（Indexer + Server + Dashboard 同一台）方式安裝 Wazuh 的步驟。
 
-> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 完成驗證；Agent 已涵蓋 PVE 節點、Debian 13 容器、Ubuntu VM 與 Windows VM，共 12 台 Active。網域控制站與 CA 尚未安裝。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
+> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 完成驗證；Agent 已涵蓋 PVE 節點、Debian 13 與 Ubuntu 容器、Ubuntu VM、Windows 用戶端、網域控制站與 CA，共 16 台 Active。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
 
 ## 進度表
 
@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）皆 Active；DC01／DC02／CA 待觀察後安裝 |
+| 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）皆 Active，AD／CA 前後檢查一致；共 16 台 |
 
 ## 先認識四個名詞
 
@@ -1044,6 +1044,7 @@ WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking
 | 008 | AdGuard | 100 | node10 | Active |
 | 009 | Pihole | 101 | node12 | Active |
 | 010 | wireguard | 109 | node10 | Active |
+| 013 | ai（Ubuntu 24.04.5，HA 資源） | 113 | node10 | Active |
 
 說明：
 
@@ -1093,7 +1094,7 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 
 | 項目 | 結果 |
 | --- | --- |
-| 作業系統 | `lsb_release -a` 顯示 **Ubuntu 24.04.4 LTS（noble）**；PVE 標籤寫 ub22.04，標籤需更新 |
+| 作業系統 | `lsb_release -a` 顯示 **Ubuntu 24.04.4 LTS（noble）**；PVE 標籤原寫 ub22.04，已於 2026-09-30 更正為 ub24.04 |
 | `No LSB modules are available.` | Ubuntu 的正常訊息，不影響 |
 | SSH | 桌面版預設沒有 SSH 伺服器，先安裝 `openssh-server` 再連線操作 |
 | Port | `port OK` |
@@ -1103,6 +1104,16 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 | Manager | `ID: 011, Name: ubclient, Active` |
 
 sudo 輸入錯誤發生在 Agent 安裝之前；logcollector 預設只讀取啟動後的新紀錄，所以那幾次失敗不會出現在 Wazuh。要驗證 Agent 是否正常回報，可在安裝後故意輸錯一次 sudo 或 SSH 密碼，再到 Dashboard 搜尋。
+
+**端到端告警驗證（2026-09-30）**：在 UBClient 執行 `sudo ls` 並故意輸入錯誤密碼（出現「抱歉，請重試」）。注意：沒有輸入密碼就取消時只會顯示「sudo: 需要密碼」，不算驗證失敗，不會產生告警。
+
+Dashboard → Threat intelligence → Threat Hunting → Events，搜尋 `agent.name:ubclient`，時間範圍 Last 15 minutes：
+
+| 時間 | Agent | 描述 | 等級 | 規則 |
+| --- | --- | --- | --- | --- |
+| 2026-09-30 16:16:23 | ubclient | PAM: User login failed. | 5 | 5503 |
+
+確認 log → Agent → Manager → Indexer → Dashboard 整條路徑正常。也可在 Manager 上查：`grep -A6 'ubclient' /var/ossec/logs/alerts/alerts.log | tail -40`。
 
 ### 9-8 Windows（WinClient）
 
@@ -1148,10 +1159,123 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 | Debian 13 容器 | 004～010 | IPAM、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
 | Ubuntu VM | 011 | ubclient | SSH 登入，`sudo 變數=值 dpkg -i` |
 | Windows VM | 012 | WinClient | PowerShell，MSI + `WAZUH_MANAGER` |
+| Windows 網域控制站 | 014～015 | DC02、DC01 | 同 Windows VM；裝前快照、AD 健康基準，裝後比對（9-9） |
+| Windows 憑證伺服器 | 016 | ca | 同上，以 CertSvc 與 `certutil -ping` 比對 |
+| Ubuntu 24.04 容器 | 013 | ai | 節點上 `pct push` + `pct exec`（安裝前先以 `dpkg -l` 確認未安裝） |
 
-共 12 個 Agent，全部 Active。尚未安裝：DC01、DC02、CA（核心服務，觀察 WinClient 後再逐台安裝，裝前先做快照）、ai（Ubuntu 24.04 容器）。
+共 16 個 Agent，全部 Active。
 
 服務內部名稱為 `WazuhSvc`，顯示名稱為 `Wazuh`；`NET START`／`NET STOP` 用顯示名稱或內部名稱皆可，PowerShell 可用 `Restart-Service WazuhSvc`。
+
+### 9-9 網域控制站與 CA（DC01、DC02、CA）
+
+安裝方式與 9-8 相同（MSI + PowerShell），差別在安裝前後的檢查。
+
+| VMID | 名稱 | 節點 |
+| --- | --- | --- |
+| 106 | DC01 | node12 |
+| 107 | DC02 | node11 |
+| 111 | CA | node12 |
+
+#### (1) 安裝前：快照與 VM-GenerationID
+
+~~~bash
+qm config <VMID> | grep -E 'vmgenid|ostype'
+qm snapshot <VMID> pre-wazuh-agent --description "before Wazuh agent install"
+qm listsnapshot <VMID>
+~~~
+
+**網域控制站的快照回復有風險。** 多台 DC 的環境中，把其中一台回復到舊快照，可能造成 **USN rollback**：這台 DC 的複寫紀錄倒退，與其他 DC 不一致。Windows Server 2012 以後搭配 hypervisor 的 **VM-GenerationID**（PVE 的 `vmgenid` 設定）可以偵測回復並保護 AD，因此要先確認 `vmgenid` 存在。即使有保護，**DC 的快照只作為最後手段**；Agent 有問題時優先解除安裝，而不是回復快照。
+
+本案結果（2026-09-30）：DC01（106）、DC02（107）、CA（111）皆為 `ostype: win11`，且都有 `vmgenid`，具備回復偵測保護。
+
+快照：DC01 16:34:51、CA 16:34:57、DC02 16:35:36 建立完成。輸出中的 `freeze guest filesystem`／`thaw guest filesystem` 表示 VM 內的 QEMU Guest Agent 在快照前凍結檔案系統，取得一致的狀態；CA 另有 EFI 與 TPM state 磁碟一併快照。
+
+`qm listsnapshot` 出現 `Wide character in printf`、中文描述變成亂碼，是命令列輸出編碼的顯示問題，不影響快照；描述改用英文即可避免。
+
+#### (2) 安裝前：記錄 AD 健康基準（在 DC 上，系統管理員 PowerShell）
+
+~~~powershell
+netdom query fsmo                       # 哪台 DC 持有 FSMO 角色
+repadmin /replsummary                   # 複寫摘要，fails 應為 0
+dcdiag /q                               # 只列出錯誤；沒有輸出代表健康
+Get-Service NTDS,DNS,Netlogon,Kdc | Format-Table Name,Status
+~~~
+
+先記下安裝前的結果，安裝後才能比較。安裝順序：先裝**沒有 FSMO 角色**的 DC，確認正常後再裝持有 FSMO 的 DC，最後裝 CA。
+
+CA 的基準：
+
+~~~powershell
+Get-Service CertSvc | Format-Table Name,Status
+certutil -ping
+~~~
+
+本案基準（2026-09-30 16:23）：
+
+| 項目 | 結果 |
+| --- | --- |
+| FSMO | 5 個角色（架構主機、網域命名主機、PDC、RID 集區管理員、基礎結構主機）**全部在 DC01** |
+| 複寫 | `repadmin /replsummary`：DC01、DC02 作為來源與目的地皆為 0／5 失敗，最大差異值約 30～32 分鐘 |
+| DC 服務 | DNS、Kdc、Netlogon、NTDS 皆 Running |
+| CA | CertSvc Running；`certutil -ping` 連到企業根 CA 的 ICertRequest2 介面，15 ms 回應 |
+| `dcdiag /q` | DC01、DC02 皆無輸出（健康） |
+| DC02 服務（16:30） | DNS、Kdc、Netlogon、NTDS 皆 Running；複寫 0／5 失敗 |
+
+依此決定順序：**DC02 → DC01 → CA**。
+
+#### (3) 安裝
+
+依 9-8 的步驟執行（Test-NetConnection → 下載 MSI → `Start-Process ... -Wait` → 確認 `<address>` → `NET START Wazuh`）。
+
+#### (4) 安裝後：再跑一次 (2) 的檢查並比較
+
+結果應與安裝前一致。確認後才進行下一台。
+
+**本案實測：DC02（2026-09-30）**
+
+| 檢查 | 安裝前 | 安裝後 |
+| --- | --- | --- |
+| 1515 連線 | — | `TcpTestSucceeded : True` |
+| `<address>` | — | 192.0.2.32 ✅ |
+| 服務 | — | `NET START Wazuh` 成功；WazuhSvc Running |
+| Agent log | — | 16:45:19 `Connected to the server` |
+| `dcdiag /q` | 無輸出 | **無輸出** ✅ |
+| 複寫 | 0／5 失敗 | **0／5 失敗**、0 錯誤 ✅ |
+| DNS、Kdc、Netlogon、NTDS | Running | **Running** ✅ |
+
+安裝前後一致，Agent 未影響 AD。
+
+**本案實測：DC01（持有全部 FSMO，2026-09-30）**
+
+| 檢查 | 安裝前 | 安裝後 |
+| --- | --- | --- |
+| 1514／1515 連線 | — | 皆 `TcpTestSucceeded : True` |
+| `<address>` | — | 192.0.2.32 ✅ |
+| 服務 | — | `NET START Wazuh` 成功；WazuhSvc Running |
+| Agent log | — | 16:48:32 `Connected to the server` |
+| `dcdiag /q` | 無輸出 | **無輸出** ✅ |
+| 複寫 | 0／5 失敗 | **0／5 失敗**、0 錯誤 ✅ |
+| DNS、Kdc、Netlogon、NTDS | Running | **Running** ✅ |
+| FSMO | 5 個角色在 DC01 | **5 個角色仍在 DC01** ✅ |
+
+**本案實測：CA（2026-09-30）**
+
+| 檢查 | 安裝前 | 安裝後 |
+| --- | --- | --- |
+| 1514／1515 連線 | — | 皆 `TcpTestSucceeded : True` |
+| `<address>` | — | 192.0.2.32 ✅ |
+| 服務 | — | `NET START Wazuh` 成功；WazuhSvc Running |
+| Agent log | — | 16:54:52 `Connected to the server` |
+| CertSvc | Running | **Running** ✅ |
+| `certutil -ping` | 成功（15 ms） | **成功（16 ms）** ✅ |
+
+複寫的「最大差異值」由約 30 分鐘變成約 52 分鐘，只代表這段期間沒有 AD 變更需要複寫，不是異常。
+
+#### 注意
+
+- 網域控制站的 Security 事件記錄量很大（登入、Kerberos 票證等），接上後告警與 Indexer 使用量會明顯增加，需觀察 CT 112 的 rootfs 與 CPU。
+- 快照觀察 1～2 天後刪除：`qm delsnapshot <VMID> pre-wazuh-agent`。
 
 ## 風險與注意事項
 
