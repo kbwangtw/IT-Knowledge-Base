@@ -4,14 +4,14 @@ title: "在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）"
 date: 2026-09-29
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-sop/
-last_modified_at: 2026-09-29
+last_modified_at: 2026-09-30
 ---
 
 # 在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）
 
 Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「安全判讀」：主機完整性檢查（FIM）、弱點偵測、設定稽核與入侵告警。本文記錄在 PVE Cluster 上建立一台 Ubuntu 22.04 LXC，以 All-in-one（Indexer + Server + Dashboard 同一台）方式安裝 Wazuh 的步驟。
 
-> 文件狀態：**草稿，邊做邊寫**（2026-09-29 起）。下方「進度表」會隨實際操作更新；尚未標示「已實測」的步驟，都只是預定作法，不是完成報告。
+> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 與三台 PVE 節點的 Agent 皆完成驗證；測試用 Linux 與 Windows Agent 尚未接入，完成後補記。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
 
 ## 進度表
 
@@ -22,11 +22,11 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 2 | 下載 Ubuntu 22.04 範本 | 已完成 | 2026-09-29：使用 ubuntu 22.04 範本 |
 | 3 | 建立 LXC | 已實測 | 2026-09-29：CT 112 位於 node12；已補 nesting=1、onboot=1，rootfs 線上加大為 80G（見 3-4） |
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
-| 5 | 安裝 Wazuh All-in-one | 待做 | |
-| 6 | 驗證服務與登入 Dashboard | 待做 | |
-| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 待做 | |
-| 8 | 備份與 HA | 待做 | |
-| 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
+| 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
+| 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
+| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
+| 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
+| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點 Agent 皆 Active（001 node11、002 node10、003 node12）；測試用 Linux、Windows 待接 |
 
 ## 先認識四個名詞
 
@@ -341,6 +341,11 @@ curl -sO https://packages.wazuh.com/4.14/wazuh-install.sh
 bash ./wazuh-install.sh -a
 ~~~
 
+注意兩點：
+
+- 要用 `bash ./wazuh-install.sh`，不要直接打 `./wazuh-install.sh`。curl 下載的檔案沒有執行權限（x），直接執行會出現 `Permission denied`；交給 `bash` 讀取就不需要執行權限。
+- 一定要加 `-a`，不加參數只會顯示說明，不會安裝。
+
 **(4) 安裝失敗時**：先看 `/var/log/wazuh-install.log` 最後幾十行找原因，修正後用安裝助手的移除選項清掉半套元件再重裝：
 
 ~~~bash
@@ -356,6 +361,26 @@ bash ./wazuh-install.sh -a
 
 安裝助手若因硬體檢查中止，先回頭確認 CPU／RAM 是否達標。`-i`（忽略檢查）只在確認資源足夠、且理解風險時才使用。
 
+### 5-1 本案實測（2026-09-30）
+
+安裝在 CT 112 的 tmux 工作階段中執行。第一次誤打 `./wazuh-install.sh`（未加 `bash`、未加 `-a`）出現 `Permission denied`，改用 `bash ./wazuh-install.sh -a` 後正常安裝。
+
+安裝輸出後段的關鍵時間點：
+
+| 時間 | 事件 |
+| --- | --- |
+| 08:45:17 | Wazuh indexer 安裝完成，服務啟動 |
+| 08:45:26 | Indexer 叢集安全設定初始化完成 |
+| 08:46:15 | Wazuh manager 安裝完成，漏洞偵測設定完成 |
+| 08:46:30 | wazuh-manager 服務啟動 |
+| 08:46:42 | Filebeat 安裝完成並啟動 |
+| 08:48:39 | wazuh-dashboard 服務啟動 |
+| 08:48:43 | 內部使用者密碼更新，備份存於 `/etc/wazuh-indexer/internalusers-backup` |
+| 08:49:13 | Dashboard web 應用初始化完成；顯示 admin 帳號與密碼（已存入密碼管理工具，未記錄於本文） |
+| 08:49:16 | 移除安裝過程暫用的 gawk，`Installation finished` |
+
+從 Indexer 完成到整體結束約 4 分鐘；Dashboard 安裝約 2 分鐘是其中最久的一段。
+
 ## 6. 驗證服務與登入 Dashboard
 
 ~~~bash
@@ -368,16 +393,99 @@ ss -tlnp | grep -E ':443|:1514|:1515|:9200|:55000'
 
 驗收標準：三個服務都 `active (running)`、Port 都在監聽、Dashboard 能登入並看到 Wazuh Server 本身（agent 000）。
 
+### 6-1 本案實測（2026-09-30）
+
+| 檢查 | 結果 |
+| --- | --- |
+| `systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard` | 4 個皆 `active` ✅ |
+| Port 監聽 | 1514（wazuh-remoted）、1515（wazuh-authd）、443（node）、55000（python3，IPv4＋IPv6）對所有介面；9200（java）只聽 127.0.0.1 ✅ |
+| `filebeat test output` | 連 `https://127.0.0.1:9200`：連線、TLS 1.2 握手（憑證鏈驗證啟用）、`talk to server... OK`，回報版本 7.10.2 ✅ |
+| Dashboard 登入 | `https://192.0.2.32`（示範位址）接受自簽憑證警告後，以 admin 登入成功 ✅ |
+| Overview 畫面 | Agents Summary 顯示「no agents registered」；Last 24 hours alerts：Critical 0、High 0、Medium 213、Low 112 |
+
+Agents Summary 只計算外部 Agent，Manager 本身（ID 000）不列入，所以顯示沒有 Agent 是正常的。告警全部來自 Manager 自己：剛安裝完的系統會因套件安裝、設定稽核（SCA）、rootcheck 等產生一批告警。Critical／High 為 0，Medium／Low 屬安裝後的正常雜訊，接上 Agent 後再用 Threat Hunting 看實際內容與數量變化。
+
 ## 7. 安全收尾
 
-### 7-1 換掉預設密碼
+### 7-1 密碼與安裝檔
+
+安裝助手已替每個內部帳號產生隨機強密碼，**不需要為了「換掉預設值」而改密碼**。需要處理的是：
+
+1. **admin 密碼已存進密碼管理工具**，並確認能用它登入。
+2. **密碼曾經外流時才更換**（例如出現在截圖、共用畫面、聊天紀錄）。
+3. **妥善處理 `/root/wazuh-install-files.tar`**：它包含所有內部帳號密碼與 TLS 憑證私鑰。日後新增 Wazuh 節點或重建憑證會用到，不建議直接刪除。
 
 ~~~bash
-tar -O -xvf /root/wazuh-install-files.tar wazuh-install-files/wazuh-passwords.txt | less
-# 依官方文件使用 wazuh-passwords-tool.sh 變更 admin 密碼
+# 只讓 root 可讀
+chmod 600 /root/wazuh-install-files.tar
+ls -l /root/wazuh-install-files.tar
 ~~~
 
-`wazuh-install-files.tar` 含全部密碼，確認已安全保存後，移到只有管理者能存取的位置或刪除。
+建議另存一份到離線、受控的位置（例如內部加密儲存），不要放到雲端或本倉庫。注意：CT 112 的 PBS 備份也會包含這個檔案，備份的存取權限要一併管控。
+
+#### 更換 admin 密碼
+
+密碼規則：8～64 字元，須同時包含大寫、小寫、數字，以及 `.*+?-` 其中一個符號（其他符號可能被工具拒絕）。
+
+用 `read -s` 輸入密碼，畫面不顯示、也不會留在 bash history：
+
+`read` 引號內的文字只是**提示字**，照抄即可；按 Enter 後，在「新的 admin 密碼:」後面輸入密碼（畫面不會顯示），再按 Enter。**不要把密碼寫進引號裡**，否則密碼會顯示在畫面上並留在 history。執行工具前先用 `echo "長度：${#NEWPW}"` 確認不是 0。
+
+~~~bash
+read -rsp '新的 admin 密碼: ' NEWPW; echo
+bash /usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh -u admin -p "$NEWPW"
+unset NEWPW
+~~~
+
+改完驗證：
+
+~~~bash
+filebeat test output          # 最後要出現 talk to server... OK
+systemctl is-active filebeat wazuh-dashboard
+~~~
+
+再用新密碼登入 Dashboard（本案 2026-09-30 已確認可登入）。
+
+**為什麼要測 Filebeat？** All-in-one 的 Filebeat 預設用 admin 帳號寫入 Indexer，密碼存在 Filebeat keystore。All-in-one 環境下工具通常會一併更新；若 `talk to server` 失敗，手動更新 keystore：
+
+~~~bash
+read -rsp '新的 admin 密碼: ' NEWPW; echo
+echo "$NEWPW" | filebeat keystore add password --stdin --force
+unset NEWPW
+systemctl restart filebeat
+filebeat test output
+~~~
+
+Dashboard 連 Indexer 用的是另一個內部帳號（kibanaserver），改 admin 不影響 Dashboard 服務本身。
+
+**同步更新 Wazuh Server 的 keystore。** 工具最後會出現 WARNING，提醒要更新 Wazuh dashboard、Wazuh server、Filebeat 的密碼並重啟服務。All-in-one 的 Filebeat 已由工具自動更新；Wazuh Server（Manager）的漏洞偵測模組透過 indexer-connector 連線 Indexer，帳號密碼存在 Manager 自己的 keystore，預設也是 admin，需要手動更新：
+
+~~~bash
+read -rsp '新的admin密碼:' NEWPW; echo
+echo "$NEWPW" | /var/ossec/bin/wazuh-keystore -f indexer -k password
+unset NEWPW
+systemctl restart wazuh-manager filebeat
+systemctl is-active wazuh-manager filebeat
+grep -iE 'indexer-connector|401|unauthorized' /var/ossec/logs/ossec.log | tail -5
+~~~
+
+`filebeat test output` 會重新讀取 keystore，但執行中的 Filebeat 程序仍使用啟動時載入的舊密碼，所以一起重啟。
+
+#### 本案實測（2026-09-30）
+
+| 時間 | 事件 |
+| --- | --- |
+| 09:30:52 | `Updating the internal users` |
+| 09:30:53 | 舊設定備份至 `/etc/wazuh-indexer/internalusers-backup` |
+| 09:30:55 | `filebeat.yml` 改用 Filebeat keystore 的帳號密碼 |
+| 09:31:09 | WARNING：提醒更新 dashboard／server／Filebeat 的密碼並重啟服務 |
+| 之後 | `filebeat test output` → `talk to server... OK` |
+
+第一次操作時把密碼誤寫在 `read` 的引號內（提示字位置），`NEWPW` 長度為 0，未執行變更；清除 history 後重做成功。
+
+Manager keystore 更新：`NEWPW` 長度 13（非 0），`wazuh-manager`、`filebeat` 重啟後皆 `active`。`ossec.log` 中 indexer-connector 對各 `wazuh-states-inventory-*` 索引皆顯示 `IndexerConnector initialized successfully`，沒有 401／Unauthorized；`filebeat test output` 仍為 `talk to server... OK`。
+
+小提醒：多行指令一次貼上時，`read` 仍會等待鍵盤輸入（本案終端機的 bracketed paste 正常）。若終端機不支援 bracketed paste，下一行指令可能被 `read` 當成密碼讀走，因此 `read` 那一行建議單獨執行。
 
 ### 7-2 暫停 Wazuh 套件自動更新
 
@@ -388,28 +496,428 @@ sed -i "s/^deb /#deb /" /etc/apt/sources.list.d/wazuh.list
 apt update
 ~~~
 
-### 7-3 限制誰能連
+**本案實測（2026-09-30）**：`wazuh.list` 已變成 `#deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main`；`apt update` 只剩 Ubuntu jammy 的三個來源，不再連 packages.wazuh.com。
 
-建議在 PVE Firewall（CT → Firewall）只開放必要來源：
+### 7-3 限制誰能連（PVE Firewall）
 
-| Port | 允許來源 |
+本案管理電腦與 Agent 都在同一個網段（示範：`192.0.2.0/24`）。規劃：
+
+| Port | 用途 | 允許來源 |
+| --- | --- | --- |
+| 443/tcp | Dashboard | 管理網段 |
+| 1514/tcp | Agent 傳送資料 | Agent 網段 |
+| 1515/tcp | Agent 註冊 | Agent 網段 |
+| 22/tcp | SSH | 管理網段 |
+| ICMP | ping 排錯 | 管理網段 |
+| 55000/tcp | Wazuh API | **不開放**：Dashboard 在本機以 127.0.0.1 呼叫 API，外部不需要 |
+
+**(1) 先確認現況**（在任一節點）：
+
+~~~bash
+cat /etc/pve/firewall/cluster.fw 2>/dev/null | head -20   # 資料中心層級：[OPTIONS] 是否 enable: 1
+cat /etc/pve/firewall/112.fw 2>/dev/null                  # CT 層級：是否已有規則
+~~~
+
+PVE 防火牆分三層：資料中心 → 節點 → VM／CT。**資料中心層級沒有啟用時，CT 的規則不會生效**。啟用資料中心防火牆會影響所有節點（包括 8006 管理介面與 SSH），屬於另一項變更，須另行規劃，不在本 SOP 內直接開啟。
+
+**(2) 寫入 CT 規則**（檔案在叢集檔案系統上，任一節點寫入即同步）：
+
+~~~bash
+cat > /etc/pve/firewall/112.fw <<'FWEOF'
+[OPTIONS]
+enable: 1
+policy_in: DROP
+policy_out: ACCEPT
+
+[RULES]
+IN ACCEPT -source 192.0.2.0/24 -p tcp -dport 443 # Wazuh Dashboard
+IN ACCEPT -source 192.0.2.0/24 -p tcp -dport 1514 # Wazuh agent events
+IN ACCEPT -source 192.0.2.0/24 -p tcp -dport 1515 # Wazuh agent enrollment
+IN SSH(ACCEPT) -source 192.0.2.0/24 # SSH
+IN Ping(ACCEPT) -source 192.0.2.0/24 # ICMP ping
+FWEOF
+pve-firewall compile > /dev/null && echo "syntax OK"
+~~~
+
+`policy_in: DROP` 表示「沒有明確允許的連入一律丟棄」。網卡需有 `firewall=1`（本案已設定）規則才會套用。
+
+**(3) 驗證**（從管理網段的電腦）：
+
+| 測試 | 預期 |
 | --- | --- |
-| 443/tcp | 管理網段 |
-| 1514/tcp、1515/tcp | 需要裝 Agent 的主機網段 |
-| 55000/tcp | 管理網段（沒有用 API 可不開） |
-| 22/tcp | 管理網段 |
+| 瀏覽 `https://<Wazuh IP>` | 可登入 |
+| `Test-NetConnection <Wazuh IP> -Port 1514`（Windows）或 `nc -zv <Wazuh IP> 1514`（Linux） | 成功 |
+| 同上測 55000 | **失敗**（已被擋） |
 
-開啟防火牆前，先加好管理網段的允許規則，避免把自己擋在外面。
+**回復方式**：規則有誤時，把 `112.fw` 的 `enable: 1` 改成 `enable: 0` 即停用。即使網路規則寫錯，仍可在節點上用 `pct enter 112` 進入容器。
+
+**本案現況（2026-09-30）**：
+
+| 檔案 | 內容 | 意思 |
+| --- | --- | --- |
+| `cluster.fw` | `[OPTIONS] enable: 0`、`ebtables: 0` | 資料中心防火牆**未啟用** |
+| `112.fw` | 不存在 | CT 112 從未設定規則 |
+
+因此即使寫入 `112.fw`，規則也不會生效。要讓 PVE Firewall 生效就得啟用資料中心防火牆，但這會讓三台節點的主機層也開始套用預設的連入政策；Ceph（MON 3300／6789、OSD 6800–7300）、Corosync、8006、SSH 等流量需事先確認都有允許規則，否則可能影響叢集與儲存。這屬於獨立的變更，需另排維護時段評估，不在本次 Wazuh 部署中直接開啟。
+
+**本案決定（2026-09-30）**：採應用程式層做法，把 Wazuh API（55000）改成只聽本機，達成「關閉 55000 對外」這項主要目標，不動 PVE 防火牆。資料中心防火牆另案規劃。
+
+#### 7-4 Wazuh API 只監聽本機
+
+**(1) 確認現況**
+
+~~~bash
+grep -n 'host' /var/ossec/api/configuration/api.yaml
+grep -n 'url:' /usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+~~~
+
+本案結果：`api.yaml` 沒有未註解的 `host:`，代表使用預設值（所有介面）；Dashboard 的 API 位址是 `url: https://127.0.0.1`，改成只聽本機後 Dashboard 仍連得到。
+
+**(2) 備份並加入設定**
+
+~~~bash
+cp -a /var/ossec/api/configuration/api.yaml /var/ossec/api/configuration/api.yaml.bak-$(date +%F)
+tail -c1 /var/ossec/api/configuration/api.yaml | od -c | head -1   # 確認檔尾是 \n
+echo "host: ['127.0.0.1']" >> /var/ossec/api/configuration/api.yaml
+grep -n '^host' /var/ossec/api/configuration/api.yaml              # 只能有一行
+~~~
+
+YAML 最上層不能有重複的 key，所以加入前要確認沒有其他未註解的 `host:`。
+
+**(3) 重啟並驗證**
+
+~~~bash
+systemctl restart wazuh-manager
+systemctl is-active wazuh-manager
+ss -tlnp | grep ':55000'                     # 應只剩 127.0.0.1:55000
+tail -5 /var/ossec/logs/api.log
+~~~
+
+再到 Dashboard 開啟 Agents management 或 Server management，頁面能正常載入、沒有 API 連線錯誤。從管理電腦測試 55000 應連不上：`Test-NetConnection <Wazuh IP> -Port 55000`。
+
+**本案實測（2026-09-30）**：
+
+| 檢查 | 結果 |
+| --- | --- |
+| 檔尾 | `\n` ✅ |
+| 加入後 `grep '^host'` | 第 80 行 `host: ['127.0.0.1']`，只有一行 ✅ |
+| `wazuh-manager` | active ✅ |
+| `ss` | 只剩 `127.0.0.1:55000`（原本的 `0.0.0.0` 與 `[::]` 已消失）✅ |
+| `api.log` | `RBAC database integrity check finished successfully`、`Listening on ['127.0.0.1']:55000` ✅ |
+| 外部測試（管理電腦 PowerShell） | `Test-NetConnection -Port 55000` → `TcpTestSucceeded : False`（Ping 仍 True）；`-Port 443` → `True` ✅ |
+
+升級 Wazuh 後要再檢查一次這行設定是否保留。
+
+**回復方式**：
+
+~~~bash
+cp -a /var/ossec/api/configuration/api.yaml.bak-<日期> /var/ossec/api/configuration/api.yaml
+systemctl restart wazuh-manager
+~~~
+
+**判讀限制**：管理與 Agent 都在同一網段時，這組規則的主要效果是關閉 55000 與其他未列出的 Port，並阻擋其他網段（如 VPN、其他 VLAN）連入；同網段內的主機仍可連 443／1514／1515。
 
 ## 8. 備份與 HA
 
-- 將 CT 加入既有 PBS 備份排程；Indexer 持續寫入，建議用 snapshot 模式，並另排一次還原測試。
-- 要加入 HA 前，確認：rootfs 在共用儲存、所有節點都已完成步驟 1、`nesting=1` 已設定。
-- 做一次手動遷移（`pct migrate` 或 GUI Migrate），確認換節點後 Indexer 能正常啟動。
+### 8-1 先做一次手動備份
 
-## 9. 第一台 Agent
+安裝與安全設定完成後，先留一個「乾淨狀態」的備份點。在 CT 所在節點：
 
-建議先把一台 PVE 節點接進來，驗證 1514／1515 通、告警有進 Dashboard，再擴大範圍。詳細步驟待實作時補上。
+~~~bash
+pvesh get /cluster/backup --output-format yaml     # 看既有的排程備份工作（是否已包含 112 或 all）
+vzdump 112 --storage PBS31 --mode snapshot --protected 1 --notes-template '{{guestname}} Wazuh 4.14 安裝完成'
+~~~
+
+`vzdump` 要在 **CT 目前所在的節點**執行。`--protected 1` 讓這份備份不會被 prune 保留策略自動刪除；不再需要時，到 PBS31 取消保護即可。
+
+| 模式 | 說明 | 本案選擇 |
+| --- | --- | --- |
+| snapshot | 不停機；先對 RBD 做快照再備份 | ✅ 日常排程 |
+| suspend | 短暫凍結 CT | — |
+| stop | 關機備份，資料一致性最高，會停機數分鐘 | 需要「完全一致」的備份點時使用 |
+
+**本案實測（2026-09-30）**：
+
+| 項目 | 結果 |
+| --- | --- |
+| 資料量 | 14.611 GiB，其中 14.215 GiB 需上傳（壓縮後 3.749 GiB） |
+| 重複利用 | 405.59 MiB（2.7%），首次備份幾乎是全量 |
+| 速度／時間 | 平均 92.4 MiB/s；Duration 157.64 s，整體 00:02:40 |
+| 收尾 | 暫存 `vzdump` 快照已移除；`Backup job finished successfully`；已通知 `mail-to-root` |
+
+Indexer 持續寫入，snapshot 模式得到的是「像突然斷電那一刻」的狀態（crash-consistent）。OpenSearch 通常能自行恢復，但**只有做過還原測試才算數**。
+
+### 8-2 加入排程備份
+
+本案現況（2026-09-30）：既有排程工作已涵蓋全部 guest，CT 112 自動納入，不需另外設定。
+
+| 項目 | 值 |
+| --- | --- |
+| 範圍 | `all: 1`（全部 VM／CT） |
+| 時間 | 每天 21:00 |
+| 模式 | snapshot（fleecing 未啟用） |
+| 目的地 | PBS31 |
+| 保留 | keep-last 3、keep-daily 7 |
+| 備註範本 | `{{guestname}}` |
+
+
+Datacenter → Backup：若既有工作是「All」則已自動包含；否則編輯工作把 112 加入，或新增一個工作（Storage：PBS31、Mode：Snapshot）。保留策略依 PBS 的 prune 設定。
+
+### 8-3 還原測試
+
+還原成**另一個 CT ID**，開機前把網卡設為斷線（`link_down=1`），避免和正式機衝突：
+
+~~~bash
+pvesh get /cluster/nextid                                   # 取一個可用的 CT ID
+pvesm list PBS31 --vmid 112                                 # 找到剛才那份備份的 volid
+pct restore <新CTID> <volid> --storage VM_Pool --unique 1   # --unique：產生新的 MAC
+pct set <新CTID> --onboot 0 --net0 name=eth0,bridge=vmbr0,ip=192.0.2.99/24,gw=192.0.2.1,link_down=1
+pct start <新CTID>
+~~~
+
+| 設定 | 目的 |
+| --- | --- |
+| `--unique 1` | 重新產生 MAC，避免與正式機重複 |
+| `--onboot 0` | 測試機不要在節點重開時自動啟動 |
+| `link_down=1` | 網卡斷線：IP、hostname、Manager 身分都和正式機相同，斷線才不會搶 Agent 或造成 IP 衝突 |
+
+等 1～2 分鐘讓服務啟動後驗證：
+
+~~~bash
+pct exec <新CTID> -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
+pct enter <新CTID>
+curl -sk -u admin 'https://127.0.0.1:9200/_cluster/health?pretty'   # 會詢問 admin 密碼；status 應為 green
+curl -sk -u admin 'https://127.0.0.1:9200/_cat/indices/wazuh-alerts-*?v&s=index'   # 告警索引與筆數
+exit
+~~~
+
+**本案實測（2026-09-30，還原到 node11 的 CT 114）**：
+
+| 項目 | 結果 |
+| --- | --- |
+| 選用備份 | `PBS31:backup/ct/112/2026-09-30T05:29:26Z`（台灣時間 13:29 的手動備份；PBS 以 UTC 命名）|
+| 另一份 | `2026-09-29T13:05:01Z`（0.9 GB，昨晚排程，安裝 Wazuh 前）不使用 |
+| 還原 | 在 VM_Pool 建立 80G ext4（20971520 個 4k 區塊），14.611 GiB 於 1 分 52.8 秒完成，平均 132.6 MiB/s |
+| 網路隔離 | `pct set` 後 net0 含 `link_down=1`、IP 改為 .99、MAC 已重新產生；容器內 `ip -br addr show eth0` → `DOWN`、無 IP ✅ |
+| Indexer 健康 | `status: green`，1 個節點，23 個 primary shard 全部 active，unassigned 0，`active_shards_percent` 100% ✅ |
+| 告警資料 | `wazuh-alerts-4.x-2026.09.30`：green／open，3 primary、0 replica，1718 筆，2.2 MB ✅ |
+
+結論：snapshot 模式的備份可完整還原，Indexer 啟動後資料一致，告警索引與筆數都在。從 PBS 還原約 2 分鐘，加上服務啟動約 1～2 分鐘，可作為 RTO 參考。
+
+測試完成後已刪除 CT 114（`pct destroy 114 --purge`）。
+
+操作提醒：`pct enter` 會開新的 shell，和後面的指令一起貼上時，後面幾行會排在節點的 shell，等離開容器後才在**節點上**執行。`pct enter` 要單獨執行。
+
+驗收標準：4 個服務 active、叢集健康 green（或 yellow 並能說明原因）、可以看到還原前的告警索引。
+
+驗收後刪除測試 CT：
+
+~~~bash
+pct stop <新CTID>
+pct destroy <新CTID> --purge
+~~~
+
+### 8-4 遷移測試與 HA
+
+LXC 不支援線上遷移，只能「重啟式遷移」，會中斷約 1～2 分鐘加上服務啟動時間：
+
+~~~bash
+pct migrate 112 <目標節點> --restart
+# 遷移後在目標節點
+pct exec 112 -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
+~~~
+
+**本案紀錄（2026-09-30）**：CT 112 已由 node12 遷移至 node10（8-1 手動備份即在 node10 執行）。遷移後驗證：
+
+~~~bash
+pct status 112
+pct exec 112 -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
+pct exec 112 -- sysctl vm.max_map_count
+pct exec 112 -- ss -tlnp | grep -E ':443 |:1514|:1515|:55000'
+~~~
+
+遷移後驗證結果：
+
+| 檢查 | 結果 |
+| --- | --- |
+| `pct status` | running ✅ |
+| 4 個服務 | 皆 active ✅（Indexer 換節點後正常啟動） |
+| `vm.max_map_count` | 1048576（node10 kernel）✅ |
+| Port | 443／1514／1515 聽 0.0.0.0；55000 只聽 127.0.0.1 ✅（設定隨 CT 保留） |
+| Dashboard | 登入正常 ✅ |
+
+加入 HA 前確認：rootfs 在共用儲存（VM_Pool）、所有節點 `vm.max_map_count` ≥ 262144、`nesting=1` 已設定、手動遷移測試成功。
+
+**加入前先看 HA 現況**（任一節點）：
+
+~~~bash
+ha-manager status          # quorum、master、各節點 lrm 狀態、既有 HA 資源
+ha-manager config          # 既有 HA 資源清單
+ha-manager rules config 2>/dev/null   # PVE 9 的 HA 規則（取代舊版 HA groups）
+~~~
+
+**盲點：HA 會啟用節點的 watchdog 自我隔離（fencing）。** 節點上一旦有 HA 資源，該節點的 LRM 會變成 active 並啟動 watchdog；之後若這台節點失去 quorum（例如叢集網路中斷），它會**自動重開機**以保護資料。如果叢集原本已經有 HA 資源，這是既有行為；如果 CT 112 是第一個 HA 資源，等於替叢集新增了這項機制，需要先確認叢集網路穩定。
+
+**本案現況（2026-09-30）**：
+
+| 項目 | 狀態 |
+| --- | --- |
+| quorum | OK；HA master 為 node12；fencing armed |
+| LRM | node10 active／watchdog active；node11 idle／standby；node12 active／watchdog active |
+| 既有 HA 資源 | ct:100、ct:110、ct:113（node10）；ct:101（node12），皆 started |
+| HA 規則 | 未設定 |
+
+CT 112 目前在 node10，而 node10 的 LRM 本來就是 active，加入 HA 不會新增 fencing 行為。
+
+加入 HA：
+
+~~~bash
+ha-manager add ct:112 --state started --max_restart 1 --max_relocate 1
+ha-manager status | grep -E 'ct:112|lrm'
+~~~
+
+| 參數 | 意思 |
+| --- | --- |
+| `--state started` | HA 會確保它維持開機 |
+| `--max_restart 1` | 在原節點啟動失敗時，重試 1 次 |
+| `--max_relocate 1` | 仍失敗時，最多搬到其他節點 1 次 |
+
+節點故障時，HA 會在 fencing 完成後（通常約 2～3 分鐘）於其他節點重新啟動 CT 112。LXC 是重新開機而非線上接手，服務會中斷數分鐘。
+
+**本案實測（2026-09-30）**：`ha-manager add ct:112 --state started --max_restart 1 --max_relocate 1` 後，`ha-manager status` 顯示 `service ct:112 (node10, started)`，三台 LRM 狀態與加入前相同；加入 HA 過程未重開 CT。
+
+加入後 node10 上有 4 個 HA 資源（ct:100、110、112、113）。node10 故障時會同時在其他節點重啟，目前 node11 可用記憶體約 44 GiB，容量足夠；資源增加後可考慮用 HA 規則分散。
+
+| 想做的事 | 不要用 | 改用 |
+| --- | --- | --- |
+| 關機 | `pct shutdown 112` | GUI Shutdown，或 `ha-manager set ct:112 --state stopped` |
+| 遷移 | `pct migrate 112 ...` | GUI Migrate，或 `ha-manager migrate ct:112 <節點>` |
+| 維護時暫停 HA 管理 | — | `ha-manager set ct:112 --state ignored` |
+
+注意：加入 HA 後，要關機或遷移請透過 HA（GUI 或 `ha-manager`），直接 `pct shutdown` 可能被 HA 自動拉起來。
+
+## 9. 接上 Agent
+
+本案順序（2026-09-30 決定）：先接一台 PVE 節點（node11），再接測試用 Linux VM／CT，最後接 Windows 管理電腦。node11 目前沒有 HA 資源、負載最輕，Agent 有狀況時影響最小。
+
+### 9-1 版本原則
+
+Agent 版本不可高於 Manager（本案 4.14.8）。安裝時指定版本號，避免裝到比 Manager 新的版本。
+
+### 9-2 Linux（Debian／Ubuntu）：下載 .deb 安裝，不加套件庫
+
+PVE 節點或其他重要主機建議用這個方式：直接安裝 .deb，不在主機上新增 Wazuh 套件庫，日後 `apt upgrade` 不會連帶升級 Agent。
+
+~~~bash
+apt-get install -y lsb-release        # Agent 的相依套件；PVE 9（Debian 13）預設沒有安裝
+cd /tmp
+wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.8-1_amd64.deb
+WAZUH_MANAGER='192.0.2.32' WAZUH_AGENT_NAME='<主機名稱>' dpkg -i ./wazuh-agent_4.14.8-1_amd64.deb
+systemctl daemon-reload
+systemctl enable --now wazuh-agent
+systemctl is-active wazuh-agent
+~~~
+
+也可在 Dashboard 的 **Deploy new agent** 精靈選擇作業系統與 Manager 位址，產生對應指令後核對版本再執行。
+
+### 9-2a PVE 節點安裝前檢查
+
+~~~bash
+cat /etc/debian_version                        # PVE 9 為 Debian 13（trixie）
+dpkg -l | grep -i wazuh                        # 應無輸出
+timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && echo "1514 OK"
+timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "1515 OK"
+~~~
+
+本案結果（2026-09-30）：node10、node11、node12 皆為 Debian 13.7，沒有 Wazuh 套件，1514／1515 皆 OK。安裝順序：先 node11 驗證成功，再依序安裝 node10、node12。
+
+`/dev/tcp/<IP>/<Port>` 是 bash 內建的連線測試，不需要另外安裝 nc。兩個 Port 都要 OK，否則 Agent 無法註冊或回報。
+
+#### 本案踩到的相依性問題（2026-09-30，node11）
+
+第一次 `dpkg -i` 出現：
+
+~~~text
+dpkg: dependency problems prevent configuration of wazuh-agent:
+ wazuh-agent depends on lsb-release; however:
+  Package lsb-release is not installed.
+~~~
+
+`dpkg -i` 只安裝指定的檔案，不會自動下載相依套件，所以套件被解開但停在「未設定」狀態。處理方式：
+
+~~~bash
+apt-get install -s lsb-release          # 模擬：確認只會新增 lsb-release
+apt-get install -y lsb-release          # 從 Debian 官方套件庫安裝；apt 會順便完成 wazuh-agent 的設定
+grep -A2 '<server>' /var/ossec/etc/ossec.conf    # 檢查 Manager 位址
+~~~
+
+apt 在完成 wazuh-agent 設定時沒有帶 `WAZUH_MANAGER` 環境變數，設定檔中的位址停在佔位字 `MANAGER_IP`。本案實測：帶環境變數重跑 `dpkg -i`（同版本覆蓋安裝）**不會**改寫位址，仍是 `MANAGER_IP`；環境變數只在全新安裝時套用。因此手動修正：
+
+~~~bash
+sed -i 's|<address>MANAGER_IP</address>|<address>192.0.2.32</address>|' /var/ossec/etc/ossec.conf
+grep -A2 '<server>' /var/ossec/etc/ossec.conf    # <address> 必須是 Manager IP
+~~~
+
+Agent 名稱沒有另外寫入設定檔時，註冊時會使用主機名稱（本案即 node11）。
+
+**避免重蹈覆轍**：其他節點先安裝 `lsb-release`，再帶環境變數做全新安裝，並在啟動前一定用 `grep` 確認 `<address>`。
+
+### 9-3 驗證
+
+~~~bash
+# Agent 端
+grep -iE 'connected|error' /var/ossec/logs/ossec.log | tail -5
+
+# Manager 端（CT 112 內）
+/var/ossec/bin/agent_control -l
+~~~
+
+Dashboard → Agents management → Summary 應看到新 Agent，狀態為 **Active**。
+
+#### 本案實測：node11（2026-09-30）
+
+| 檢查 | 結果 |
+| --- | --- |
+| Agent log | `14:30:31 wazuh-agentd: INFO: (4102): Connected to the server ([192.0.2.32]:1514/tcp).` ✅ |
+| Manager `agent_control -l` | `ID: 001, Name: node11, IP: any, Active` ✅ |
+| Dashboard Endpoints | Active 1；node11、IP 192.0.2.11、群組 default、Debian GNU/Linux 13、v4.14.8、active ✅ |
+
+#### 本案實測：node12（2026-09-30）
+
+依修正後順序操作：`apt-get install -y lsb-release`（新安裝 12.1-1，來自 Debian trixie 官方套件庫）→ 下載 .deb（13,227,800 bytes）→ 帶環境變數全新安裝 → `grep` 顯示 `<address>192.0.2.32</address>` → 啟動，`is-active` 為 active。
+
+**結論：先裝好 lsb-release，再帶環境變數做全新安裝，Manager 位址會正確寫入。** node11 的 `MANAGER_IP` 問題來自「相依套件缺少、安裝被中斷，之後由 apt 補完設定」的順序，不是環境變數本身失效。
+
+node10 原本已有 lsb-release（12.1-1），apt 只將它標記為手動安裝；之後的下載、全新安裝、位址檢查與啟動過程與 node12 相同。
+
+#### 三台 PVE 節點總驗收（2026-09-30）
+
+Manager 端 `agent_control -l`：
+
+| ID | 名稱 | 狀態 |
+| --- | --- | --- |
+| 000 | wazuh (server) | Active/Local |
+| 001 | node11 | Active |
+| 002 | node10 | Active |
+| 003 | node12 | Active |
+
+Dashboard 上的「Cluster node: node01」是 Wazuh Manager 叢集的節點名稱（安裝預設值），不是 PVE 節點名稱。
+
+### 9-4 回復方式（要移除 Agent 時）
+
+~~~bash
+# Agent 端
+systemctl disable --now wazuh-agent
+apt-get remove --purge -y wazuh-agent
+rm -rf /var/ossec
+
+# Manager 端（CT 112 內），<ID> 由 agent_control -l 查得
+/var/ossec/bin/manage_agents -r <ID>
+~~~
+
+### 9-5 PVE 節點的告警調校（接上後觀察）
+
+預設的檔案完整性監控（FIM）會掃 `/etc`，其中包含叢集檔案系統 `/etc/pve`。`/etc/pve` 的變更會同步到每台節點，三台都裝 Agent 時同一個變更會產生三份告警。先以預設值觀察一段時間，再決定是否在 Agent 的 `ossec.conf` 加入 `<ignore>/etc/pve</ignore>`，或改由 Manager 端規則處理。FIM 只記錄雜湊值，除非啟用 `report_changes`，不會保存檔案內容。
 
 ## 風險與注意事項
 
@@ -417,6 +925,7 @@ apt update
 - 所有節點 `vm.max_map_count` 都必須 ≥ 262144，否則 HA／遷移後 Indexer 可能起不來。
 - 資料量成長很快，需規劃 Index 保留天數（Index State Management），並監控 rootfs 用量。
 - Indexer 對儲存 I/O 敏感；放在 Ceph 上時，觀察 Ceph 延遲是否因此上升。
+- PVE 節點裝上 Agent 後告警量會明顯增加（`/etc/pve` 變更、套件異動、CIS 設定稽核），先觀察再調校，不要一次關閉大量規則。
 - 文中 IP 皆為文件示範位址（192.0.2.0/24），指令執行前請替換。
 
 ## 參考資料
