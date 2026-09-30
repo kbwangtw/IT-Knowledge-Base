@@ -1179,12 +1179,17 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 
 ~~~bash
 qm config <VMID> | grep -E 'vmgenid|ostype'
-qm snapshot <VMID> pre-wazuh-agent --description "安裝 Wazuh Agent 前"
+qm snapshot <VMID> pre-wazuh-agent --description "before Wazuh agent install"
+qm listsnapshot <VMID>
 ~~~
 
 **網域控制站的快照回復有風險。** 多台 DC 的環境中，把其中一台回復到舊快照，可能造成 **USN rollback**：這台 DC 的複寫紀錄倒退，與其他 DC 不一致。Windows Server 2012 以後搭配 hypervisor 的 **VM-GenerationID**（PVE 的 `vmgenid` 設定）可以偵測回復並保護 AD，因此要先確認 `vmgenid` 存在。即使有保護，**DC 的快照只作為最後手段**；Agent 有問題時優先解除安裝，而不是回復快照。
 
 本案結果（2026-09-30）：DC01（106）、DC02（107）、CA（111）皆為 `ostype: win11`，且都有 `vmgenid`，具備回復偵測保護。
+
+快照：DC01 16:34:51、CA 16:34:57、DC02 16:35:36 建立完成。輸出中的 `freeze guest filesystem`／`thaw guest filesystem` 表示 VM 內的 QEMU Guest Agent 在快照前凍結檔案系統，取得一致的狀態；CA 另有 EFI 與 TPM state 磁碟一併快照。
+
+`qm listsnapshot` 出現 `Wide character in printf`、中文描述變成亂碼，是命令列輸出編碼的顯示問題，不影響快照；描述改用英文即可避免。
 
 #### (2) 安裝前：記錄 AD 健康基準（在 DC 上，系統管理員 PowerShell）
 
