@@ -1212,7 +1212,8 @@ certutil -ping
 | 複寫 | `repadmin /replsummary`：DC01、DC02 作為來源與目的地皆為 0／5 失敗，最大差異值約 30～32 分鐘 |
 | DC 服務 | DNS、Kdc、Netlogon、NTDS 皆 Running |
 | CA | CertSvc Running；`certutil -ping` 連到 ITBH-Root-CA 的 ICertRequest2 介面，15 ms 回應 |
-| `dcdiag /q` | 待補 |
+| `dcdiag /q` | DC02：無輸出（健康）；DC01：待補 |
+| DC02 服務（16:30） | DNS、Kdc、Netlogon、NTDS 皆 Running；複寫 0／5 失敗 |
 
 依此決定順序：**DC02 → DC01 → CA**。
 
