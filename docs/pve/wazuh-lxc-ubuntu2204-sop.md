@@ -969,6 +969,43 @@ pct exec <CTID> -- bash -c 'systemctl daemon-reload && systemctl enable --now wa
 pct exec <CTID> -- rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 ~~~
 
+#### 本案實測：IPAM（CT 103，2026-09-30）
+
+| 步驟 | 結果 |
+| --- | --- |
+| Port 測試 | `port OK` |
+| lsb-release | 容器內已有（12.1-1） |
+| `dpkg -i` | 全新安裝，無相依性錯誤 |
+| `<address>` | 192.0.2.32 ✅ |
+| 服務 | enable 並 active |
+| Agent log | logcollector 自動開始讀取 `/var/log/nginx/error.log`；07:04:25 `Connected to the server` |
+| Manager | 剛註冊時為 `ID: 004, Name: IPAM, Pending`，稍後轉為 `Active` |
+
+`Pending` 表示已註冊、Manager 尚未收到第一次完整回報，通常數十秒內會轉為 Active。容器 log 時間為 UTC（容器時區未改），與節點台灣時間相差 8 小時，屬顯示差異。
+
+#### 批次安裝其餘容器
+
+試裝成功後，用迴圈處理同一節點上的其他容器。位址不正確的容器不會被啟動：
+
+~~~bash
+DEB=/tmp/wazuh-agent_4.14.8-1_amd64.deb
+MGR=192.0.2.32
+for id in 102 105 110; do
+  echo "===== CT $id ====="
+  pct exec $id -- bash -c "timeout 3 bash -c '</dev/tcp/$MGR/1514' && timeout 3 bash -c '</dev/tcp/$MGR/1515'" \
+    || { echo "CT $id：連不到 Manager，跳過"; continue; }
+  pct push $id $DEB $DEB
+  pct exec $id -- apt-get install -y lsb-release
+  pct exec $id -- env WAZUH_MANAGER=$MGR dpkg -i $DEB
+  if pct exec $id -- grep -q "<address>$MGR</address>" /var/ossec/etc/ossec.conf; then
+    pct exec $id -- bash -c 'systemctl daemon-reload && systemctl enable --now wazuh-agent && systemctl is-active wazuh-agent'
+  else
+    echo "CT $id：Manager 位址不正確，未啟動"
+  fi
+  pct exec $id -- rm -f $DEB
+done
+~~~
+
 說明：
 
 - `pct exec <CTID> -- env 變數=值 指令`：`pct exec` 不經過 shell，要用 `env` 把環境變數帶給 dpkg。
