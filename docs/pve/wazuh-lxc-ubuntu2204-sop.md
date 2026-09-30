@@ -11,7 +11,7 @@ last_modified_at: 2026-09-30
 
 Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「安全判讀」：主機完整性檢查（FIM）、弱點偵測、設定稽核與入侵告警。本文記錄在 PVE Cluster 上建立一台 Ubuntu 22.04 LXC，以 All-in-one（Indexer + Server + Dashboard 同一台）方式安裝 Wazuh 的步驟。
 
-> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 完成驗證；Agent 已涵蓋 PVE 節點、Debian 13 與 Ubuntu 容器、Ubuntu VM、Windows 用戶端、網域控制站與 CA，共 16 台 Active。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
+> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 完成驗證；Agent 已涵蓋 PVE 節點、Debian 13 與 Ubuntu 容器、Ubuntu VM、Windows 用戶端、網域控制站、CA 與 PBS，共 17 台 Active。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
 
 ## 進度表
 
@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）皆 Active，AD／CA 前後檢查一致；共 16 台 |
+| 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 
 ## 先認識四個名詞
 
@@ -1161,9 +1161,10 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 | Windows VM | 012 | WinClient | PowerShell，MSI + `WAZUH_MANAGER` |
 | Windows 網域控制站 | 014～015 | DC02、DC01 | 同 Windows VM；裝前快照、AD 健康基準，裝後比對（9-9） |
 | Windows 憑證伺服器 | 016 | ca | 同上，以 CertSvc 與 `certutil -ping` 比對 |
+| Proxmox Backup Server | 017 | pbs31 | 主機上下載 .deb，先裝 lsb-release 再 `dpkg -i`（9-10） |
 | Ubuntu 24.04 容器 | 013 | ai | 節點上 `pct push` + `pct exec`（安裝前先以 `dpkg -l` 確認未安裝） |
 
-共 16 個 Agent，全部 Active。
+共 17 個 Agent，全部 Active。
 
 服務內部名稱為 `WazuhSvc`，顯示名稱為 `Wazuh`；`NET START`／`NET STOP` 用顯示名稱或內部名稱皆可，PowerShell 可用 `Restart-Service WazuhSvc`。
 
@@ -1309,6 +1310,19 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 - 避開排程備份時段（本案每天 21:00）安裝，雖然 Agent 不會重啟 PBS 服務，仍以不干擾備份為原則。
 - **不要把 datastore 目錄加入 FIM**：備份資料量大、變動頻繁，會產生大量事件並拖慢掃描。預設 FIM 只監控系統目錄，不包含 datastore。
 - 安裝後確認 PBS 服務不受影響：`systemctl is-active proxmox-backup proxmox-backup-proxy`。
+
+**本案實測（2026-09-30）**：
+
+| 項目 | 結果 |
+| --- | --- |
+| 版本 | proxmox-backup-server 4.2.6-1（running 4.2.6），Debian 13.7 |
+| 事前檢查 | 尚未安裝；1514／1515 `port OK` |
+| `<address>` | 192.0.2.32 ✅（先裝 lsb-release 再全新安裝，位址一次寫入） |
+| 服務 | wazuh-agent enable 並 active |
+| PBS 服務 | proxmox-backup、proxmox-backup-proxy 皆 active ✅ |
+| Manager | `ID: 017, Name: pbs31, Active` |
+
+第一次貼上 Port 測試指令時被換行截斷，出現 `bash: -c: option requires an argument`；重新完整貼上一行即正常。
 
 ## 風險與注意事項
 

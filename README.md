@@ -6,7 +6,7 @@
 
 ## 全部文章
 
-- [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop.md)（主要流程已實測，16 台 Agent 上線）
+- [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop.md)（主要流程已實測，17 台 Agent 上線）
 - [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22.md)
 - [ML30 Gen11 擴充紀錄：哪些零件裝好了？哪些還要測？](docs/hardware/hpe/ml30-gen11/index.md)
 - [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP.md)
