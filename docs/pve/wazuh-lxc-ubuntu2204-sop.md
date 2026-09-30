@@ -1204,6 +1204,18 @@ Get-Service CertSvc | Format-Table Name,Status
 certutil -ping
 ~~~
 
+本案基準（2026-09-30 16:23）：
+
+| 項目 | 結果 |
+| --- | --- |
+| FSMO | 5 個角色（架構主機、網域命名主機、PDC、RID 集區管理員、基礎結構主機）**全部在 DC01** |
+| 複寫 | `repadmin /replsummary`：DC01、DC02 作為來源與目的地皆為 0／5 失敗，最大差異值約 30～32 分鐘 |
+| DC 服務 | DNS、Kdc、Netlogon、NTDS 皆 Running |
+| CA | CertSvc Running；`certutil -ping` 連到 ITBH-Root-CA 的 ICertRequest2 介面，15 ms 回應 |
+| `dcdiag /q` | 待補 |
+
+依此決定順序：**DC02 → DC01 → CA**。
+
 #### (3) 安裝
 
 依 9-8 的步驟執行（Test-NetConnection → 下載 MSI → `Start-Process ... -Wait` → 確認 `<address>` → `NET START Wazuh`）。
