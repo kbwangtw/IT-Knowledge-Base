@@ -848,12 +848,19 @@ dpkg: dependency problems prevent configuration of wazuh-agent:
 ~~~bash
 apt-get install -s lsb-release          # 模擬：確認只會新增 lsb-release
 apt-get install -y lsb-release          # 從 Debian 官方套件庫安裝；apt 會順便完成 wazuh-agent 的設定
-WAZUH_MANAGER='192.0.2.32' WAZUH_AGENT_NAME='node11' dpkg -i ./wazuh-agent_4.14.8-1_amd64.deb   # 重跑一次，讓安裝腳本讀到環境變數
-grep -A2 '<server>' /var/ossec/etc/ossec.conf    # <address> 必須是 Manager IP，不能是 MANAGER_IP
-grep '<agent_name>' /var/ossec/etc/ossec.conf
+grep -A2 '<server>' /var/ossec/etc/ossec.conf    # 檢查 Manager 位址
 ~~~
 
-重跑 `dpkg -i` 的原因：`apt-get install lsb-release` 在完成 wazuh-agent 設定時沒有帶 `WAZUH_MANAGER` 等環境變數，設定檔裡的 Manager 位址可能仍是預設值。
+apt 在完成 wazuh-agent 設定時沒有帶 `WAZUH_MANAGER` 環境變數，設定檔中的位址停在佔位字 `MANAGER_IP`。本案實測：帶環境變數重跑 `dpkg -i`（同版本覆蓋安裝）**不會**改寫位址，仍是 `MANAGER_IP`；環境變數只在全新安裝時套用。因此手動修正：
+
+~~~bash
+sed -i 's|<address>MANAGER_IP</address>|<address>192.0.2.32</address>|' /var/ossec/etc/ossec.conf
+grep -A2 '<server>' /var/ossec/etc/ossec.conf    # <address> 必須是 Manager IP
+~~~
+
+Agent 名稱沒有另外寫入設定檔時，註冊時會使用主機名稱（本案即 node11）。
+
+**避免重蹈覆轍**：其他節點先安裝 `lsb-release`，再帶環境變數做全新安裝，並在啟動前一定用 `grep` 確認 `<address>`。
 
 ### 9-3 驗證
 
