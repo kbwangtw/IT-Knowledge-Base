@@ -636,6 +636,15 @@ vzdump 112 --storage PBS31 --mode snapshot --protected 1 --notes-template '{{gue
 | suspend | 短暫凍結 CT | — |
 | stop | 關機備份，資料一致性最高，會停機數分鐘 | 需要「完全一致」的備份點時使用 |
 
+**本案實測（2026-09-30）**：
+
+| 項目 | 結果 |
+| --- | --- |
+| 資料量 | 14.611 GiB，其中 14.215 GiB 需上傳（壓縮後 3.749 GiB） |
+| 重複利用 | 405.59 MiB（2.7%），首次備份幾乎是全量 |
+| 速度／時間 | 平均 92.4 MiB/s；Duration 157.64 s，整體 00:02:40 |
+| 收尾 | 暫存 `vzdump` 快照已移除；`Backup job finished successfully`；已通知 `mail-to-root` |
+
 Indexer 持續寫入，snapshot 模式得到的是「像突然斷電那一刻」的狀態（crash-consistent）。OpenSearch 通常能自行恢復，但**只有做過還原測試才算數**。
 
 ### 8-2 加入排程備份
@@ -656,17 +665,40 @@ Datacenter → Backup：若既有工作是「All」則已自動包含；否則�
 
 ### 8-3 還原測試
 
-還原成**另一個 CT ID**，並在開機前斷開網路，避免和正式機 IP 衝突：
+還原成**另一個 CT ID**，開機前把網卡設為斷線（`link_down=1`），避免和正式機衝突：
 
 ~~~bash
-pvesm list PBS31 --vmid 112                              # 找到備份的 volid
-pct restore <新CTID> <volid> --storage VM_Pool
-pct set <新CTID> --net0 name=eth0,bridge=vmbr0,ip=192.0.2.99/24,gw=192.0.2.1,link_down=1
+pvesh get /cluster/nextid                                   # 取一個可用的 CT ID
+pvesm list PBS31 --vmid 112                                 # 找到剛才那份備份的 volid
+pct restore <新CTID> <volid> --storage VM_Pool --unique 1   # --unique：產生新的 MAC
+pct set <新CTID> --onboot 0 --net0 name=eth0,bridge=vmbr0,ip=192.0.2.99/24,gw=192.0.2.1,link_down=1
 pct start <新CTID>
-pct exec <新CTID> -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
 ~~~
 
-驗收後刪除測試 CT：`pct stop <新CTID> && pct destroy <新CTID>`。
+| 設定 | 目的 |
+| --- | --- |
+| `--unique 1` | 重新產生 MAC，避免與正式機重複 |
+| `--onboot 0` | 測試機不要在節點重開時自動啟動 |
+| `link_down=1` | 網卡斷線：IP、hostname、Manager 身分都和正式機相同，斷線才不會搶 Agent 或造成 IP 衝突 |
+
+等 1～2 分鐘讓服務啟動後驗證：
+
+~~~bash
+pct exec <新CTID> -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
+pct enter <新CTID>
+curl -sk -u admin 'https://127.0.0.1:9200/_cluster/health?pretty'   # 會詢問 admin 密碼；status 應為 green
+curl -sk -u admin 'https://127.0.0.1:9200/_cat/indices/wazuh-alerts-*?v&s=index'   # 告警索引與筆數
+exit
+~~~
+
+驗收標準：4 個服務 active、叢集健康 green（或 yellow 並能說明原因）、可以看到還原前的告警索引。
+
+驗收後刪除測試 CT：
+
+~~~bash
+pct stop <新CTID>
+pct destroy <新CTID> --purge
+~~~
 
 ### 8-4 遷移測試與 HA
 
