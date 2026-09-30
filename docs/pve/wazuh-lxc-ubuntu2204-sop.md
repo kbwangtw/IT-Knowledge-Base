@@ -1105,6 +1105,16 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 
 sudo 輸入錯誤發生在 Agent 安裝之前；logcollector 預設只讀取啟動後的新紀錄，所以那幾次失敗不會出現在 Wazuh。要驗證 Agent 是否正常回報，可在安裝後故意輸錯一次 sudo 或 SSH 密碼，再到 Dashboard 搜尋。
 
+**端到端告警驗證（2026-09-30）**：在 UBClient 執行 `sudo ls` 並故意輸入錯誤密碼（出現「抱歉，請重試」）。注意：沒有輸入密碼就取消時只會顯示「sudo: 需要密碼」，不算驗證失敗，不會產生告警。
+
+Dashboard → Threat intelligence → Threat Hunting → Events，搜尋 `agent.name:ubclient`，時間範圍 Last 15 minutes：
+
+| 時間 | Agent | 描述 | 等級 | 規則 |
+| --- | --- | --- | --- | --- |
+| 2026-09-30 16:16:23 | ubclient | PAM: User login failed. | 5 | 5503 |
+
+確認 log → Agent → Manager → Indexer → Dashboard 整條路徑正常。也可在 Manager 上查：`grep -A6 'ubclient' /var/ossec/logs/alerts/alerts.log | tail -40`。
+
 ### 9-8 Windows（WinClient）
 
 以系統管理員身分開啟 PowerShell：
