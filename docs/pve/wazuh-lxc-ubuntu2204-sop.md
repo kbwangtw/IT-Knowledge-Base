@@ -25,7 +25,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
-| 8 | 備份與 HA | 進行中 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；CT 112 已遷移至 node10，驗證中 |
+| 8 | 備份與 HA | 進行中 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試、HA 待做 |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
 
 ## 先認識四個名詞
@@ -719,7 +719,15 @@ pct exec 112 -- sysctl vm.max_map_count
 pct exec 112 -- ss -tlnp | grep -E ':443 |:1514|:1515|:55000'
 ~~~
 
-遷移後驗證結果：待確認。
+遷移後驗證結果：
+
+| 檢查 | 結果 |
+| --- | --- |
+| `pct status` | running ✅ |
+| 4 個服務 | 皆 active ✅（Indexer 換節點後正常啟動） |
+| `vm.max_map_count` | 1048576（node10 kernel）✅ |
+| Port | 443／1514／1515 聽 0.0.0.0；55000 只聽 127.0.0.1 ✅（設定隨 CT 保留） |
+| Dashboard | 登入正常 ✅ |
 
 加入 HA 前確認：rootfs 在共用儲存（VM_Pool）、所有節點 `vm.max_map_count` ≥ 262144、`nesting=1` 已設定、手動遷移測試成功。
 
