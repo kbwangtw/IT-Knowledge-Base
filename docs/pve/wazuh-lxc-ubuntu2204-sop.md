@@ -24,7 +24,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
-| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 進行中 | 2026-09-30：7-1 admin 密碼更換完成（Filebeat、Manager keystore 皆驗證 OK）；7-2、7-3 待做 |
+| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 進行中 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用，做法待決定 |
 | 8 | 備份與 HA | 待做 | |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
 
@@ -444,7 +444,7 @@ filebeat test output          # 最後要出現 talk to server... OK
 systemctl is-active filebeat wazuh-dashboard
 ~~~
 
-再用新密碼登入 Dashboard。
+再用新密碼登入 Dashboard（本案 2026-09-30 已確認可登入）。
 
 **為什麼要測 Filebeat？** All-in-one 的 Filebeat 預設用 admin 帳號寫入 Indexer，密碼存在 Filebeat keystore。All-in-one 環境下工具通常會一併更新；若 `talk to server` 失敗，手動更新 keystore：
 
@@ -495,6 +495,8 @@ Wazuh 各元件版本要一致才能正常運作，`apt upgrade` 時被單獨升
 sed -i "s/^deb /#deb /" /etc/apt/sources.list.d/wazuh.list
 apt update
 ~~~
+
+**本案實測（2026-09-30）**：`wazuh.list` 已變成 `#deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main`；`apt update` 只剩 Ubuntu jammy 的三個來源，不再連 packages.wazuh.com。
 
 ### 7-3 限制誰能連（PVE Firewall）
 
@@ -548,6 +550,17 @@ pve-firewall compile > /dev/null && echo "syntax OK"
 | 同上測 55000 | **失敗**（已被擋） |
 
 **回復方式**：規則有誤時，把 `112.fw` 的 `enable: 1` 改成 `enable: 0` 即停用。即使網路規則寫錯，仍可在節點上用 `pct enter 112` 進入容器。
+
+**本案現況（2026-09-30）**：
+
+| 檔案 | 內容 | 意思 |
+| --- | --- | --- |
+| `cluster.fw` | `[OPTIONS] enable: 0`、`ebtables: 0` | 資料中心防火牆**未啟用** |
+| `112.fw` | 不存在 | CT 112 從未設定規則 |
+
+因此即使寫入 `112.fw`，規則也不會生效。要讓 PVE Firewall 生效就得啟用資料中心防火牆，但這會讓三台節點的主機層也開始套用預設的連入政策；Ceph（MON 3300／6789、OSD 6800–7300）、Corosync、8006、SSH 等流量需事先確認都有允許規則，否則可能影響叢集與儲存。這屬於獨立的變更，需另排維護時段評估，不在本次 Wazuh 部署中直接開啟。
+
+替代做法：在應用程式層把 Wazuh API（55000）改成只聽本機，達成「關閉 55000 對外」這項主要目標，不動 PVE 防火牆。做法待決定後補記。
 
 **判讀限制**：管理與 Agent 都在同一網段時，這組規則的主要效果是關閉 55000 與其他未列出的 Port，並阻擋其他網段（如 VPN、其他 VLAN）連入；同網段內的主機仍可連 443／1514／1515。
 
