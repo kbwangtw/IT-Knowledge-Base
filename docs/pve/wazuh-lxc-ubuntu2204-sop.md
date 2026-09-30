@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 第一台 Agent（建議先接一台 PVE 節點） | 進行中 | 2026-09-30：node11 Agent（ID 001）已連線 Active；node10、node12 待裝 |
+| 9 | 第一台 Agent（建議先接一台 PVE 節點） | 進行中 | 2026-09-30：三台 PVE 節點 Agent 已安裝啟動（node11 ID 001 已確認 Active；node10、node12 Manager 端確認中）|
 
 ## 先認識四個名詞
 
@@ -888,7 +888,7 @@ Dashboard → Agents management → Summary 應看到新 Agent，狀態為 **Act
 
 **結論：先裝好 lsb-release，再帶環境變數做全新安裝，Manager 位址會正確寫入。** node11 的 `MANAGER_IP` 問題來自「相依套件缺少、安裝被中斷，之後由 apt 補完設定」的順序，不是環境變數本身失效。
 
-node10 原本已有 lsb-release（12.1-1），apt 只將它標記為手動安裝。
+node10 原本已有 lsb-release（12.1-1），apt 只將它標記為手動安裝；之後的下載、全新安裝、位址檢查與啟動過程與 node12 相同。
 
 Dashboard 上的「Cluster node: node01」是 Wazuh Manager 叢集的節點名稱（安裝預設值），不是 PVE 節點名稱。
 
