@@ -1129,6 +1129,18 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 
 說明：`Start-Process ... -Wait` 會等安裝完成才回到提示字元；直接執行 `msiexec` 會立刻返回，下一步可能在安裝完成前就執行。
 
+#### 本案實測：WinClient（VM 108，2026-09-30）
+
+| 項目 | 結果 |
+| --- | --- |
+| 下載與安裝 | `Invoke-WebRequest` 與 `Start-Process ... -Wait` 皆無錯誤訊息 |
+| `<address>` | `ossec.conf` 第 11 行為 192.0.2.32 ✅ |
+| 啟動 | `NET START Wazuh` → 「Wazuh 服務已經啟動成功」 |
+| 服務 | `Get-Service`：Status Running、Name **WazuhSvc**、DisplayName **Wazuh** |
+| log | 剛啟動時 `Connected` 尚未出現，等待後再查 |
+
+服務內部名稱為 `WazuhSvc`，顯示名稱為 `Wazuh`；`NET START`／`NET STOP` 用顯示名稱或內部名稱皆可，PowerShell 可用 `Restart-Service WazuhSvc`。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
