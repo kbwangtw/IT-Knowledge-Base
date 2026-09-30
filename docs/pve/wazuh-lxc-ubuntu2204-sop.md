@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點 Agent 皆 Active（001 node11、002 node10、003 node12）；測試用 Linux、Windows 待接 |
+| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 4 台 Debian 13 容器（004 IPAM、005 librenms、006 Graylog、007 ProxCenter）皆 Active；DNS 容器、WireGuard、Windows 待接 |
 
 ## 先認識四個名詞
 
@@ -1011,6 +1011,23 @@ for id in 102 105 110; do
   pct exec $id -- rm -f $DEB
 done
 ~~~
+
+本案結果：以迴圈安裝 Graylog（105）、ProxCenter（110），Manager 顯示 `ID: 006, Name: Graylog, Active`、`ID: 007, Name: ProxCenter, Active`。
+
+#### DNS 容器：先做快照
+
+AdGuard（100）與 Pi-hole（101）是全網路依賴的服務。安裝 Agent 不會重啟 DNS 服務，但保險起見先做快照，出問題可以立即回復：
+
+~~~bash
+pct snapshot <CTID> pre-wazuh-agent --description "安裝 Wazuh Agent 前"
+# 安裝完成並確認 DNS 正常後
+pct exec <CTID> -- systemctl is-active AdGuardHome     # AdGuard
+pct exec <CTID> -- systemctl is-active pihole-FTL      # Pi-hole
+# 觀察一段時間沒問題再刪除快照
+pct delsnapshot <CTID> pre-wazuh-agent
+~~~
+
+回復方式：`pct rollback <CTID> pre-wazuh-agent`（會回到快照當下，快照之後的變更全部消失）。
 
 說明：
 
