@@ -24,7 +24,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
-| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 進行中 | 2026-09-30：admin 密碼已更換、Filebeat 驗證 OK，Manager keystore 更新中；防火牆規則規劃完成 |
+| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 進行中 | 2026-09-30：7-1 admin 密碼更換完成（Filebeat、Manager keystore 皆驗證 OK）；7-2、7-3 待做 |
 | 8 | 備份與 HA | 待做 | |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
 
@@ -482,6 +482,10 @@ grep -iE 'indexer-connector|401|unauthorized' /var/ossec/logs/ossec.log | tail -
 | 之後 | `filebeat test output` → `talk to server... OK` |
 
 第一次操作時把密碼誤寫在 `read` 的引號內（提示字位置），`NEWPW` 長度為 0，未執行變更；清除 history 後重做成功。
+
+Manager keystore 更新：`NEWPW` 長度 13（非 0），`wazuh-manager`、`filebeat` 重啟後皆 `active`。`ossec.log` 中 indexer-connector 對各 `wazuh-states-inventory-*` 索引皆顯示 `IndexerConnector initialized successfully`，沒有 401／Unauthorized；`filebeat test output` 仍為 `talk to server... OK`。
+
+小提醒：多行指令一次貼上時，`read` 仍會等待鍵盤輸入（本案終端機的 bracketed paste 正常）。若終端機不支援 bracketed paste，下一行指令可能被 `read` 當成密碼讀走，因此 `read` 那一行建議單獨執行。
 
 ### 7-2 暫停 Wazuh 套件自動更新
 
