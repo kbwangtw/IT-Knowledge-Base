@@ -341,6 +341,11 @@ curl -sO https://packages.wazuh.com/4.14/wazuh-install.sh
 bash ./wazuh-install.sh -a
 ~~~
 
+注意兩點：
+
+- 要用 `bash ./wazuh-install.sh`，不要直接打 `./wazuh-install.sh`。curl 下載的檔案沒有執行權限（x），直接執行會出現 `Permission denied`；交給 `bash` 讀取就不需要執行權限。
+- 一定要加 `-a`，不加參數只會顯示說明，不會安裝。
+
 **(4) 安裝失敗時**：先看 `/var/log/wazuh-install.log` 最後幾十行找原因，修正後用安裝助手的移除選項清掉半套元件再重裝：
 
 ~~~bash
