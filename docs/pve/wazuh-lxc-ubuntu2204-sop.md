@@ -25,7 +25,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
-| 8 | 備份與 HA | 待做 | |
+| 8 | 備份與 HA | 進行中 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；CT 112 已遷移至 node10，驗證中 |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
 
 ## 先認識四個名詞
@@ -709,6 +709,17 @@ pct migrate 112 <目標節點> --restart
 # 遷移後在目標節點
 pct exec 112 -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
 ~~~
+
+**本案紀錄（2026-09-30）**：CT 112 已由 node12 遷移至 node10（8-1 手動備份即在 node10 執行）。遷移後驗證：
+
+~~~bash
+pct status 112
+pct exec 112 -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
+pct exec 112 -- sysctl vm.max_map_count
+pct exec 112 -- ss -tlnp | grep -E ':443 |:1514|:1515|:55000'
+~~~
+
+遷移後驗證結果：待確認。
 
 加入 HA 前確認：rootfs 在共用儲存（VM_Pool）、所有節點 `vm.max_map_count` ≥ 262144、`nesting=1` 已設定、手動遷移測試成功。
 
