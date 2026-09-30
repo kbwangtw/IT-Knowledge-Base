@@ -24,7 +24,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
-| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 進行中 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用，做法待決定 |
+| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 進行中 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 已改為只聽 127.0.0.1 |
 | 8 | 備份與 HA | 待做 | |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
 
@@ -594,6 +594,19 @@ tail -5 /var/ossec/logs/api.log
 ~~~
 
 再到 Dashboard 開啟 Agents management 或 Server management，頁面能正常載入、沒有 API 連線錯誤。從管理電腦測試 55000 應連不上：`Test-NetConnection <Wazuh IP> -Port 55000`。
+
+**本案實測（2026-09-30）**：
+
+| 檢查 | 結果 |
+| --- | --- |
+| 檔尾 | `\n` ✅ |
+| 加入後 `grep '^host'` | 第 80 行 `host: ['127.0.0.1']`，只有一行 ✅ |
+| `wazuh-manager` | active ✅ |
+| `ss` | 只剩 `127.0.0.1:55000`（原本的 `0.0.0.0` 與 `[::]` 已消失）✅ |
+| `api.log` | `RBAC database integrity check finished successfully`、`Listening on ['127.0.0.1']:55000` ✅ |
+| Dashboard 與外部 55000 測試 | 待確認 |
+
+升級 Wazuh 後要再檢查一次這行設定是否保留。
 
 **回復方式**：
 
