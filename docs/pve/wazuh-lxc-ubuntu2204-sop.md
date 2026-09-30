@@ -798,6 +798,8 @@ ha-manager status | grep -E 'ct:112|lrm'
 
 ## 9. 第一台 Agent
 
+本案順序（2026-09-30 決定）：先接一台 PVE 節點（node11），再接測試用 Linux VM／CT，最後接 Windows 管理電腦。node11 目前沒有 HA 資源、負載最輕，Agent 有狀況時影響最小。
+
 ### 9-1 版本原則
 
 Agent 版本不可高於 Manager（本案 4.14.8）。安裝時指定版本號，避免裝到比 Manager 新的版本。
@@ -817,6 +819,17 @@ systemctl is-active wazuh-agent
 
 也可在 Dashboard 的 **Deploy new agent** 精靈選擇作業系統與 Manager 位址，產生對應指令後核對版本再執行。
 
+### 9-2a PVE 節點安裝前檢查
+
+~~~bash
+cat /etc/debian_version                        # PVE 9 為 Debian 13（trixie）
+dpkg -l | grep -i wazuh                        # 應無輸出
+timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && echo "1514 OK"
+timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "1515 OK"
+~~~
+
+`/dev/tcp/<IP>/<Port>` 是 bash 內建的連線測試，不需要另外安裝 nc。兩個 Port 都要 OK，否則 Agent 無法註冊或回報。
+
 ### 9-3 驗證
 
 ~~~bash
@@ -828,6 +841,22 @@ grep -iE 'connected|error' /var/ossec/logs/ossec.log | tail -5
 ~~~
 
 Dashboard → Agents management → Summary 應看到新 Agent，狀態為 **Active**。
+
+### 9-4 回復方式（要移除 Agent 時）
+
+~~~bash
+# Agent 端
+systemctl disable --now wazuh-agent
+apt-get remove --purge -y wazuh-agent
+rm -rf /var/ossec
+
+# Manager 端（CT 112 內），<ID> 由 agent_control -l 查得
+/var/ossec/bin/manage_agents -r <ID>
+~~~
+
+### 9-5 PVE 節點的告警調校（接上後觀察）
+
+預設的檔案完整性監控（FIM）會掃 `/etc`，其中包含叢集檔案系統 `/etc/pve`。`/etc/pve` 的變更會同步到每台節點，三台都裝 Agent 時同一個變更會產生三份告警。先以預設值觀察一段時間，再決定是否在 Agent 的 `ossec.conf` 加入 `<ignore>/etc/pve</ignore>`，或改由 Manager 端規則處理。FIM 只記錄雜湊值，除非啟用 `report_changes`，不會保存檔案內容。
 
 ## 風險與注意事項
 
