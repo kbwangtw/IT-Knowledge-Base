@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 第一台 Agent（建議先接一台 PVE 節點） | 進行中 | 2026-09-30：三台 PVE 節點安裝前檢查通過（Debian 13.7、1514／1515 OK），先裝 node11 |
+| 9 | 第一台 Agent（建議先接一台 PVE 節點） | 進行中 | 2026-09-30：node11 Agent（ID 001）已連線 Active；node10、node12 待裝 |
 
 ## 先認識四個名詞
 
@@ -873,6 +873,16 @@ grep -iE 'connected|error' /var/ossec/logs/ossec.log | tail -5
 ~~~
 
 Dashboard → Agents management → Summary 應看到新 Agent，狀態為 **Active**。
+
+#### 本案實測：node11（2026-09-30）
+
+| 檢查 | 結果 |
+| --- | --- |
+| Agent log | `14:30:31 wazuh-agentd: INFO: (4102): Connected to the server ([192.0.2.32]:1514/tcp).` ✅ |
+| Manager `agent_control -l` | `ID: 001, Name: node11, IP: any, Active` ✅ |
+| Dashboard Endpoints | Active 1；node11、IP 192.0.2.11、群組 default、Debian GNU/Linux 13、v4.14.8、active ✅ |
+
+Dashboard 上的「Cluster node: node01」是 Wazuh Manager 叢集的節點名稱（安裝預設值），不是 PVE 節點名稱。
 
 ### 9-4 回復方式（要移除 Agent 時）
 
