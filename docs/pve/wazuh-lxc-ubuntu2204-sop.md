@@ -23,7 +23,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 3 | 建立 LXC | 已實測 | 2026-09-29：CT 112 位於 node12；已補 nesting=1、onboot=1，rootfs 線上加大為 80G（見 3-4） |
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
-| 6 | 驗證服務與登入 Dashboard | 進行中 | 2026-09-30：4 個服務皆 active、5 個 Port 正常、Filebeat→Indexer 連線 OK；Dashboard 登入確認中 |
+| 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 待做 | |
 | 8 | 備份與 HA | 待做 | |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
@@ -400,18 +400,37 @@ ss -tlnp | grep -E ':443|:1514|:1515|:9200|:55000'
 | `systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard` | 4 個皆 `active` ✅ |
 | Port 監聽 | 1514（wazuh-remoted）、1515（wazuh-authd）、443（node）、55000（python3，IPv4＋IPv6）對所有介面；9200（java）只聽 127.0.0.1 ✅ |
 | `filebeat test output` | 連 `https://127.0.0.1:9200`：連線、TLS 1.2 握手（憑證鏈驗證啟用）、`talk to server... OK`，回報版本 7.10.2 ✅ |
-| Dashboard 登入 | 待確認 |
+| Dashboard 登入 | `https://192.0.2.32`（示範位址）接受自簽憑證警告後，以 admin 登入成功 ✅ |
+| Overview 畫面 | Agents Summary 顯示「no agents registered」；Last 24 hours alerts：Critical 0、High 0、Medium 213、Low 112 |
+
+Agents Summary 只計算外部 Agent，Manager 本身（ID 000）不列入，所以顯示沒有 Agent 是正常的。告警全部來自 Manager 自己：剛安裝完的系統會因套件安裝、設定稽核（SCA）、rootcheck 等產生一批告警。Critical／High 為 0，Medium／Low 屬安裝後的正常雜訊，接上 Agent 後再用 Threat Hunting 看實際內容與數量變化。
 
 ## 7. 安全收尾
 
-### 7-1 換掉預設密碼
+### 7-1 密碼與安裝檔
+
+安裝助手已替每個內部帳號產生隨機強密碼，**不需要為了「換掉預設值」而改密碼**。需要處理的是：
+
+1. **admin 密碼已存進密碼管理工具**，並確認能用它登入。
+2. **密碼曾經外流時才更換**（例如出現在截圖、共用畫面、聊天紀錄）。
+3. **妥善處理 `/root/wazuh-install-files.tar`**：它包含所有內部帳號密碼與 TLS 憑證私鑰。日後新增 Wazuh 節點或重建憑證會用到，不建議直接刪除。
 
 ~~~bash
-tar -O -xvf /root/wazuh-install-files.tar wazuh-install-files/wazuh-passwords.txt | less
-# 依官方文件使用 wazuh-passwords-tool.sh 變更 admin 密碼
+# 只讓 root 可讀
+chmod 600 /root/wazuh-install-files.tar
+ls -l /root/wazuh-install-files.tar
 ~~~
 
-`wazuh-install-files.tar` 含全部密碼，確認已安全保存後，移到只有管理者能存取的位置或刪除。
+建議另存一份到離線、受控的位置（例如內部加密儲存），不要放到雲端或本倉庫。注意：CT 112 的 PBS 備份也會包含這個檔案，備份的存取權限要一併管控。
+
+需要更換 admin 密碼時，使用 Indexer 內附的工具（密碼需 8～64 字元，含大小寫、數字與符號）：
+
+~~~bash
+bash /usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh -u admin -p '<新密碼>'
+filebeat test output       # 改完確認 Filebeat 仍能連到 Indexer
+~~~
+
+在指令前加一個空白，Ubuntu 預設（HISTCONTROL=ignoreboth）就不會把這行記進 bash history。
 
 ### 7-2 暫停 Wazuh 套件自動更新
 
