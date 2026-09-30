@@ -24,7 +24,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
-| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 進行中 | 2026-09-30：管理與 Agent 皆在同一網段，防火牆規則規劃完成 |
+| 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 進行中 | 2026-09-30：admin 密碼已更換、Filebeat 驗證 OK，Manager keystore 更新中；防火牆規則規劃完成 |
 | 8 | 備份與 HA | 待做 | |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
 
@@ -457,6 +457,31 @@ filebeat test output
 ~~~
 
 Dashboard 連 Indexer 用的是另一個內部帳號（kibanaserver），改 admin 不影響 Dashboard 服務本身。
+
+**同步更新 Wazuh Server 的 keystore。** 工具最後會出現 WARNING，提醒要更新 Wazuh dashboard、Wazuh server、Filebeat 的密碼並重啟服務。All-in-one 的 Filebeat 已由工具自動更新；Wazuh Server（Manager）的漏洞偵測模組透過 indexer-connector 連線 Indexer，帳號密碼存在 Manager 自己的 keystore，預設也是 admin，需要手動更新：
+
+~~~bash
+read -rsp '新的admin密碼:' NEWPW; echo
+echo "$NEWPW" | /var/ossec/bin/wazuh-keystore -f indexer -k password
+unset NEWPW
+systemctl restart wazuh-manager filebeat
+systemctl is-active wazuh-manager filebeat
+grep -iE 'indexer-connector|401|unauthorized' /var/ossec/logs/ossec.log | tail -5
+~~~
+
+`filebeat test output` 會重新讀取 keystore，但執行中的 Filebeat 程序仍使用啟動時載入的舊密碼，所以一起重啟。
+
+#### 本案實測（2026-09-30）
+
+| 時間 | 事件 |
+| --- | --- |
+| 09:30:52 | `Updating the internal users` |
+| 09:30:53 | 舊設定備份至 `/etc/wazuh-indexer/internalusers-backup` |
+| 09:30:55 | `filebeat.yml` 改用 Filebeat keystore 的帳號密碼 |
+| 09:31:09 | WARNING：提醒更新 dashboard／server／Filebeat 的密碼並重啟服務 |
+| 之後 | `filebeat test output` → `talk to server... OK` |
+
+第一次操作時把密碼誤寫在 `read` 的引號內（提示字位置），`NEWPW` 長度為 0，未執行變更；清除 history 後重做成功。
 
 ### 7-2 暫停 Wazuh 套件自動更新
 
