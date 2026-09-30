@@ -1184,6 +1184,8 @@ qm snapshot <VMID> pre-wazuh-agent --description "安裝 Wazuh Agent 前"
 
 **網域控制站的快照回復有風險。** 多台 DC 的環境中，把其中一台回復到舊快照，可能造成 **USN rollback**：這台 DC 的複寫紀錄倒退，與其他 DC 不一致。Windows Server 2012 以後搭配 hypervisor 的 **VM-GenerationID**（PVE 的 `vmgenid` 設定）可以偵測回復並保護 AD，因此要先確認 `vmgenid` 存在。即使有保護，**DC 的快照只作為最後手段**；Agent 有問題時優先解除安裝，而不是回復快照。
 
+本案結果（2026-09-30）：DC01（106）、DC02（107）、CA（111）皆為 `ostype: win11`，且都有 `vmgenid`，具備回復偵測保護。
+
 #### (2) 安裝前：記錄 AD 健康基準（在 DC 上，系統管理員 PowerShell）
 
 ~~~powershell
