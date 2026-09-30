@@ -25,7 +25,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
-| 8 | 備份與 HA | 進行中 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試、HA 待做 |
+| 8 | 備份與 HA | 進行中 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；HA 待做 |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
 
 ## 先認識四個名詞
@@ -698,7 +698,13 @@ exit
 | 選用備份 | `PBS31:backup/ct/112/2026-09-30T05:29:26Z`（台灣時間 13:29 的手動備份；PBS 以 UTC 命名）|
 | 另一份 | `2026-09-29T13:05:01Z`（0.9 GB，昨晚排程，安裝 Wazuh 前）不使用 |
 | 還原 | 在 VM_Pool 建立 80G ext4（20971520 個 4k 區塊），14.611 GiB 於 1 分 52.8 秒完成，平均 132.6 MiB/s |
-| 開機後驗證 | 待確認 |
+| 網路隔離 | `pct set` 後 net0 含 `link_down=1`、IP 改為 .99、MAC 已重新產生；容器內 `ip -br addr show eth0` → `DOWN`、無 IP ✅ |
+| Indexer 健康 | `status: green`，1 個節點，23 個 primary shard 全部 active，unassigned 0，`active_shards_percent` 100% ✅ |
+| 告警資料 | `wazuh-alerts-4.x-2026.09.30`：green／open，3 primary、0 replica，1718 筆，2.2 MB ✅ |
+
+結論：snapshot 模式的備份可完整還原，Indexer 啟動後資料一致，告警索引與筆數都在。從 PBS 還原約 2 分鐘，加上服務啟動約 1～2 分鐘，可作為 RTO 參考。
+
+操作提醒：`pct enter` 會開新的 shell，和後面的指令一起貼上時，後面幾行會排在節點的 shell，等離開容器後才在**節點上**執行。`pct enter` 要單獨執行。
 
 驗收標準：4 個服務 active、叢集健康 green（或 yellow 並能說明原因）、可以看到還原前的告警索引。
 
