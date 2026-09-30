@@ -23,7 +23,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 3 | 建立 LXC | 已實測 | 2026-09-29：CT 112 位於 node12；已補 nesting=1、onboot=1，rootfs 線上加大為 80G（見 3-4） |
 | 4 | 容器內基本設定 | 已實測 | 2026-09-29：systemd running、79G、8G RAM／512M swap、max_map_count 1048576、IP 與 Gateway 正常；DNS 只回 IPv6，依決定略過 IPv6 測試；時區由 UTC 改為 Asia/Taipei |
 | 5 | 安裝 Wazuh All-in-one | 已實測 | 2026-09-30：安裝助手 4.14 `-a` 完成，Indexer／Manager／Filebeat／Dashboard 皆 started，結尾 `Installation finished`（見 5-1） |
-| 6 | 驗證服務與登入 Dashboard | 進行中 | |
+| 6 | 驗證服務與登入 Dashboard | 進行中 | 2026-09-30：4 個服務皆 active；Port、Filebeat、Dashboard 登入確認中 |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 待做 | |
 | 8 | 備份與 HA | 待做 | |
 | 9 | 第一台 Agent（建議先接一台 PVE 節點） | 待做 | |
@@ -392,6 +392,15 @@ ss -tlnp | grep -E ':443|:1514|:1515|:9200|:55000'
 從管理電腦瀏覽 `https://192.0.2.32`，以 `admin` 登入。憑證是自簽，瀏覽器會出現警告，確認網址無誤後繼續。
 
 驗收標準：三個服務都 `active (running)`、Port 都在監聽、Dashboard 能登入並看到 Wazuh Server 本身（agent 000）。
+
+### 6-1 本案實測（2026-09-30）
+
+| 檢查 | 結果 |
+| --- | --- |
+| `systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard` | 4 個皆 `active` ✅ |
+| Port 監聽 | 待確認 |
+| `filebeat test output` | 待確認 |
+| Dashboard 登入 | 待確認 |
 
 ## 7. 安全收尾
 
