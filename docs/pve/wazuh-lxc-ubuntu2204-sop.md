@@ -11,7 +11,7 @@ last_modified_at: 2026-09-30
 
 Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「安全判讀」：主機完整性檢查（FIM）、弱點偵測、設定稽核與入侵告警。本文記錄在 PVE Cluster 上建立一台 Ubuntu 22.04 LXC，以 All-in-one（Indexer + Server + Dashboard 同一台）方式安裝 Wazuh 的步驟。
 
-> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 完成驗證；Agent 已涵蓋 PVE 節點、Debian 13 與 Ubuntu 容器、Ubuntu VM 與 Windows VM，共 13 台 Active。網域控制站與 CA 尚未安裝。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
+> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 完成驗證；Agent 已涵蓋 PVE 節點、Debian 13 與 Ubuntu 容器、Ubuntu VM、Windows 用戶端、網域控制站與 CA，共 16 台 Active。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
 
 ## 進度表
 
@@ -26,7 +26,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 6 | 驗證服務與登入 Dashboard | 已實測 | 2026-09-30：4 個服務 active、5 個 Port 正常、Filebeat→Indexer OK、Dashboard 以 admin 登入成功（見 6-1） |
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
-| 9 | 接上 Agent | 進行中 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02、DC01、CA 已安裝連線，AD／CA 前後檢查一致 |
+| 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）皆 Active，AD／CA 前後檢查一致；共 16 台 |
 
 ## 先認識四個名詞
 
@@ -1159,9 +1159,11 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 | Debian 13 容器 | 004～010 | IPAM、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
 | Ubuntu VM | 011 | ubclient | SSH 登入，`sudo 變數=值 dpkg -i` |
 | Windows VM | 012 | WinClient | PowerShell，MSI + `WAZUH_MANAGER` |
+| Windows 網域控制站 | 014～015 | DC02、DC01 | 同 Windows VM；裝前快照、AD 健康基準，裝後比對（9-9） |
+| Windows 憑證伺服器 | 016 | ca | 同上，以 CertSvc 與 `certutil -ping` 比對 |
 | Ubuntu 24.04 容器 | 013 | ai | 節點上 `pct push` + `pct exec`（安裝前先以 `dpkg -l` 確認未安裝） |
 
-DC02、DC01、CA 已依 9-9 安裝並連線，安裝前後 AD／CA 檢查一致；Manager 端 ID 待確認後補記。
+共 16 個 Agent，全部 Active。
 
 服務內部名稱為 `WazuhSvc`，顯示名稱為 `Wazuh`；`NET START`／`NET STOP` 用顯示名稱或內部名稱皆可，PowerShell 可用 `Restart-Service WazuhSvc`。
 
