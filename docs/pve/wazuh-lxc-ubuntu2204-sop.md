@@ -560,7 +560,47 @@ pve-firewall compile > /dev/null && echo "syntax OK"
 
 因此即使寫入 `112.fw`，規則也不會生效。要讓 PVE Firewall 生效就得啟用資料中心防火牆，但這會讓三台節點的主機層也開始套用預設的連入政策；Ceph（MON 3300／6789、OSD 6800–7300）、Corosync、8006、SSH 等流量需事先確認都有允許規則，否則可能影響叢集與儲存。這屬於獨立的變更，需另排維護時段評估，不在本次 Wazuh 部署中直接開啟。
 
-替代做法：在應用程式層把 Wazuh API（55000）改成只聽本機，達成「關閉 55000 對外」這項主要目標，不動 PVE 防火牆。做法待決定後補記。
+**本案決定（2026-09-30）**：採應用程式層做法，把 Wazuh API（55000）改成只聽本機，達成「關閉 55000 對外」這項主要目標，不動 PVE 防火牆。資料中心防火牆另案規劃。
+
+#### 7-4 Wazuh API 只監聽本機
+
+**(1) 確認現況**
+
+~~~bash
+grep -n 'host' /var/ossec/api/configuration/api.yaml
+grep -n 'url:' /usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+~~~
+
+本案結果：`api.yaml` 沒有未註解的 `host:`，代表使用預設值（所有介面）；Dashboard 的 API 位址是 `url: https://127.0.0.1`，改成只聽本機後 Dashboard 仍連得到。
+
+**(2) 備份並加入設定**
+
+~~~bash
+cp -a /var/ossec/api/configuration/api.yaml /var/ossec/api/configuration/api.yaml.bak-$(date +%F)
+tail -c1 /var/ossec/api/configuration/api.yaml | od -c | head -1   # 確認檔尾是 \n
+echo "host: ['127.0.0.1']" >> /var/ossec/api/configuration/api.yaml
+grep -n '^host' /var/ossec/api/configuration/api.yaml              # 只能有一行
+~~~
+
+YAML 最上層不能有重複的 key，所以加入前要確認沒有其他未註解的 `host:`。
+
+**(3) 重啟並驗證**
+
+~~~bash
+systemctl restart wazuh-manager
+systemctl is-active wazuh-manager
+ss -tlnp | grep ':55000'                     # 應只剩 127.0.0.1:55000
+tail -5 /var/ossec/logs/api.log
+~~~
+
+再到 Dashboard 開啟 Agents management 或 Server management，頁面能正常載入、沒有 API 連線錯誤。從管理電腦測試 55000 應連不上：`Test-NetConnection <Wazuh IP> -Port 55000`。
+
+**回復方式**：
+
+~~~bash
+cp -a /var/ossec/api/configuration/api.yaml.bak-<日期> /var/ossec/api/configuration/api.yaml
+systemctl restart wazuh-manager
+~~~
 
 **判讀限制**：管理與 Agent 都在同一網段時，這組規則的主要效果是關閉 55000 與其他未列出的 Port，並阻擋其他網段（如 VPN、其他 VLAN）連入；同網段內的主機仍可連 443／1514／1515。
 
