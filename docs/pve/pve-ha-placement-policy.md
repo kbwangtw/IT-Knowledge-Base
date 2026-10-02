@@ -198,6 +198,17 @@ watch -n 5 "ha-manager status | grep ct:112"
 
 本案結果：遷移完成後 `ct:112 (node12, started)`；在 node12 上確認 4 個 Wazuh 服務 active、`vm.max_map_count` 1048576、Active 數量 18（17 Agent + Manager），Dashboard 顯示 Active 17、Disconnected 0。好處是 node10 故障時，監控系統不會跟著停。
 
+第二步把 DC02（VM 107，非 HA）以 live migration 移回 node11。先確認磁碟都在共用儲存、沒有 hostpci／usb 直通，且 DC01 不在目標節點：
+
+~~~bash
+qm config 107 | grep -E 'scsi|virtio|sata|ide|hostpci|usb'
+qm migrate 107 node11 --online       # 在 VM 目前所在的節點執行
+~~~
+
+本案結果：記憶體 4 GB、實際傳輸 3.4 GiB，平均 342.9 MiB/s，**停頓 63 ms**（上限 100 ms），整體 17 秒完成；DC01 在 node12、DC02 在 node11，仍符合互斥。輸出中的 `conntrack state migration not supported or disabled` 表示防火牆連線追蹤狀態不會跟著搬，本案資料中心防火牆未啟用，影響不大。
+
+調整後各節點台數由 9／2／3 變為 7／3／4（node10／node11／node12）。
+
 ## 待驗證與後續
 
 | 項目 | 狀態 |
@@ -205,7 +216,7 @@ watch -n 5 "ha-manager status | grep ct:112"
 | 用 ProxCenter 完整逐台更新三台，每台確認 DNS／DC 位置 | 待下次更新 |
 | ProxCenter 搬移非 HA VM 時是否遵守 Affinity rules | 未確認 |
 | 單節點故障演練（實測 Ceph I/O latency 與 HA 恢復時間） | 未演練 |
-| node10 承載大部分服務，需分散 | 進行中：Wazuh 已移至 node12；DC02 可考慮移回 node11 |
+| node10 承載大部分服務，需分散 | 進行中：Wazuh 移至 node12、DC02 移回 node11，台數 7／3／4 |
 | Dynamic Load 與 Automatic Rebalance 的實際行為 | 未查證 |
 
 單節點故障的預期行為（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，且在節點回來前沒有再壞一顆硬碟的餘裕。
