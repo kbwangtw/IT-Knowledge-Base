@@ -147,6 +147,7 @@ DRS 關閉時，ProxCenter 平常不搬任何東西，和 PVE 的設定不衝突
 | --- | --- | --- |
 | Operation mode | Automatic | **Manual**，先看建議是否合理 |
 | Guest types | VMs + Containers (LXC) | **只留 VMs**，避免容器每小時被搬、被重啟 |
+| Affinity rules | — | 確認需要的規則都是 **Active**，再打開 DRS，否則 DRS 開始運作時不知道這些限制 |
 
 ProxCenter 的 Load Overview 會在叢集名稱旁顯示模式標籤（例如 AUTOMATIC）。本案 DRS 開關關閉時，標籤仍顯示 AUTOMATIC：**標籤是設定的模式，不代表正在執行**，要以 Configuration 頁的 DRS enabled 開關為準。
 
@@ -159,6 +160,8 @@ ProxCenter 的 Load Overview 會在叢集名稱旁顯示模式標籤（例如 AU
 | DNS 互斥 | **PVE HA rules** | ProxCenter | HA 資源，維護與故障時由 PVE 搬 |
 | DC 互斥 | **ProxCenter** | — | DC 不是 HA 資源，PVE 不會搬 |
 | VGA 固定 node11 | **ProxCenter** | — | 顯示卡直通的 VM 本來就無法遷移 |
+
+DRS 關閉時，ProxCenter 的規則不會自動執行；但逐台更新搬移非 HA VM、手動遷移等功能是否會參考這些規則尚未確認。規則開著沒有副作用，本案三條規則維持 **Active**。
 
 一句話原則：**會在故障或維護時被自動搬動的東西，規則放 PVE；其他的放 ProxCenter。** 同一條規則存在兩邊時，修改要兩邊一起改。
 
