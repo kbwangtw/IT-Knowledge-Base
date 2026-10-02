@@ -28,6 +28,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
+| 11 | 告警調校 | 進行中 | 2026-10-02：找出前 15 名；修正 ai 容器重複的 hermes-gateway 與 IPv6 優先順序，AppArmor 告警減少約 98%、服務失敗告警歸零 |
 
 ## 先認識四個名詞
 
@@ -1412,6 +1413,106 @@ find /var/ossec/logs/alerts/20* -type f -mtime +30 | head    # 先預覽：目�
 
 - 30 天後的告警無法再查詢。PBS 排程的保留策略（keep-daily 7、keep-last 3）也只涵蓋約一週，**沒有更長期的告警副本**；若日後有稽核或事件調查需求，需重新評估保留天數或另行封存。
 - `/var/ossec/queue` 內的檔案由 Manager 管理，不要手動刪除。持續觀察 `du -sh /var/ossec/queue/*`，特別是 `indexer` 是否不斷成長。
+
+## 11. 告警調校
+
+### 11-1 先找出最常觸發的規則
+
+在 CT 112 內對 Indexer 做彙總查詢，取過去 24 小時數量最多的 15 條規則：
+
+~~~bash
+cat > /root/top-rules.json <<'JSONEOF'
+{
+  "size": 0,
+  "query": { "range": { "timestamp": { "gte": "now-24h" } } },
+  "aggs": {
+    "rules": {
+      "terms": { "field": "rule.id", "size": 15 },
+      "aggs": {
+        "desc":   { "terms": { "field": "rule.description", "size": 1 } },
+        "level":  { "max":   { "field": "rule.level" } },
+        "agents": { "terms": { "field": "agent.name", "size": 3 } }
+      }
+    }
+  }
+}
+JSONEOF
+curl -sk -u admin 'https://127.0.0.1:9200/wazuh-alerts-*/_search' \
+  -H 'Content-Type: application/json' -d @/root/top-rules.json > /root/top-rules.out
+head -c 100 /root/top-rules.out; echo     # 必須是 { 開頭；若是 Unauthorized 代表密碼錯誤
+~~~
+
+再用 Python 整理成表格（見本案操作紀錄）。輸出存檔時錯誤訊息也會被寫進檔案，所以存完要先看開頭。
+
+**本案前 15 名（2026-10-02，過去 24 小時）**：
+
+| 規則 | 等級 | 數量 | 說明 | 主要主機 | 分類 |
+| --- | --- | --- | --- | --- | --- |
+| 52002 | 3 | 75,070 | AppArmor DENIED | node10 | 根因待查 |
+| 60137 | 3 | 13,968 | Windows User Logoff | DC02、DC01 | 正常活動 |
+| 60106 | 3 | 8,003 | Windows Logon Success | DC02、DC01 | 正常活動（需保留人員登入） |
+| 40704 | 5 | 6,183 | Systemd: Service exited due to a failure | ai | 根因待查 |
+| 31101 | 5 | 1,865 | Web server 400 error code | librenms | 待查 |
+| 750 | 5 | 1,693 | Registry Value Integrity Checksum Changed | DC01、WinClient、ca | 掃描類 |
+| 510 | 7 | 1,344 | rootcheck 異常 | wazuh、AdGuard、Graylog（容器） | 掃描類 |
+| 5501／5502 | 3 | 各約 1,300 | PAM 工作階段開啟／關閉 | 三台 PVE 節點 | 推測為 ProxCenter 定期登入 |
+| 5402 | 3 | 1,281 | Successful sudo to ROOT | 三台 PVE 節點 | 同上 |
+| 61104 | 3 | 1,012 | 服務啟動類型變更 | DC01、DC02、ca | 待查 |
+| 60642 | 3 | 330 | Software protection service scheduled | ca、DC01、DC02 | 正常活動 |
+| 550 | 7 | 326 | Integrity checksum changed | ubclient、node11、node12 | 掃描類 |
+
+原則：先處理「可能有東西壞了」的類別，修好根因後告警自然消失；正常活動只針對特定主機或帳號降級，不整條關閉。
+
+### 11-2 AppArmor DENIED（52002）與 ai 服務失敗（40704）
+
+**追查**（node10）：
+
+~~~bash
+journalctl -k --since "1 hour ago" | grep 'apparmor="DENIED"' \
+  | sed -E 's/.*operation="([^"]*)".*profile="([^"]*)".*name="([^"]*)".*comm="([^"]*)".*/\1 | \2 | \3 | \4/' \
+  | sort | uniq -c | sort -rn | head -10
+~~~
+
+一小時 2,178 次皆為同一組合：namespace `lxc-113`（ai 容器）、profile `rsyslogd`、操作 `sendmsg`、目標 `/run/systemd/journal/dev-log`、程式 `systemd-journal`。容器內 Ubuntu 24.04 的 rsyslog AppArmor 規則擋下 journald 轉送日誌；容器與主機共用 kernel，紀錄寫在 node10 的 kernel 日誌，被 node10 的 Agent 收集。
+
+40704 來自 ai 容器內的 `hermes-gateway.service`：
+
+| 發現 | 說明 |
+| --- | --- |
+| 系統層級服務 | `/etc/systemd/system/hermes-gateway.service`，PID 287，自 9/29 穩定運作 |
+| **使用者層級服務** | `/root/.config/systemd/user/hermes-gateway.service`（8/27 建立，非刻意設定），由 `systemd[264]`（root 的使用者層級 systemd）啟動，**restart counter 13,270** |
+| 原因 | 兩個 gateway 搶同一個 Telegram Bot，使用者層級的啟動約 20 秒後失敗退出、再被重啟 |
+| 網路 | `api.telegram.org` 的 DNS 優先回 IPv6，但容器沒有 IPv6 路由（`curl -6` 立即失敗，`curl -4` 回 302） |
+
+每次失敗都印出數十行 traceback，journald 每一行都轉給 rsyslog、每一行都被 AppArmor 擋，因此兩條告警量都很大。
+
+**處理**（node10，保留系統層級的 gateway）：
+
+~~~bash
+pct exec 113 -- systemctl --user --machine=root@.host disable --now hermes-gateway.service
+pct exec 113 -- bash -c "ps -ef | grep -v grep | grep 'gateway run'"      # 只剩 --replace 那個
+pct exec 113 -- bash -c "grep -q '^precedence ::ffff:0:0/96' /etc/gai.conf || echo 'precedence ::ffff:0:0/96  100' >> /etc/gai.conf"
+pct exec 113 -- getent ahosts api.telegram.org | head -3                    # 第一筆應為 IPv4
+pct exec 113 -- systemctl restart hermes-gateway
+~~~
+
+`/etc/gai.conf` 的 precedence 設定讓系統連線時優先使用 IPv4，不需要變更容器網路。
+
+**驗證（處理後 10 分鐘）**：
+
+| 檢查 | 處理前（10 分鐘） | 處理後 |
+| --- | --- | --- |
+| 使用者層級 gateway 失敗 | 約 30 次 | **0** |
+| Telegram `Timed out` | 持續出現 | **0** |
+| node10 AppArmor DENIED | 約 360 次 | **8** |
+
+AppArmor 告警減少約 98%。剩餘的是正常日誌量造成的轉送阻擋，可再停用容器內 rsyslog 的 AppArmor 規則（容器本身仍受主機 LXC AppArmor 規則限制）：
+
+~~~bash
+pct exec 113 -- ln -s /etc/apparmor.d/usr.sbin.rsyslogd /etc/apparmor.d/disable/usr.sbin.rsyslogd
+pct exec 113 -- apparmor_parser -R /etc/apparmor.d/usr.sbin.rsyslogd
+pct exec 113 -- systemctl restart rsyslog
+~~~
 
 ## 風險與注意事項
 
