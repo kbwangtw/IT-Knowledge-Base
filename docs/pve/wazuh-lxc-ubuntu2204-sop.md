@@ -747,6 +747,8 @@ pct exec 112 -- ss -tlnp | grep -E ':443 |:1514|:1515|:55000'
 | Port | 443／1514／1515 聽 0.0.0.0；55000 只聽 127.0.0.1 ✅（設定隨 CT 保留） |
 | Dashboard | 登入正常 ✅ |
 
+2026-10-02 為分散 node10 的負載，以 `ha-manager migrate ct:112 node12` 將 CT 112 移至 node12（HA 資源要透過 ha-manager 遷移）。容器為重啟式遷移，中斷約 1～2 分鐘；遷移後在 node12 確認 4 個服務 active、`vm.max_map_count` 1048576、`agent_control -l` 中 Active 為 18，Dashboard 顯示 17 台 Agent Active。IP 不變，Agent 不需修改設定。
+
 加入 HA 前確認：rootfs 在共用儲存（VM_Pool）、所有節點 `vm.max_map_count` ≥ 262144、`nesting=1` 已設定、手動遷移測試成功。
 
 **加入前先看 HA 現況**（任一節點）：
