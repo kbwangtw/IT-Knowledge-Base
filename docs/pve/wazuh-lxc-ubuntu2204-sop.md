@@ -28,7 +28,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
-| 11 | 告警調校 | 進行中 | 2026-10-02：找出前 15 名；修正 ai 容器重複的 hermes-gateway 與 IPv6 優先順序，AppArmor 告警減少約 98%、服務失敗告警歸零 |
+| 11 | 告警調校 | 進行中 | 2026-10-02：找出前 15 名；修正 ai 容器重複的 hermes-gateway 與 IPv6 優先順序，AppArmor 告警與服務失敗告警皆歸零，ai 容器停擺三天的 syslog 恢復 |
 
 ## 先認識四個名詞
 
@@ -1527,7 +1527,7 @@ pct exec 113 -- logger -t wazuhtest "rsyslog test after journald restart"
 pct exec 113 -- tail -3 /var/log/syslog      # 最後一行出現 wazuhtest 即正常
 ~~~
 
-本案結果：syslog 出現 03:27（UTC）rsyslog 啟動紀錄與測試訊息，停擺三天的 syslog 恢復寫入。rsyslog 啟動時的 `imklog: cannot open kernel log (/proc/kmsg): Permission denied` 是非特權容器的正常限制。
+本案結果：syslog 出現 03:27（UTC）rsyslog 啟動紀錄與測試訊息，停擺三天的 syslog 恢復寫入。之後追蹤 node10 的 kernel 日誌，最後一筆 DENIED 發生在重啟當下的 11:27:09（台灣時間），之後不再出現，52002 告警歸零。rsyslog 啟動時的 `imklog: cannot open kernel log (/proc/kmsg): Permission denied` 是非特權容器的正常限制。
 
 ## 風險與注意事項
 
