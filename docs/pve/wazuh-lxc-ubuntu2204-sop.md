@@ -1627,7 +1627,39 @@ for n in node10 node11 node12; do echo -n "$n: "; ssh $n id -u Debian-snmp; done
 | 腳本／目錄 | `root root`、755 | 其他人不可寫入 ✅ |
 | Debian-snmp UID | 三台皆為 109 | 可共用同一條規則 |
 
-可再收緊（選擇性）：`(ALL)` 改為 `(root)`；指令後加 `""` 禁止帶參數（sudoers 中未寫參數代表允許任意參數）；把設定從主檔 `/etc/sudoers` 移到 `/etc/sudoers.d/` 獨立檔，避免 sudo 套件更新時被詢問是否覆蓋。修改 sudoers 一律用 `visudo` 或先 `visudo -c` 檢查。
+**已收緊（2026-10-02，三台節點）**：原設定寫在 `/etc/sudoers` 第 55 行，而且位於 `@includedir /etc/sudoers.d` 之後（sudoers 以最後符合的規則為準，所以舊行一定要刪除）。改為獨立檔案，限定以 root 執行且不得帶參數（sudoers 中指令未寫參數代表允許任意參數，`""` 才代表禁止）：
+
+~~~text
+舊：Debian-snmp ALL=(ALL)  NOPASSWD: /usr/local/bin/proxmox      （/etc/sudoers）
+新：Debian-snmp ALL=(root) NOPASSWD: /usr/local/bin/proxmox ""   （/etc/sudoers.d/librenms-snmp）
+~~~
+
+每一步都先 `visudo -cf` 檢查暫存檔，通過才寫入（sudoers 語法錯誤會讓整台主機的 sudo 失效）：
+
+~~~bash
+cat > /root/sudoers-snmp.sh <<'SUEOF'
+#!/bin/bash
+set -e
+ts=$(date +%F-%H%M)
+cp -a /etc/sudoers /root/sudoers.bak-$ts
+tmp=$(mktemp)
+echo 'Debian-snmp ALL=(root) NOPASSWD: /usr/local/bin/proxmox ""' > $tmp
+visudo -cf $tmp >/dev/null
+install -m 440 -o root -g root $tmp /etc/sudoers.d/librenms-snmp
+cp /etc/sudoers $tmp
+sed -i -E '/^[[:space:]]*Debian-snmp[[:space:]]+ALL=\(ALL\)[[:space:]]+NOPASSWD:[[:space:]]*\/usr\/local\/bin\/proxmox[[:space:]]*$/d' $tmp
+visudo -cf $tmp >/dev/null
+install -m 440 -o root -g root $tmp /etc/sudoers
+rm -f $tmp
+visudo -c >/dev/null && echo "$(hostname): visudo OK"
+grep -rn 'Debian-snmp' /etc/sudoers /etc/sudoers.d/
+echo "no args (should work): $(sudo -u Debian-snmp /usr/bin/sudo -n /usr/local/bin/proxmox 2>&1 | wc -l) lines"
+echo "with arg (should be denied): $(sudo -u Debian-snmp /usr/bin/sudo -n /usr/local/bin/proxmox test 2>&1 | head -1)"
+SUEOF
+for n in node10 node11 node12; do ssh $n bash -s < /root/sudoers-snmp.sh; done   # 先做一台確認，再做其餘
+~~~
+
+本案結果：三台皆 `visudo OK`、規則只剩 `/etc/sudoers.d/librenms-snmp`；以 Debian-snmp 身分不帶參數執行可輸出 VM 資訊（行數隨各節點 VM 數量不同），帶參數則回 `sudo: a password is required`（遭拒，Wazuh 會記錄一筆 sudo 失敗，屬預期）。還原：`cp -a $(ls -t /root/sudoers.bak-* | head -1) /etc/sudoers && rm -f /etc/sudoers.d/librenms-snmp && visudo -c`。
 
 **規則**：
 
