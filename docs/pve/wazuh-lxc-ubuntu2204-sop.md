@@ -1518,6 +1518,17 @@ pct exec 113 -- systemctl restart rsyslog
 
 復原方式：刪除 `disable/` 內的連結，再以 `apparmor_parser -r` 重新載入並重啟 rsyslog。
 
+**移除規則後仍被擋：要一併重啟 journald。** 移除規則、重啟 rsyslog 後，node10 仍出現同樣的 DENIED（profile 仍為 `rsyslogd`，對象是自 9/29 未重啟的 journald，PID 6881）；`logger` 測試訊息也沒有寫入 syslog。檢查發現 ai 容器的 `/var/log/syslog` **最後一筆停在 9/29 開機時**，也就是這三天 rsyslog 完全收不到 journald 轉送的日誌。推測 journald 既有的 socket 仍帶著舊規則的標記，重啟相關服務後解決：
+
+~~~bash
+pct exec 113 -- systemctl restart systemd-journald
+pct exec 113 -- systemctl restart syslog.socket rsyslog
+pct exec 113 -- logger -t wazuhtest "rsyslog test after journald restart"
+pct exec 113 -- tail -3 /var/log/syslog      # 最後一行出現 wazuhtest 即正常
+~~~
+
+本案結果：syslog 出現 03:27（UTC）rsyslog 啟動紀錄與測試訊息，停擺三天的 syslog 恢復寫入。rsyslog 啟動時的 `imklog: cannot open kernel log (/proc/kmsg): Permission denied` 是非特權容器的正常限制。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
