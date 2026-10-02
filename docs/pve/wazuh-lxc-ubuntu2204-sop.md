@@ -925,7 +925,7 @@ rm -rf /var/ossec
 
 ### 9-6 Debian 13 LXC 容器：從 PVE 節點推送安裝
 
-本案 Debian 13 的服務都跑在 LXC 容器裡（AdGuard、Graylog、IPAM、LibreNMS、Pi-hole、ProxCenter、WireGuard）。做法是在 PVE 節點把 .deb 推進容器、用 `pct exec` 安裝：
+本案 Debian 13 的服務都跑在 LXC 容器裡（AdGuard、Graylog、ipam、LibreNMS、Pi-hole、ProxCenter、WireGuard）。做法是在 PVE 節點把 .deb 推進容器、用 `pct exec` 安裝：
 
 - 容器內不需要 wget／curl，也不必能連到 packages.wazuh.com。
 - 所有指令都在節點上執行，容易逐台複製。
@@ -941,7 +941,7 @@ pct list        # 在每台節點各執行一次
 
 | CT ID | 名稱 | 節點 | 狀態 | 安裝順序 |
 | --- | --- | --- | --- | --- |
-| 103 | IPAM | node10 | running | ① 試裝 |
+| 103 | ipam | node10 | running | ① 試裝 |
 | 102 | librenms | node10 | running | ② |
 | 105 | Graylog | node10 | running | ② |
 | 110 | ProxCenter | node10 | running | ② |
@@ -973,7 +973,7 @@ pct exec <CTID> -- bash -c 'systemctl daemon-reload && systemctl enable --now wa
 pct exec <CTID> -- rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 ~~~
 
-#### 本案實測：IPAM（CT 103，2026-09-30）
+#### 本案實測：ipam（CT 103，2026-09-30）
 
 | 步驟 | 結果 |
 | --- | --- |
@@ -1041,7 +1041,7 @@ WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking
 
 | ID | 名稱 | CT | 節點 | 狀態 |
 | --- | --- | --- | --- | --- |
-| 004 | IPAM | 103 | node10 | Active |
+| 004 | ipam | 103 | node10 | Active |
 | 005 | librenms | 102 | node10 | Active |
 | 006 | Graylog | 105 | node10 | Active |
 | 007 | ProxCenter | 110 | node10 | Active |
@@ -1160,7 +1160,7 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 | 類型 | ID | 名稱 | 安裝方式 |
 | --- | --- | --- | --- |
 | PVE 節點 | 001～003 | node11、node10、node12 | 節點上下載 .deb，`dpkg -i` |
-| Debian 13 容器 | 004～010 | IPAM、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
+| Debian 13 容器 | 004～010 | ipam、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
 | Ubuntu VM | 011 | ubclient | SSH 登入，`sudo 變數=值 dpkg -i` |
 | Windows VM | 012 | WinClient | PowerShell，MSI + `WAZUH_MANAGER` |
 | Windows 網域控制站 | 014～015 | DC02、DC01 | 同 Windows VM；裝前快照、AD 健康基準，裝後比對（9-9） |
@@ -1807,7 +1807,7 @@ grep -c 'VSS' /var/ossec/etc/shared/default/merged.mg            # ≥ 1 代表�
 
 ### 11-9 第二輪：LibreNMS Web 404（31101）—— jt-ipam 的過期設備
 
-**分析**：31101 每天 1,712 筆，全部來自 IPAM 主機（CT 103，執行開源的 jt-ipam）呼叫 LibreNMS API，約每 5 分鐘一輪：
+**分析**：31101 每天 1,712 筆，全部來自 ipam 主機（CT 103，執行開源的 jt-ipam）呼叫 LibreNMS API，約每 5 分鐘一輪：
 
 | 路徑 | 原因 |
 | --- | --- |
@@ -1907,6 +1907,137 @@ unset C
 | `devices/17/ports` 404 | Graylog 剛重新加入 LibreNMS，連接埠探索完成前查不到，預期自行消失 |
 | 31301 PHP `ctype_digit(): Argument of type null` | LibreNMS 程式在新版 PHP 的 deprecated 警告（8192），與 `ports?columns=` 請求同時出現；待評估更新 LibreNMS 或以訊息內容降級 |
 | jt-ipam 網頁 401 | 瀏覽器開著登入已過期的 jt-ipam 頁面持續輪詢通知；401 屬認證失敗，保留告警 |
+
+### 11-10 延伸修正：SNMP 寫入權限（rwuser）
+
+11-9 複製 SNMP 設定時發現範本中有 `rwuser snmpuser`，因此掃描所有節點與容器。腳本只列出設定種類與帳號名稱，community 與密碼以 `***` 遮蔽：
+
+~~~bash
+cat > /root/snmp-rw-scan.sh <<'SCANEOF'
+#!/bin/bash
+# Read-only scan: list SNMP write-access settings without printing secrets
+H=$(hostname)
+probe='grep -hsE "^[[:space:]]*(rwuser|rwcommunity6?|createUser)" /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.d/*.conf 2>/dev/null | awk "{print \$1, (\$1==\"rwuser\" ? \$2 : \"***\")}" | sort -u | tr "\n" " "; echo "| usmUser=$(grep -c ^usmUser /var/lib/snmp/snmpd.conf 2>/dev/null) | snmpd=$(systemctl is-active snmpd 2>/dev/null)"'
+echo "$H host : $(bash -c "$probe")"
+for id in $(pct list | awk 'NR>1 && $2=="running"{print $1}'); do
+  name=$(pct config $id | awk '/^hostname:/{print $2}')
+  echo "$H CT$id($name) : $(pct exec $id -- bash -c "$probe" 2>/dev/null)"
+done
+SCANEOF
+chmod 700 /root/snmp-rw-scan.sh
+for n in node10 node11 node12; do ssh $n bash -s < /root/snmp-rw-scan.sh; done
+~~~
+
+**結果**：node12 節點、AdGuard、Pihole、librenms、wireguard 共 5 台有 `rwuser snmpuser`，且 v3 帳號實際存在（`usmUser=1`）。
+
+**不能直接刪除**：LibreNMS 對 9 台設備都以 SNMPv3 `snmpuser`（authPriv）輪詢，而這 5 台的 `snmpuser` 只有 `rwuser`、沒有 `rouser`。刪掉會讓監控中斷，因此改為 `rouser`：帳號與密碼不變，只移除寫入權限。
+
+~~~bash
+cat > /root/snmp-ro.sh <<'ROEOF'
+#!/bin/bash
+# Change SNMPv3 rwuser to rouser (keep user, drop write access)
+set -e
+f=/etc/snmp/snmpd.conf
+cp -a $f $f.bak-$(date +%F-%H%M)
+sed -i 's/^\([[:space:]]*\)rwuser /\1rouser /' $f
+echo "$(hostname): $(grep -E '^[[:space:]]*(rouser|rwuser)' $f | awk '{print $1,$2}' | tr '\n' ' ')"
+systemctl restart snmpd
+echo "snmpd=$(systemctl is-active snmpd)"
+ROEOF
+chmod 700 /root/snmp-ro.sh
+
+# 容器（一台一台做，每台做完立即驗證）
+pct push 109 /root/snmp-ro.sh /root/snmp-ro.sh --perms 700 && pct exec 109 -- /root/snmp-ro.sh
+# 驗證：在 LibreNMS 所在節點執行，出現 Snmpget[n/...] 即讀取正常
+pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:poll 13 -m core" 2>&1 | tail -8
+~~~
+
+依序處理 wireguard → AdGuard → Pihole → librenms → node12 節點；每台都顯示 `rouser snmpuser`、`snmpd=active`，LibreNMS 輪詢 `Snmpget[3/0.05s]`。最後重跑掃描，所有主機都不再有 `rwuser`。
+
+注意：`pct exec` 只能在容器所在的節點執行；在其他節點執行會失敗，錯誤訊息又被 `grep` 過濾時，畫面會什麼都沒有，容易誤判。
+
+還原：`cp -a $(ls -t /etc/snmp/snmpd.conf.bak-* | head -1) /etc/snmp/snmpd.conf && systemctl restart snmpd`。
+
+待改善：Graylog 目前以 v2c 輪詢（community 明文傳送），其他設備為 v3，之後可改為 v3 一致。
+
+### 11-11 延伸：未監控的 LXC 加入 LibreNMS（SNMPv3 SHA／AES）
+
+掃描時發現 ipam、ProxCenter、ai、wazuh 四個容器沒有 snmpd，也不在 LibreNMS。另外發現現有 9 台設備的 SNMPv3 使用 **MD5／DES**（已過時），因此新加入的主機直接改用 **SHA／AES**；帳號與密碼沿用 `snmpuser`，LibreNMS 的演算法以設備為單位設定，可以並存。
+
+**做法重點**：
+
+- SNMPv3 帳號的金鑰會依各主機的 engineID 本地化，不能複製別台的 `/var/lib/snmp/snmpd.conf`，每台要重新建立帳號。
+- 密碼直接從 LibreNMS 資料庫讀入變數（`devices.authpass`、`devices.cryptopass`），不顯示在畫面上，用完即清除。
+- 設定只有 `rouser snmpuser priv`（唯讀、必須加密），沒有 v2c community。
+- 帳號以 `createUser` 寫入 `/var/lib/snmp/snmpd.conf`，snmpd 啟動時會轉成 `usmUser` 並刪除含明文密碼的那一行；以 `createUser=0` 驗證。
+
+安裝腳本（在 LibreNMS 所在節點執行，對象為同節點的容器）：
+
+~~~bash
+cat > /root/snmp-v3-add.sh <<'ADDEOF'
+#!/bin/bash
+# Install snmpd with a read-only SNMPv3 user (SHA/AES) in a local LXC; secrets are never printed
+set -e
+CT=$1; LOC=$2
+[ -n "$CT" ] && [ -n "$LOC" ] || { echo "usage: $0 CTID Location"; exit 1; }
+umask 077
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+AP=$(pct exec 102 -- mysql -N librenms -e "select authpass from devices where device_id=13")
+PP=$(pct exec 102 -- mysql -N librenms -e "select cryptopass from devices where device_id=13")
+CONTACT=$(pct exec 102 -- grep -m1 '^syscontact' /etc/snmp/snmpd.conf)
+pct pull 102 /usr/bin/distro $T/distro
+printf 'agentAddress udp:161\nrouser snmpuser priv\nsyslocation %s\n%s\nextend distro /usr/bin/distro\n' "$LOC" "$CONTACT" > $T/snmpd.conf
+printf 'createUser snmpuser SHA "%s" AES "%s"\n' "$AP" "$PP" > $T/cu
+unset AP PP
+pct exec $CT -- bash -c "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq snmpd >/dev/null"
+pct exec $CT -- systemctl stop snmpd
+pct push $CT $T/snmpd.conf /etc/snmp/snmpd.conf --perms 600
+pct push $CT $T/distro /usr/bin/distro --perms 755
+pct push $CT $T/cu /root/.snmp-cu --perms 600
+pct exec $CT -- bash -c 'mkdir -p /var/lib/snmp && cat /root/.snmp-cu >> /var/lib/snmp/snmpd.conf && rm -f /root/.snmp-cu && chown Debian-snmp:Debian-snmp /var/lib/snmp/snmpd.conf 2>/dev/null || true'
+pct exec $CT -- systemctl enable snmpd >/dev/null 2>&1
+pct exec $CT -- systemctl restart snmpd
+sleep 2
+pct exec $CT -- bash -c 'echo "CT'"$CT"': snmpd=$(systemctl is-active snmpd) usmUser=$(grep -c ^usmUser /var/lib/snmp/snmpd.conf) createUser=$(grep -c ^createUser /var/lib/snmp/snmpd.conf) udp161=$(ss -ulnp | grep -c ":161 ")"'
+ADDEOF
+chmod 700 /root/snmp-v3-add.sh
+~~~
+
+其他節點上的容器使用同樣邏輯的 `snmp-v3-add-remote.sh NODE CTID Location`：暫存檔以 `scp` 傳到目標節點，所有 `pct` 指令改以 `ssh NODE` 執行，結束後兩邊的暫存檔都刪除。
+
+加入 LibreNMS（`lnms device:add` 的 `-a` 預設為 MD5，必須明確指定 SHA；安全等級會依有無加密密碼自動判斷為 authPriv）：
+
+~~~bash
+cat > /root/snmp-v3-lnms.sh <<'LNMSEOF'
+#!/bin/bash
+# Add a host to LibreNMS with SNMPv3 SHA/AES (secrets read from LibreNMS DB, never printed)
+set -e
+H=$1
+[ -n "$H" ] || { echo "usage: $0 hostname-or-ip"; exit 1; }
+AP=$(pct exec 102 -- mysql -N librenms -e "select authpass from devices where device_id=13")
+PP=$(pct exec 102 -- mysql -N librenms -e "select cryptopass from devices where device_id=13")
+pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:add -3 -u snmpuser -a SHA -A '$AP' -x AES -X '$PP' $H" 2>&1 | grep -v -- "$AP" | grep -v -- "$PP"
+unset AP PP
+pct exec 102 -- mysql librenms -e "select device_id, hostname, snmpver, authlevel, authalgo, cryptoalgo from devices where hostname='$H';"
+LNMSEOF
+chmod 700 /root/snmp-v3-lnms.sh
+~~~
+
+**本案結果**（每台一台一台執行並確認）：
+
+| 容器 | 所在節點 | 作業系統 | LibreNMS |
+| --- | --- | --- | --- |
+| ai（CT113） | node10 | Ubuntu 24.04 | device 18，v3／authPriv／SHA／AES |
+| ProxCenter（CT110） | node10 | Debian 13 | device 19 |
+| ipam（CT103） | node10 | Debian 13 | device 20（先在 AdGuard 與 Pihole 補上 DNS 紀錄） |
+| wazuh（CT112） | node12 | Ubuntu 22.04 | device 21 |
+
+注意：
+
+- 加入前先確認主機名稱解析得到：`pct exec 102 -- getent hosts <主機名稱>`；兩台 DNS 伺服器都要加紀錄。
+- 安裝時的 `perl: warning: Setting locale failed` 是容器內沒有 `en_US.UTF-8` 語系，不影響功能。
+- jt-ipam 下一次同步時會自動帶入新設備，`devices_seen` 隨之增加。
+- 待改善：原有 9 台由 MD5／DES 升級為 SHA／AES；Graylog（device 17）由 v2c 改為 v3。
 
 ## 風險與注意事項
 
