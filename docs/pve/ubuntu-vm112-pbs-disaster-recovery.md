@@ -3,12 +3,14 @@ layout: default
 title: "Ubuntu VM 從 PBS 還原：6 分 38 秒代表什麼？"
 permalink: /docs/pve/ubuntu-vm112-pbs-disaster-recovery/
 categories: [PVE, PBS, Ubuntu, DR]
-last_modified_at: 2026-09-18
+last_modified_at: 2026-10-02
 ---
 
 # Ubuntu VM 從 PBS 還原：6 分 38 秒代表什麼？
 
 影片已確認 VM112 還原任務顯示 TASK OK，之後在 node11 進入 Ubuntu 桌面，主機名稱、MAC 和 IP 與原紀錄一致，systemctl 沒有 failed unit。
+
+> 文中 IP 皆為文件示範位址（管理網 192.0.2.0/24），並非實際環境位址；照做前請換成自己的位址。
 
 其中 **397.97 秒（約 6 分 38 秒）只代表 image restore 階段**，不是從事故發生到所有應用程式恢復的完整時間。
 
@@ -65,7 +67,7 @@ last_modified_at: 2026-09-18
 | 主機名稱 | ubclient | 一致 |
 | 網卡 | ens18 | UP |
 | MAC | bc:24:11:e7:8e:c0 | 一致 |
-| IP | 192.168.10.68/24，DHCP | 一致，dynamic |
+| IP | 192.0.2.68/24，DHCP | 一致，dynamic |
 | OS 版本 | Ubuntu 22.04 | 已進桌面；版本指令輸出待補 |
 | 根檔案系統 | /dev/sda2，約 59 GB | 詳細比對待補 |
 | 使用量 | 約 29 GB／52% | 詳細比對待補 |
