@@ -65,7 +65,7 @@ HA 資源：
 | ct:100 | AdGuard（DNS） | node10 |
 | ct:101 | Pi-hole（DNS） | node12 |
 | ct:110 | ProxCenter | node10 |
-| ct:112 | Wazuh | node10 |
+| ct:112 | Wazuh | node10（之後移至 node12，見第 4 節） |
 | ct:113 | AI Agent | node10 |
 
 ProxCenter 的 Affinity rules：
@@ -147,6 +147,9 @@ DRS 關閉時，ProxCenter 平常不搬任何東西，和 PVE 的設定不衝突
 | --- | --- | --- |
 | Operation mode | Automatic | **Manual**，先看建議是否合理 |
 | Guest types | VMs + Containers (LXC) | **只留 VMs**，避免容器每小時被搬、被重啟 |
+| Affinity rules | — | 確認需要的規則都是 **Active**，再打開 DRS，否則 DRS 開始運作時不知道這些限制 |
+
+ProxCenter 的 Load Overview 會在叢集名稱旁顯示模式標籤（例如 AUTOMATIC）。本案 DRS 開關關閉時，標籤仍顯示 AUTOMATIC：**標籤是設定的模式，不代表正在執行**，要以 Configuration 頁的 DRS enabled 開關為準。
 
 原則：**平常負責搬移的只能有一個。** ProxCenter DRS 與 PVE 的 Automatic Rebalance 同時開啟，會互相把服務搬來搬去（乒乓效應）。
 
@@ -157,6 +160,8 @@ DRS 關閉時，ProxCenter 平常不搬任何東西，和 PVE 的設定不衝突
 | DNS 互斥 | **PVE HA rules** | ProxCenter | HA 資源，維護與故障時由 PVE 搬 |
 | DC 互斥 | **ProxCenter** | — | DC 不是 HA 資源，PVE 不會搬 |
 | VGA 固定 node11 | **ProxCenter** | — | 顯示卡直通的 VM 本來就無法遷移 |
+
+DRS 關閉時，ProxCenter 的規則不會自動執行；但逐台更新搬移非 HA VM、手動遷移等功能是否會參考這些規則尚未確認。規則開著沒有副作用，本案三條規則維持 **Active**。
 
 一句話原則：**會在故障或維護時被自動搬動的東西，規則放 PVE；其他的放 ProxCenter。** 同一條規則存在兩邊時，修改要兩邊一起改。
 
@@ -173,6 +178,42 @@ pvesh get /cluster/resources --type vm --output-format json | grep -oE '"id":"qe
 
 本案 DC02 曾被手動移到 node10，DC01 在 node12，仍符合互斥。
 
+## 4. DRS 看不到「服務太集中」：手動分散 node10
+
+ProxCenter Load Overview（2026-10-02）：
+
+| 節點 | CPU | RAM | 台數 |
+| --- | --- | --- | --- |
+| node11 | 1.0% | 33.4% | 2 |
+| node10 | 2.4% | 31.4% | 9 |
+| node12 | 1.0% | 23.2% | 3（標記為可接收的 Target） |
+
+叢集 CPU 約 1%、RAM 29%，不平衡度 10%。node11 只有兩台用戶端 VM，但記憶體配置大，RAM 使用率反而最高。**從使用率看叢集很平衡，DRS 不會把 node10 視為問題。**
+
+但 node10 承載 9 台，包含 DNS、ProxCenter、Wazuh、DC02 等，節點故障時影響範圍最大。這是可用性風險，不是效能問題，需要人工規劃。
+
+第一步把 Wazuh（ct:112）移到 DRS 標記為 Target 的 node12：
+
+~~~bash
+ha-manager migrate ct:112 node12          # HA 資源要用 ha-manager，不要用 pct migrate
+watch -n 5 "ha-manager status | grep ct:112"
+~~~
+
+本案結果：遷移完成後 `ct:112 (node12, started)`；在 node12 上確認 4 個 Wazuh 服務 active、`vm.max_map_count` 1048576、Active 數量 18（17 Agent + Manager），Dashboard 顯示 Active 17、Disconnected 0。好處是 node10 故障時，監控系統不會跟著停。
+
+第二步把 DC02（VM 107，非 HA）以 live migration 移回 node11。先確認磁碟都在共用儲存、沒有 hostpci／usb 直通，且 DC01 不在目標節點：
+
+~~~bash
+qm config 107 | grep -E 'scsi|virtio|sata|ide|hostpci|usb'
+qm migrate 107 node11 --online       # 在 VM 目前所在的節點執行
+~~~
+
+本案結果：記憶體 4 GB、實際傳輸 3.4 GiB，平均 342.9 MiB/s，**停頓 63 ms**（上限 100 ms），整體 17 秒完成；DC01 在 node12、DC02 在 node11，仍符合互斥。輸出中的 `conntrack state migration not supported or disabled` 表示防火牆連線追蹤狀態不會跟著搬，本案資料中心防火牆未啟用，影響不大。
+
+遷移後在 DC02 上確認：`dcdiag /q` 無輸出、`repadmin /replsummary` 兩台 DC 皆 0／5 失敗、DNS／Kdc／Netlogon／NTDS 皆 Running；Wazuh 上 DC02（ID 014）維持 Active。
+
+調整後各節點台數由 9／2／3 變為 7／3／4（node10／node11／node12）。
+
 ## 待驗證與後續
 
 | 項目 | 狀態 |
@@ -180,7 +221,7 @@ pvesh get /cluster/resources --type vm --output-format json | grep -oE '"id":"qe
 | 用 ProxCenter 完整逐台更新三台，每台確認 DNS／DC 位置 | 待下次更新 |
 | ProxCenter 搬移非 HA VM 時是否遵守 Affinity rules | 未確認 |
 | 單節點故障演練（實測 Ceph I/O latency 與 HA 恢復時間） | 未演練 |
-| node10 承載大部分 HA 服務，需分散 | 規劃中 |
+| node10 承載大部分服務，需分散 | 進行中：Wazuh 移至 node12、DC02 移回 node11，台數 7／3／4 |
 | Dynamic Load 與 Automatic Rebalance 的實際行為 | 未查證 |
 
 單節點故障的預期行為（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，且在節點回來前沒有再壞一顆硬碟的餘裕。

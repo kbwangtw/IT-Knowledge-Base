@@ -28,6 +28,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
+| 11 | 告警調校 | 第一輪完成 | 2026-10-02：修正 ai 容器根因（AppArmor、服務失敗歸零）；Windows 電腦帳號登入登出、LibreNMS SNMP 的 sudo、LXC rootcheck 誤報以子規則降級並驗證；剩 librenms 400、61104、FIM 待處理 |
 
 ## 先認識四個名詞
 
@@ -747,6 +748,8 @@ pct exec 112 -- ss -tlnp | grep -E ':443 |:1514|:1515|:55000'
 | Port | 443／1514／1515 聽 0.0.0.0；55000 只聽 127.0.0.1 ✅（設定隨 CT 保留） |
 | Dashboard | 登入正常 ✅ |
 
+2026-10-02 為分散 node10 的負載，以 `ha-manager migrate ct:112 node12` 將 CT 112 移至 node12（HA 資源要透過 ha-manager 遷移）。容器為重啟式遷移，中斷約 1～2 分鐘；遷移後在 node12 確認 4 個服務 active、`vm.max_map_count` 1048576、`agent_control -l` 中 Active 為 18，Dashboard 顯示 17 台 Agent Active。IP 不變，Agent 不需修改設定。
+
 加入 HA 前確認：rootfs 在共用儲存（VM_Pool）、所有節點 `vm.max_map_count` ≥ 262144、`nesting=1` 已設定、手動遷移測試成功。
 
 **加入前先看 HA 現況**（任一節點）：
@@ -1410,6 +1413,339 @@ find /var/ossec/logs/alerts/20* -type f -mtime +30 | head    # 先預覽：目�
 
 - 30 天後的告警無法再查詢。PBS 排程的保留策略（keep-daily 7、keep-last 3）也只涵蓋約一週，**沒有更長期的告警副本**；若日後有稽核或事件調查需求，需重新評估保留天數或另行封存。
 - `/var/ossec/queue` 內的檔案由 Manager 管理，不要手動刪除。持續觀察 `du -sh /var/ossec/queue/*`，特別是 `indexer` 是否不斷成長。
+
+## 11. 告警調校
+
+### 11-1 先找出最常觸發的規則
+
+在 CT 112 內對 Indexer 做彙總查詢，取過去 24 小時數量最多的 15 條規則：
+
+~~~bash
+cat > /root/top-rules.json <<'JSONEOF'
+{
+  "size": 0,
+  "query": { "range": { "timestamp": { "gte": "now-24h" } } },
+  "aggs": {
+    "rules": {
+      "terms": { "field": "rule.id", "size": 15 },
+      "aggs": {
+        "desc":   { "terms": { "field": "rule.description", "size": 1 } },
+        "level":  { "max":   { "field": "rule.level" } },
+        "agents": { "terms": { "field": "agent.name", "size": 3 } }
+      }
+    }
+  }
+}
+JSONEOF
+curl -sk -u admin 'https://127.0.0.1:9200/wazuh-alerts-*/_search' \
+  -H 'Content-Type: application/json' -d @/root/top-rules.json > /root/top-rules.out
+head -c 100 /root/top-rules.out; echo     # 必須是 { 開頭；若是 Unauthorized 代表密碼錯誤
+~~~
+
+再用 Python 整理成表格（見本案操作紀錄）。輸出存檔時錯誤訊息也會被寫進檔案，所以存完要先看開頭。
+
+**本案前 15 名（2026-10-02，過去 24 小時）**：
+
+| 規則 | 等級 | 數量 | 說明 | 主要主機 | 分類 |
+| --- | --- | --- | --- | --- | --- |
+| 52002 | 3 | 75,070 | AppArmor DENIED | node10 | 根因待查 |
+| 60137 | 3 | 13,968 | Windows User Logoff | DC02、DC01 | 正常活動 |
+| 60106 | 3 | 8,003 | Windows Logon Success | DC02、DC01 | 正常活動（需保留人員登入） |
+| 40704 | 5 | 6,183 | Systemd: Service exited due to a failure | ai | 根因待查 |
+| 31101 | 5 | 1,865 | Web server 400 error code | librenms | 待查 |
+| 750 | 5 | 1,693 | Registry Value Integrity Checksum Changed | DC01、WinClient、ca | 掃描類 |
+| 510 | 7 | 1,344 | rootcheck 異常 | wazuh、AdGuard、Graylog（容器） | 掃描類 |
+| 5501／5502 | 3 | 各約 1,300 | PAM 工作階段開啟／關閉 | 三台 PVE 節點 | 推測為 ProxCenter 定期登入 |
+| 5402 | 3 | 1,281 | Successful sudo to ROOT | 三台 PVE 節點 | 同上 |
+| 61104 | 3 | 1,012 | 服務啟動類型變更 | DC01、DC02、ca | 待查 |
+| 60642 | 3 | 330 | Software protection service scheduled | ca、DC01、DC02 | 正常活動 |
+| 550 | 7 | 326 | Integrity checksum changed | ubclient、node11、node12 | 掃描類 |
+
+原則：先處理「可能有東西壞了」的類別，修好根因後告警自然消失；正常活動只針對特定主機或帳號降級，不整條關閉。
+
+### 11-2 AppArmor DENIED（52002）與 ai 服務失敗（40704）
+
+**追查**（node10）：
+
+~~~bash
+journalctl -k --since "1 hour ago" | grep 'apparmor="DENIED"' \
+  | sed -E 's/.*operation="([^"]*)".*profile="([^"]*)".*name="([^"]*)".*comm="([^"]*)".*/\1 | \2 | \3 | \4/' \
+  | sort | uniq -c | sort -rn | head -10
+~~~
+
+一小時 2,178 次皆為同一組合：namespace `lxc-113`（ai 容器）、profile `rsyslogd`、操作 `sendmsg`、目標 `/run/systemd/journal/dev-log`、程式 `systemd-journal`。容器內 Ubuntu 24.04 的 rsyslog AppArmor 規則擋下 journald 轉送日誌；容器與主機共用 kernel，紀錄寫在 node10 的 kernel 日誌，被 node10 的 Agent 收集。
+
+40704 來自 ai 容器內的 `hermes-gateway.service`：
+
+| 發現 | 說明 |
+| --- | --- |
+| 系統層級服務 | `/etc/systemd/system/hermes-gateway.service`，PID 287，自 9/29 穩定運作 |
+| **使用者層級服務** | `/root/.config/systemd/user/hermes-gateway.service`（8/27 建立，非刻意設定），由 `systemd[264]`（root 的使用者層級 systemd）啟動，**restart counter 13,270** |
+| 原因 | 兩個 gateway 搶同一個 Telegram Bot，使用者層級的啟動約 20 秒後失敗退出、再被重啟 |
+| 網路 | `api.telegram.org` 的 DNS 優先回 IPv6，但容器沒有 IPv6 路由（`curl -6` 立即失敗，`curl -4` 回 302） |
+
+每次失敗都印出數十行 traceback，journald 每一行都轉給 rsyslog、每一行都被 AppArmor 擋，因此兩條告警量都很大。
+
+**處理**（node10，保留系統層級的 gateway）：
+
+~~~bash
+pct exec 113 -- systemctl --user --machine=root@.host disable --now hermes-gateway.service
+pct exec 113 -- bash -c "ps -ef | grep -v grep | grep 'gateway run'"      # 只剩 --replace 那個
+pct exec 113 -- bash -c "grep -q '^precedence ::ffff:0:0/96' /etc/gai.conf || echo 'precedence ::ffff:0:0/96  100' >> /etc/gai.conf"
+pct exec 113 -- getent ahosts api.telegram.org | head -3                    # 第一筆應為 IPv4
+pct exec 113 -- systemctl restart hermes-gateway
+~~~
+
+`/etc/gai.conf` 的 precedence 設定讓系統連線時優先使用 IPv4，不需要變更容器網路。
+
+**驗證（處理後 10 分鐘）**：
+
+| 檢查 | 處理前（10 分鐘） | 處理後 |
+| --- | --- | --- |
+| 使用者層級 gateway 失敗 | 約 30 次 | **0** |
+| Telegram `Timed out` | 持續出現 | **0** |
+| node10 AppArmor DENIED | 約 360 次 | **8** |
+
+AppArmor 告警減少約 98%。剩餘的是正常日誌量造成的轉送阻擋，可再停用容器內 rsyslog 的 AppArmor 規則（容器本身仍受主機 LXC AppArmor 規則限制）：
+
+~~~bash
+pct exec 113 -- ln -s /etc/apparmor.d/usr.sbin.rsyslogd /etc/apparmor.d/disable/usr.sbin.rsyslogd
+pct exec 113 -- apparmor_parser -R /etc/apparmor.d/usr.sbin.rsyslogd
+pct exec 113 -- systemctl restart rsyslog
+~~~
+
+本案結果（2026-10-02）：三行指令第一次執行皆無輸出（成功）；重複執行時出現 `File exists`、`Profile doesn't exist`，代表第一次已完成，不是錯誤。`/sys/kernel/security/apparmor/profiles` 已無 rsyslogd，rsyslog 維持 active。
+
+復原方式：刪除 `disable/` 內的連結，再以 `apparmor_parser -r` 重新載入並重啟 rsyslog。
+
+**移除規則後仍被擋：要一併重啟 journald。** 移除規則、重啟 rsyslog 後，node10 仍出現同樣的 DENIED（profile 仍為 `rsyslogd`，對象是自 9/29 未重啟的 journald，PID 6881）；`logger` 測試訊息也沒有寫入 syslog。檢查發現 ai 容器的 `/var/log/syslog` **最後一筆停在 9/29 開機時**，也就是這三天 rsyslog 完全收不到 journald 轉送的日誌。推測 journald 既有的 socket 仍帶著舊規則的標記，重啟相關服務後解決：
+
+~~~bash
+pct exec 113 -- systemctl restart systemd-journald
+pct exec 113 -- systemctl restart syslog.socket rsyslog
+pct exec 113 -- logger -t wazuhtest "rsyslog test after journald restart"
+pct exec 113 -- tail -3 /var/log/syslog      # 最後一行出現 wazuhtest 即正常
+~~~
+
+本案結果：syslog 出現 03:27（UTC）rsyslog 啟動紀錄與測試訊息，停擺三天的 syslog 恢復寫入。之後追蹤 node10 的 kernel 日誌，最後一筆 DENIED 發生在重啟當下的 11:27:09（台灣時間），之後不再出現，52002 告警歸零。rsyslog 啟動時的 `imklog: cannot open kernel log (/proc/kmsg): Permission denied` 是非特權容器的正常限制。
+
+### 11-3 自訂降級規則的寫法與注意事項
+
+正常活動的降級一律寫在 `/var/ossec/etc/rules/local_rules.xml`，做法是為原規則加一條 **level 0 的子規則**（`if_sid` 指向原規則，再加上比對條件）。level 0 不寫入告警，但事件仍會被分析，例如暴力破解偵測不受影響。
+
+**修改流程（順序不可顛倒）**：
+
+~~~bash
+cp -a /var/ossec/etc/rules/local_rules.xml /var/ossec/etc/rules/local_rules.xml.bak-$(date +%F-%H%M)
+# ...編輯 local_rules.xml...
+/var/ossec/bin/wazuh-analysisd -t ; echo "exit=$?"            # 必須是 exit=0
+systemctl restart wazuh-manager && systemctl is-active wazuh-manager
+~~~
+
+規則寫錯時 Manager 會無法啟動，17 台 Agent 全部斷線；**先 `-t` 再重啟**。`-t` 失敗時硬碟上的檔案已經是壞的，要立刻修正或還原備份，否則下次 CT 遷移、重開機就會起不來。
+
+**欄位寫法**：
+
+| 類型 | 例子 | 規則寫法 |
+| --- | --- | --- |
+| 靜態欄位（內建） | `srcuser`、`dstuser`、`srcip`、`dstip`、`url` | 專用標籤（`<srcip>`、`<user>`）或用 `<match>` 比對日誌文字 |
+| 動態欄位（解碼器解析） | `command`、`uid`、`win.eventdata.*` | `<field name="...">` |
+
+本案踩到的錯誤：以 `<field name="srcuser">` 撰寫時，`-t` 回報 `Field 'srcuser' is static.` 並 `exit=1`。
+
+### 11-4 Windows 登入／登出（60137、60106）
+
+**分析**（過去 24 小時，依帳號彙總 `data.win.eventdata.targetUserName`）：
+
+| 帳號 | 60137 Logoff | 60106 Logon Success |
+| --- | --- | --- |
+| DC01$、DC02$（含 `$@網域` 寫法） | 11,874 | 7,913 |
+| CA$、WINCLIENT$ | 1,788 | 86 |
+| Administrator | 303 | 3 |
+
+約 98% 是電腦帳號（`$` 結尾），屬 AD 複寫、Kerberos、群組原則等正常活動。人員帳號必須保留告警。
+
+**做法**：只比對**已知**的電腦帳號，不比對所有 `$` 結尾的帳號。陌生或偽造的電腦帳號登入時仍會告警（攻擊者會濫用電腦帳號）；代價是新增 Windows 主機時要把名稱加入規則。
+
+~~~xml
+<group name="local,windows,tuning,">
+  <rule id="100100" level="0">
+    <if_sid>60137</if_sid>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)^(DC01|DC02|CA|WINCLIENT)\$(@.*)?$</field>
+    <description>Windows logoff by known computer account (suppressed)</description>
+  </rule>
+  <rule id="100101" level="0">
+    <if_sid>60106</if_sid>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)^(DC01|DC02|CA|WINCLIENT)\$(@.*)?$</field>
+    <description>Windows logon success by known computer account (suppressed)</description>
+  </rule>
+</group>
+~~~
+
+| regex 片段 | 意思 |
+| --- | --- |
+| `(?i)` | 不分大小寫 |
+| `^(DC01\|DC02\|CA\|WINCLIENT)` | 開頭必須是這 4 個名稱之一 |
+| `\$` | 接著一個 `$` 字元 |
+| `(@.*)?` | 後面可接、可不接 `@網域` |
+| `$` | 到此結束 |
+
+**驗證（套用後，在 DC02 實際登入、登出一次）**：
+
+| 規則 | 帳號 | 判讀 |
+| --- | --- | --- |
+| 60106 Logon Success | `Administrator@網域`（1） | 人員登入保留 ✅ |
+| 60137 Logoff | Administrator（2） | 人員登出保留 ✅ |
+| 67022／67023 | administrator、DWM-n、UMFD-n | 主控台互動登入時伴隨產生（DWM、UMFD 是桌面視窗管理員與字型驅動的虛擬帳號），量少，保留 |
+| — | DC01$、DC02$ | 未再出現 ✅ |
+
+重啟後前 3 分鐘內 60137／60106 為 0（調校前約每分鐘 15 筆）。
+
+### 11-5 PVE 節點的 sudo（5402、5501、5502）
+
+**分析**：原先推測是 ProxCenter 定期 SSH 登入，實際日誌顯示來源是 **LibreNMS 的 SNMP 監控**：
+
+~~~text
+node10 sudo: Debian-snmp : PWD=/ ; USER=root ; COMMAND=/usr/local/bin/proxmox
+node10 sudo: pam_unix(sudo:session): session opened for user root(uid=0) by (uid=109)
+~~~
+
+LibreNMS 每 5 分鐘以 SNMP 輪詢 → snmpd 的 `extend proxmox /usr/bin/sudo /usr/local/bin/proxmox` → 以 root 執行腳本讀取 PVE 資訊。每次輪詢在每台節點產生 5402（sudo）、5501（工作階段開啟）、5502（工作階段關閉）各一筆。
+
+**降級前先確認權限安全**（任一節點）：
+
+~~~bash
+grep -rn 'Debian-snmp' /etc/sudoers /etc/sudoers.d/
+ls -l /usr/local/bin/proxmox; ls -ld /usr/local/bin
+grep -n 'proxmox' /etc/snmp/snmpd.conf
+for n in node10 node11 node12; do echo -n "$n: "; ssh $n id -u Debian-snmp; done   # UID 由各節點分配，需逐台確認
+~~~
+
+| 項目 | 本案結果 | 判讀 |
+| --- | --- | --- |
+| sudoers | `Debian-snmp ALL=(ALL) NOPASSWD: /usr/local/bin/proxmox` | 只允許單一指令 ✅ |
+| 腳本／目錄 | `root root`、755 | 其他人不可寫入 ✅ |
+| Debian-snmp UID | 三台皆為 109 | 可共用同一條規則 |
+
+可再收緊（選擇性）：`(ALL)` 改為 `(root)`；指令後加 `""` 禁止帶參數（sudoers 中未寫參數代表允許任意參數）；把設定從主檔 `/etc/sudoers` 移到 `/etc/sudoers.d/` 獨立檔，避免 sudo 套件更新時被詢問是否覆蓋。修改 sudoers 一律用 `visudo` 或先 `visudo -c` 檢查。
+
+**規則**：
+
+~~~xml
+<group name="local,sudo,tuning,">
+  <rule id="100110" level="0">
+    <if_sid>5402</if_sid>
+    <match>Debian-snmp : PWD=</match>
+    <field name="command">^/usr/local/bin/proxmox$</field>
+    <description>sudo by Debian-snmp for LibreNMS proxmox extend (suppressed)</description>
+  </rule>
+  <rule id="100111" level="0">
+    <if_sid>5501</if_sid>
+    <match>pam_unix(sudo:session)</match>
+    <field name="uid">^109$</field>
+    <description>sudo session opened by Debian-snmp (suppressed)</description>
+  </rule>
+  <rule id="100112" level="0">
+    <if_sid>5502</if_sid>
+    <match>pam_unix(sudo:session)</match>
+    <description>sudo session closed (suppressed; open and command are still logged)</description>
+  </rule>
+</group>
+~~~
+
+| 規則 | 條件 | 仍會告警的情況 |
+| --- | --- | --- |
+| 100110 | Debian-snmp **且**指令完全等於該腳本 | Debian-snmp 執行其他指令 |
+| 100111 | sudo 工作階段 **且** uid 109 | 其他使用者執行 sudo |
+| 100112 | sudo 工作階段關閉（日誌中沒有執行者，無法區分） | SSH 工作階段關閉 |
+
+人員執行 sudo 時，5402（含指令）與 5501 都保留，少了關閉紀錄不影響追查。人員的 SSH 登入（5715）也不受影響。
+
+**驗證（重啟後約 45 分鐘）**：5402 已無 `Debian-snmp`、5501 已無 uid 109 ✅。剩下的少量事件來源如下：
+
+| 規則 | 數量 | 來源 | 處理 |
+| --- | --- | --- | --- |
+| 5715 SSH 登入成功 | 7 | ProxCenter 的 IP，帳號 `proxcenter`，只連 node11 | **保留** |
+| 5501／5402 | 16／7 | `proxcenter`（uid 110）登入後執行 sudo | **保留** |
+| 5715／5501 | 2／3 | node10 的 IP，帳號 root | 節點間 SSH，保留 |
+
+ProxCenter 約每 6 分鐘以 SSH 登入一台節點並執行 sudo，一天約數百筆。`proxcenter` 是能以 root 操作叢集的自動化帳號，ProxCenter 被入侵時這就是攻擊路徑，因此**刻意保留**這些紀錄作為稽核軌跡；在 Dashboard 以 `data.srcuser: proxcenter` 篩選即可排除或單獨檢視。
+
+### 11-6 容器的 rootcheck 隱藏檔誤報（510）
+
+**分析**：`full_log` 是全文欄位，不能直接做 terms 彙總（會回傳錯誤，沒有 `aggregations`），改為抓回原始告警再用 Python 計數：
+
+~~~bash
+cat > /root/rootcheck.json <<'JSONEOF'
+{
+  "size": 2000,
+  "_source": ["agent.name", "full_log"],
+  "query": { "bool": { "filter": [
+    { "range": { "timestamp": { "gte": "now-24h" } } },
+    { "term": { "rule.id": "510" } }
+  ] } }
+}
+JSONEOF
+curl -sk -u admin 'https://127.0.0.1:9200/wazuh-alerts-*/_search' \
+  -H 'Content-Type: application/json' -d @/root/rootcheck.json > /root/rootcheck.out
+python3 - <<'PYEOF2'
+import json, collections
+d = json.load(open('/root/rootcheck.out'))
+c = collections.Counter((h['_source']['agent']['name'], h['_source'].get('full_log', '')[:200]) for h in d['hits']['hits'])
+for (agent, msg), n in sorted(c.items()): print(f"{agent:10} ({n}) {msg}")
+PYEOF2
+~~~
+
+本案 24 小時 1,440 筆，**10 台 LXC 全部**觸發，內容只有兩種：
+
+| 檔案 | 用途 |
+| --- | --- |
+| `/dev/.lxc-boot-id` | LXC 記錄容器開機識別碼 |
+| `/dev/.lxc/proc/*`（cpuinfo、meminfo、uptime 等約 47 個） | lxcfs 提供，讓容器看到自己被分配的資源 |
+
+rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿檔，LXC 的正常檔案因此被誤判；每台約 48 筆、每 12 小時掃描一次。
+
+**做法**：不關閉 `/dev` 檢查，只以完整路徑放過這兩類檔案；`/dev` 出現其他隱藏檔（例如 `/dev/.x`、`/dev/.lxc-backdoor`）仍會告警。
+
+~~~xml
+<group name="local,rootcheck,tuning,">
+  <rule id="100120" level="0">
+    <if_sid>510</if_sid>
+    <regex type="pcre2">^File '/dev/\.lxc(-boot-id|/proc/[a-z_-]+)' present on /dev\. Possible hidden file\.$</regex>
+    <description>rootcheck: LXC runtime file in /dev (suppressed)</description>
+  </rule>
+</group>
+~~~
+
+套用後（先 `-t` 再重啟），可手動觸發掃描驗證，不必等 12 小時：
+
+~~~bash
+/var/ossec/bin/agent_control -l                 # 查 Agent ID
+/var/ossec/bin/agent_control -r -u 000          # Manager 本機
+/var/ossec/bin/agent_control -r -u 005          # 例：librenms
+~~~
+
+**驗證**：觸發掃描約 20 分鐘後查詢 510，`510 total = 0`。
+
+查詢檔若不存在，`curl -d @檔案` 會送出空查詢，Indexer 回傳全部告警（`total = 10000` 是計數上限）而沒有 `aggregations`；看到這種結果先確認查詢檔已建立。
+
+### 11-7 調校成果（2026-10-02 第一輪）
+
+| 規則 | 調校前（每天） | 調校後 | 方式 |
+| --- | --- | --- | --- |
+| 52002 AppArmor DENIED | 75,070 | 約 0 | 修正根因（11-2） |
+| 40704 服務失敗 | 6,183 | 0 | 修正根因（11-2） |
+| 60137／60106 Windows 登入登出 | 21,967 | 只剩人員帳號 | 子規則 100100、100101（11-4） |
+| 5402／5501／5502 sudo | 約 3,900 | 只剩 ProxCenter 與人員 | 子規則 100110～100112（11-5） |
+| 510 rootcheck | 1,440 | 0 | 子規則 100120（11-6） |
+
+**尚未處理**：31101／31301（librenms 的 Web 400 與 Nginx 錯誤）、61104（Windows 服務啟動類型變更）、750（登錄檔 FIM）、550（檔案 FIM）。
+
+**維護提醒**：
+
+- 新增 Windows 主機時，把電腦名稱加入規則 100100、100101。
+- 新增 LXC 時不需修改（100120 以路徑比對，適用所有容器）。
+- `local_rules.xml` 在 Wazuh 升級時會保留，但升級後仍要以 `-t` 確認規則可以載入。
 
 ## 風險與注意事項
 
