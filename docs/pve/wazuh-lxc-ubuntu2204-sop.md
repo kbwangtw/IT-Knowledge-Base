@@ -1029,7 +1029,7 @@ pct delsnapshot <CTID> pre-wazuh-agent
 
 回復方式：`pct rollback <CTID> pre-wazuh-agent`（會回到快照當下，快照之後的變更全部消失）。
 
-本案結果（2026-09-30）：AdGuard（100，node10）與 Pi-hole（101，node12）先做快照再安裝；安裝後 `AdGuardHome`、`pihole-FTL` 皆 active；Manager 顯示 `ID: 008, Name: AdGuard, Active`、`ID: 009, Name: Pihole, Active`。快照待觀察一兩天、DNS 正常後刪除。
+本案結果（2026-09-30）：AdGuard（100，node10）與 Pi-hole（101，node12）先做快照再安裝；安裝後 `AdGuardHome`、`pihole-FTL` 皆 active；Manager 顯示 `ID: 008, Name: AdGuard, Active`、`ID: 009, Name: Pihole, Active`。快照觀察兩天、DNS 正常後，已於 2026-10-02 刪除（CT 100、101、109）。
 
 WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking wazuh-agent (4.14.8-1) over (4.14.8-1)`，代表容器內**原本已裝過 Agent**，這次是同版本覆蓋安裝；設定檔位址正確、服務 active，`wg show` 顯示 wg0 不受影響。Manager 端只有一筆 `ID: 010, Name: wireguard, Active`，沒有重複註冊。另以 `apt autoremove`（先 `--dry-run` 確認）移除容器內用不到的 `linux-image-6.12.73+deb13-rt-amd64`，釋放 111 MB；容器使用主機 kernel，不需要自己的 kernel 套件。安裝前可先用 `pct exec <CTID> -- dpkg -l wazuh-agent` 確認，避免重複安裝。
 
@@ -1276,7 +1276,7 @@ certutil -ping
 #### 注意
 
 - 網域控制站的 Security 事件記錄量很大（登入、Kerberos 票證等），接上後告警與 Indexer 使用量會明顯增加，需觀察 CT 112 的 rootfs 與 CPU。
-- 快照觀察 1～2 天後刪除：`qm delsnapshot <VMID> pre-wazuh-agent`。
+- 快照觀察 1～2 天後刪除：`qm delsnapshot <VMID> pre-wazuh-agent`。本案已於 2026-10-02 刪除 VM 106、107、111 的快照；刪除前先用 `qm listsnapshot` 確認只刪 `pre-wazuh-agent`。DC02 當時已不在原節點（`107.conf does not exist`），需先用 `pvesh get /cluster/resources --type vm` 找到所在節點再操作；兩台 DC 仍在不同節點。
 
 ### 9-10 Proxmox Backup Server（PBS31）
 
