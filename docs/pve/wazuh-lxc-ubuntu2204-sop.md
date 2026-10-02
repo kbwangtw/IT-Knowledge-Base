@@ -1324,6 +1324,80 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 
 第一次貼上 Port 測試指令時被換行截斷，出現 `bash: -c: option requires an argument`；重新完整貼上一行即正常。
 
+## 10. 資料保留（30 天）
+
+### 10-1 先看空間用在哪裡（2026-10-02 實測，17 台 Agent 上線約 2 天）
+
+| 位置 | 大小 | 內容 |
+| --- | --- | --- |
+| `/var/ossec/queue/vd` | 9.9 GB | 弱點偵測內容資料庫（CVE 情資），大小相對固定 |
+| `/var/ossec/queue/indexer` | 1.7 GB | 等待送往 Indexer 的佇列，需觀察是否持續成長 |
+| `/var/ossec/queue/db` | 201 MB | 各 Agent 的本機資料庫 |
+| `/var/lib/wazuh-indexer` | 131 MB | 全部索引 |
+| `/var/ossec/logs/alerts` | 95 MB | 告警的文字檔備份（alerts.json／alerts.log），**預設永不刪除** |
+
+每日告警索引：9/30 約 48 MB（含初始掃描）、10/01 約 42.5 MB（第一個完整的一天）。索引日期以 UTC 切分。告警本身佔用很小，磁碟主要被弱點資料庫使用。
+
+### 10-2 Indexer：告警索引保留 30 天（ISM）
+
+在 CT 112 內建立政策檔：
+
+~~~bash
+cat > /root/wazuh-alerts-30d.json <<'JSONEOF'
+{
+  "policy": {
+    "description": "Delete wazuh-alerts indices older than 30 days",
+    "default_state": "hot",
+    "states": [
+      {
+        "name": "hot",
+        "actions": [],
+        "transitions": [ { "state_name": "delete", "conditions": { "min_index_age": "30d" } } ]
+      },
+      {
+        "name": "delete",
+        "actions": [ { "delete": {} } ],
+        "transitions": []
+      }
+    ],
+    "ism_template": [ { "index_patterns": ["wazuh-alerts-*"], "priority": 100 } ]
+  }
+}
+JSONEOF
+~~~
+
+建立政策，並套用到**已經存在**的告警索引（`ism_template` 只會自動套用到之後新建的索引）：
+
+~~~bash
+curl -sk -u admin -X PUT 'https://127.0.0.1:9200/_plugins/_ism/policies/wazuh-alerts-30d' \
+  -H 'Content-Type: application/json' -d @/root/wazuh-alerts-30d.json
+
+curl -sk -u admin -X POST 'https://127.0.0.1:9200/_plugins/_ism/add/wazuh-alerts-*' \
+  -H 'Content-Type: application/json' -d '{"policy_id": "wazuh-alerts-30d"}'
+
+curl -sk -u admin 'https://127.0.0.1:9200/_plugins/_ism/explain/wazuh-alerts-*?pretty' | grep -E '"index"|policy_id'
+~~~
+
+每個指令都會詢問 admin 密碼。也可以在 Dashboard 的 **Index Management → Index policies** 建立同樣的政策。
+
+### 10-3 Manager：告警文字檔保留 30 天
+
+Indexer 的政策管不到 `/var/ossec/logs/alerts/`。以排程刪除 30 天前、已按日期歸檔的檔案（只處理年份子目錄，不碰目前正在寫入的 alerts.json）：
+
+~~~bash
+cat > /etc/cron.d/wazuh-alerts-cleanup <<'CRONEOF'
+# Remove archived Wazuh alert logs older than 30 days
+17 3 * * * root find /var/ossec/logs/alerts/20* -type f -mtime +30 -delete; find /var/ossec/logs/alerts/20* -mindepth 1 -type d -empty -delete
+CRONEOF
+chmod 644 /etc/cron.d/wazuh-alerts-cleanup
+find /var/ossec/logs/alerts/20* -type f -mtime +30 | head    # 先預覽：目前應沒有符合的檔案
+~~~
+
+### 10-4 注意
+
+- 30 天後的告警無法再查詢。PBS 排程的保留策略（keep-daily 7、keep-last 3）也只涵蓋約一週，**沒有更長期的告警副本**；若日後有稽核或事件調查需求，需重新評估保留天數或另行封存。
+- `/var/ossec/queue` 內的檔案由 Manager 管理，不要手動刪除。持續觀察 `du -sh /var/ossec/queue/*`，特別是 `indexer` 是否不斷成長。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
