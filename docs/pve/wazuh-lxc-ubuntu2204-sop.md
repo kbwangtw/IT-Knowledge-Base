@@ -2003,6 +2003,8 @@ ADDEOF
 chmod 700 /root/snmp-v3-add.sh
 ~~~
 
+PBS 這類不在 PVE 內的獨立主機使用 `snmp-v3-add-host.sh root@主機 Location`：在 LibreNMS 所在節點產生設定檔、distro 腳本、`createUser` 與安裝程式，打包後以**單一 SSH 連線**（`tar | ssh`）傳到目標主機執行，只需輸入一次密碼，結束後兩邊的暫存檔都刪除。`apt update` 若因企業版套件來源回報 401 會忽略並繼續；最後同時顯示 `proxmox-backup-proxy` 狀態，確認備份服務未受影響。避開排程備份時段（本案 21:00）執行。
+
 其他節點上的容器使用同樣邏輯的 `snmp-v3-add-remote.sh NODE CTID Location`：暫存檔以 `scp` 傳到目標節點，所有 `pct` 指令改以 `ssh NODE` 執行，結束後兩邊的暫存檔都刪除。
 
 加入 LibreNMS（`lnms device:add` 的 `-a` 預設為 MD5，必須明確指定 SHA；安全等級會依有無加密密碼自動判斷為 authPriv）：
@@ -2031,6 +2033,7 @@ chmod 700 /root/snmp-v3-lnms.sh
 | ProxCenter（CT110） | node10 | Debian 13 | device 19 |
 | ipam（CT103） | node10 | Debian 13 | device 20（先在 AdGuard 與 Pihole 補上 DNS 紀錄） |
 | wazuh（CT112） | node12 | Ubuntu 22.04 | device 21 |
+| PBS31（獨立主機） | — | Debian 13（PBS） | device 22 |
 
 注意：
 
