@@ -28,7 +28,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
-| 11 | 告警調校 | 第一輪完成 | 2026-10-02：修正 ai 容器根因（AppArmor、服務失敗歸零）；Windows 電腦帳號登入登出、LibreNMS SNMP 的 sudo、LXC rootcheck 誤報以子規則降級並驗證；剩 librenms 400、61104、FIM 待處理 |
+| 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
 
 ## 先認識四個名詞
 
@@ -1746,6 +1746,167 @@ rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿
 - 新增 Windows 主機時，把電腦名稱加入規則 100100、100101。
 - 新增 LXC 時不需修改（100120 以路徑比對，適用所有容器）。
 - `local_rules.xml` 在 Wazuh 升級時會保留，但升級後仍要以 `-t` 確認規則可以載入。
+
+### 11-8 第二輪：BITS、VSS 登錄檔、/etc/pve 狀態檔
+
+**分析**（過去 24 小時）：
+
+| 規則 | 每天 | 原因 |
+| --- | --- | --- |
+| 61104 服務啟動類型變更 | 926 | 所有 Windows 主機的 **BITS** 在「自動啟動」與「指定啟動（手動）」之間來回切換，是 Windows Update 的正常行為 |
+| 750 登錄檔 FIM | 1,693 | VSS 每次建立陰影複製都更新 `HKLM\System\CurrentControlSet\Services\VSS\Diag` 的診斷時間戳 |
+| 550 檔案 FIM | 326 | PVE 叢集檔案系統 `/etc/pve` 的狀態檔（`.rrd`、`.version`、`.clusterlog`、`lrm_status` 等）持續變動 |
+
+**61104：子規則**。以服務名稱（`param4`，不受介面語言影響）比對；其他服務的啟動類型變更（例如 Windows Modules Installer，一天約 3 筆）仍告警。攻擊者濫用 BITS 是建立下載工作，記錄在另一個事件頻道，不受此規則影響。
+
+~~~xml
+<group name="local,windows,tuning,">
+  <rule id="100130" level="0">
+    <if_sid>61104</if_sid>
+    <field name="win.eventdata.param4" type="pcre2">(?i)^BITS$</field>
+    <description>BITS start type toggled by Windows (suppressed)</description>
+  </rule>
+</group>
+~~~
+
+事件欄位實例：`param1` = Background Intelligent Transfer Service、`param2` = 指定啟動、`param3` = 自動啟動、`param4` = BITS。
+
+**750、550：集中式 Agent 設定**。不寫降級規則，而是讓 Agent 不掃描這些路徑，同時省下掃描資源。編輯 Manager 上的 `/var/ossec/etc/shared/default/agent.conf`（預設群組，所有 Agent 都會套用；原本只有空範本）：
+
+~~~xml
+<!-- Windows: VSS updates diagnostic timestamps on every shadow copy -->
+<agent_config os="Windows">
+  <syscheck>
+    <registry_ignore arch="both">HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\VSS\Diag</registry_ignore>
+  </syscheck>
+</agent_config>
+
+<!-- Linux (PVE nodes): pmxcfs runtime state files; config files stay monitored -->
+<agent_config os="Linux">
+  <syscheck>
+    <ignore type="sregex">^/etc/pve/\.</ignore>
+    <ignore>/etc/pve/ha/manager_status</ignore>
+    <ignore>/etc/pve/ha/crm_commands</ignore>
+    <ignore type="sregex">^/etc/pve/nodes/\w+/lrm_status$</ignore>
+  </syscheck>
+</agent_config>
+~~~
+
+~~~bash
+chown root:wazuh /var/ossec/etc/shared/default/agent.conf
+chmod 660 /var/ossec/etc/shared/default/agent.conf
+/var/ossec/bin/verify-agent-conf                                  # 必須顯示 OK
+grep -c 'VSS' /var/ossec/etc/shared/default/merged.mg            # ≥ 1 代表已打包給 Agent
+~~~
+
+注意：
+
+- `registry_ignore` 預設只排除 32 位元檢視，要加 `arch="both"`。
+- `/etc/pve` 內的 VM 設定（`qemu-server/*.conf`）、`user.cfg`、`corosync.conf`、防火牆規則**仍受監控**，這些檔案被修改一定要告警，所以只排除會自行變動的狀態檔。
+- 修改 `agent.conf` **不需要重啟 Manager**；Agent 幾分鐘內自動下載新設定並自行重啟 Agent 程式（不影響主機上的服務）。
+
+### 11-9 第二輪：LibreNMS Web 404（31101）—— jt-ipam 的過期設備
+
+**分析**：31101 每天 1,712 筆，全部來自 IPAM 主機（CT 103，執行開源的 jt-ipam）呼叫 LibreNMS API，約每 5 分鐘一輪：
+
+| 路徑 | 原因 |
+| --- | --- |
+| `/api/v0/devices/12/fdb`、`/devices/12/ports?...` | jt-ipam 的 `librenms_devices` 表仍留有 device 12（graylog），但 LibreNMS 已無此設備（網頁 `/device/12` 為 404） |
+| `/api/v0/resources/vlans`、`/resources/links` | 環境中沒有 VLAN 與 LLDP/CDP 鄰居資料，LibreNMS API 查無資料時回 404 |
+
+來源追查（PVE 節點）：
+
+~~~bash
+grep -il 'hostname: *ipam' /etc/pve/nodes/*/lxc/*.conf          # 找出 CT 與所在節點
+pct exec 103 -- systemctl list-timers --no-pager                 # jt-ipam-sync.timer 每 5 分鐘
+pct exec 103 -- systemctl cat --no-pager jt-ipam-sync.service    # 加 --no-pager 避免停在分頁畫面
+pct exec 103 -- journalctl -u jt-ipam-sync --since '-30min' --no-pager | tail -20
+~~~
+
+比對兩邊的設備清單：
+
+~~~bash
+# LibreNMS（CT 102）
+pct exec 102 -- mysql librenms -e "select device_id, hostname, sysName, disabled, \`ignore\`, status from devices order by device_id;"
+# jt-ipam（CT 103，PostgreSQL 資料庫 jt_ipam）
+pct exec 103 -- su - postgres -c "psql -d jt_ipam -c 'select id, legacy_device_id, hostname, version from librenms_devices'"
+~~~
+
+LibreNMS 有 9 台、jt-ipam 有 10 台，多出的 legacy_device_id 12 為 graylog（kernel 版本也停留在較舊的 `-15-pve`）。jt-ipam 同步時**不會刪除** LibreNMS 已移除的設備。
+
+**處理一：清除 jt-ipam 的過期紀錄**。先確認外鍵影響：
+
+~~~bash
+pct exec 103 -- su - postgres -c "psql -d jt_ipam -c \"select conrelid::regclass, conname, confdeltype from pg_constraint where confrelid = 'librenms_devices'::regclass;\""
+~~~
+
+本案：`arp_entries`、`fdb_entries` 為 `n`（SET NULL），`device_vlans` 為 `c`（CASCADE），沒有會擋下刪除的 `a`／`r`。備份後刪除：
+
+~~~bash
+pct exec 103 -- su - postgres -c "pg_dump -Fc -d jt_ipam -f /var/lib/postgresql/jt_ipam-before-graylog12-$(date +%F-%H%M).dump"
+pct exec 103 -- su - postgres -c "psql -d jt_ipam -c \"select id, legacy_device_id, hostname from librenms_devices where legacy_device_id = 12 and hostname like 'graylog%';\""   # 應只有 1 筆
+pct exec 103 -- su - postgres -c "psql -d jt_ipam -c \"delete from librenms_devices where legacy_device_id = 12 and hostname like 'graylog%';\""                         # DELETE 1
+~~~
+
+注意：直接改資料庫不會留在 jt-ipam 的稽核紀錄；有網頁刪除功能時優先使用。手動 `systemctl start jt-ipam-sync` 若距上次排程未滿 `sync_interval_seconds` 會被略過，要等下一次排程同步再驗證。
+
+**處理二：Graylog 重新加入 LibreNMS**。Graylog 容器（CT 105）的 snmpd 套件仍在，但設定檔已刪除、服務停用。從 LibreNMS 容器複製設定：
+
+~~~bash
+pct pull 102 /etc/snmp/snmpd.conf /root/snmpd.conf.tmp
+pct pull 102 /usr/bin/distro /root/distro.tmp                    # extend distro 使用的腳本
+sed -i -e '/^rwuser /d' -e 's/^syslocation .*/syslocation Node10/' /root/snmpd.conf.tmp
+pct push 105 /root/snmpd.conf.tmp /etc/snmp/snmpd.conf --perms 600
+pct push 105 /root/distro.tmp /usr/bin/distro --perms 755
+rm -f /root/snmpd.conf.tmp /root/distro.tmp
+pct exec 105 -- systemctl enable snmpd
+pct exec 105 -- systemctl restart snmpd
+
+# 從 LibreNMS 測試（容器內沒有 MIB 檔，用數字 OID；community 不顯示在畫面上）
+C=$(pct exec 102 -- awk '/^com2sec/{print $NF}' /etc/snmp/snmpd.conf)
+pct exec 102 -- snmpget -v2c -c "$C" <graylog 主機名稱> .1.3.6.1.2.1.1.5.0 .1.3.6.1.2.1.1.6.0
+pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:add --v2c -c '$C' <graylog 主機名稱>"
+unset C
+~~~
+
+本案加入後為 device 17（LibreNMS 的編號不重複使用）。
+
+⚠️ 範本設定中有 `rwuser snmpuser`（具**寫入權限**的 SNMPv3 帳號）。LibreNMS 監控只需讀取，複製時已移除；其他沿用同一範本的主機需另行檢查移除。`pct exec` 時出現的 `perl: warning: Setting locale failed` 是容器內未產生 `en_US.UTF-8` 語系，不影響功能。
+
+**處理三：剩下的空結果 404 以子規則降級**（srcip、id、url 為靜態欄位，用專用標籤）：
+
+~~~xml
+<group name="local,web,tuning,">
+  <rule id="100140" level="0">
+    <if_sid>31101</if_sid>
+    <srcip>192.0.2.29</srcip>
+    <id>^404$</id>
+    <url>^/api/v0/resources/vlans$|^/api/v0/resources/links$</url>
+    <description>LibreNMS API empty result for jt-ipam sync (suppressed)</description>
+  </rule>
+</group>
+~~~
+
+三個條件都符合才降級；其他來源、其他路徑、其他狀態碼（例如 401、403）仍告警。
+
+**用 wazuh-logtest 直接驗證規則**：等告警數量下降要花時間，而且查詢範圍容易混到重啟前的紀錄。直接把一行實際日誌交給 `wazuh-logtest`，可立即看到解碼欄位與最後比對到的規則：
+
+~~~bash
+# 從查詢結果取出一行原始日誌存檔（full_log），再交給 logtest
+/var/ossec/bin/wazuh-logtest < /root/vlans-line.txt 2>&1 | grep -E "id:|level:|description:|srcip|url|^\*\*Phase"
+~~~
+
+本案結果：Phase 2 解出 `id: '404'`、`srcip`、`url: '/api/v0/resources/vlans'`；Phase 3 為 `id: '100140'`、`level: '0'`，規則生效。
+
+**第二輪驗證**：61104、750、550 在套用後 30 分鐘內皆為 0；jt-ipam 同步 `devices_seen=10`，不再查詢 device 12。
+
+剩餘觀察項目：
+
+| 項目 | 說明 |
+| --- | --- |
+| `devices/17/ports` 404 | Graylog 剛重新加入 LibreNMS，連接埠探索完成前查不到，預期自行消失 |
+| 31301 PHP `ctype_digit(): Argument of type null` | LibreNMS 程式在新版 PHP 的 deprecated 警告（8192），與 `ports?columns=` 請求同時出現；待評估更新 LibreNMS 或以訊息內容降級 |
+| jt-ipam 網頁 401 | 瀏覽器開著登入已過期的 jt-ipam 頁面持續輪詢通知；401 屬認證失敗，保留告警 |
 
 ## 風險與注意事項
 
