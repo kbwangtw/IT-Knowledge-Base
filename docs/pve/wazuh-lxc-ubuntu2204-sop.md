@@ -2103,6 +2103,18 @@ pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo
 
 **結果**：7 台全部完成。node11、node12 第一次輪詢花了 5.09 秒（推測是 v3 帳號重建後的時間同步），再輪詢一次即恢復 0.05 秒。LibreNMS 中除 2 台 Synology NAS 外，全部為 v3／SHA／AES，且已無 v2c 與寫入權限。
 
+**Synology NAS（2 台）**：在 DSM「控制台 → 終端機 & SNMP → SNMP」取消 SNMPv1／v2c，SNMPv3 的驗證協定改為 SHA、隱私權協定改為 AES，按套用；DSM 會沿用已儲存的密碼重新產生金鑰，不必重新輸入。接著只更新 LibreNMS 的演算法並輪詢：
+
+~~~bash
+pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo='AES' WHERE device_id IN (5,6);"
+~~~
+
+兩台輪詢皆為 `Snmpget[3/0.04s]`。若輪詢逾時，代表 DSM 未沿用舊密碼，改為設定新密碼：DSM 與 LibreNMS 兩邊都填新密碼，LibreNMS 端以 `read -s` 輸入、只更新這兩台的 `authpass`／`cryptopass`。
+
+**最終狀態**：LibreNMS 監控的 15 台全部為 SNMPv3 authPriv／SHA／AES、唯讀，無 v2c community。
+
+**待辦**：`snmpuser` 的密碼目前只存在 LibreNMS 資料庫，管理者本身不知道；LibreNMS 損壞且無備份時無法復原。需另行記錄到密碼管理器，或規劃更換新密碼。
+
 還原（以容器為例；節點本身在節點上執行迴圈那一行）：
 
 ~~~bash
