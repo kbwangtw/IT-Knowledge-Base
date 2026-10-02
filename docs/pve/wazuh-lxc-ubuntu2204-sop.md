@@ -1908,6 +1908,58 @@ unset C
 | 31301 PHP `ctype_digit(): Argument of type null` | LibreNMS 程式在新版 PHP 的 deprecated 警告（8192），與 `ports?columns=` 請求同時出現；待評估更新 LibreNMS 或以訊息內容降級 |
 | jt-ipam 網頁 401 | 瀏覽器開著登入已過期的 jt-ipam 頁面持續輪詢通知；401 屬認證失敗，保留告警 |
 
+### 11-10 延伸修正：SNMP 寫入權限（rwuser）
+
+11-9 複製 SNMP 設定時發現範本中有 `rwuser snmpuser`，因此掃描所有節點與容器。腳本只列出設定種類與帳號名稱，community 與密碼以 `***` 遮蔽：
+
+~~~bash
+cat > /root/snmp-rw-scan.sh <<'SCANEOF'
+#!/bin/bash
+# Read-only scan: list SNMP write-access settings without printing secrets
+H=$(hostname)
+probe='grep -hsE "^[[:space:]]*(rwuser|rwcommunity6?|createUser)" /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.d/*.conf 2>/dev/null | awk "{print \$1, (\$1==\"rwuser\" ? \$2 : \"***\")}" | sort -u | tr "\n" " "; echo "| usmUser=$(grep -c ^usmUser /var/lib/snmp/snmpd.conf 2>/dev/null) | snmpd=$(systemctl is-active snmpd 2>/dev/null)"'
+echo "$H host : $(bash -c "$probe")"
+for id in $(pct list | awk 'NR>1 && $2=="running"{print $1}'); do
+  name=$(pct config $id | awk '/^hostname:/{print $2}')
+  echo "$H CT$id($name) : $(pct exec $id -- bash -c "$probe" 2>/dev/null)"
+done
+SCANEOF
+chmod 700 /root/snmp-rw-scan.sh
+for n in node10 node11 node12; do ssh $n bash -s < /root/snmp-rw-scan.sh; done
+~~~
+
+**結果**：node12 節點、AdGuard、Pihole、librenms、wireguard 共 5 台有 `rwuser snmpuser`，且 v3 帳號實際存在（`usmUser=1`）。
+
+**不能直接刪除**：LibreNMS 對 9 台設備都以 SNMPv3 `snmpuser`（authPriv）輪詢，而這 5 台的 `snmpuser` 只有 `rwuser`、沒有 `rouser`。刪掉會讓監控中斷，因此改為 `rouser`：帳號與密碼不變，只移除寫入權限。
+
+~~~bash
+cat > /root/snmp-ro.sh <<'ROEOF'
+#!/bin/bash
+# Change SNMPv3 rwuser to rouser (keep user, drop write access)
+set -e
+f=/etc/snmp/snmpd.conf
+cp -a $f $f.bak-$(date +%F-%H%M)
+sed -i 's/^\([[:space:]]*\)rwuser /\1rouser /' $f
+echo "$(hostname): $(grep -E '^[[:space:]]*(rouser|rwuser)' $f | awk '{print $1,$2}' | tr '\n' ' ')"
+systemctl restart snmpd
+echo "snmpd=$(systemctl is-active snmpd)"
+ROEOF
+chmod 700 /root/snmp-ro.sh
+
+# 容器（一台一台做，每台做完立即驗證）
+pct push 109 /root/snmp-ro.sh /root/snmp-ro.sh --perms 700 && pct exec 109 -- /root/snmp-ro.sh
+# 驗證：在 LibreNMS 所在節點執行，出現 Snmpget[n/...] 即讀取正常
+pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:poll 13 -m core" 2>&1 | tail -8
+~~~
+
+依序處理 wireguard → AdGuard → Pihole → librenms → node12 節點；每台都顯示 `rouser snmpuser`、`snmpd=active`，LibreNMS 輪詢 `Snmpget[3/0.05s]`。最後重跑掃描，所有主機都不再有 `rwuser`。
+
+注意：`pct exec` 只能在容器所在的節點執行；在其他節點執行會失敗，錯誤訊息又被 `grep` 過濾時，畫面會什麼都沒有，容易誤判。
+
+還原：`cp -a $(ls -t /etc/snmp/snmpd.conf.bak-* | head -1) /etc/snmp/snmpd.conf && systemctl restart snmpd`。
+
+待改善：Graylog 目前以 v2c 輪詢（community 明文傳送），其他設備為 v3，之後可改為 v3 一致。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
