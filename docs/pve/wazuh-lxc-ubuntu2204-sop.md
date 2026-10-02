@@ -2040,7 +2040,23 @@ chmod 700 /root/snmp-v3-lnms.sh
 - 加入前先確認主機名稱解析得到：`pct exec 102 -- getent hosts <主機名稱>`；兩台 DNS 伺服器都要加紀錄。
 - 安裝時的 `perl: warning: Setting locale failed` 是容器內沒有 `en_US.UTF-8` 語系，不影響功能。
 - jt-ipam 下一次同步時會自動帶入新設備，`devices_seen` 隨之增加。
-- 待改善：原有 9 台由 MD5／DES 升級為 SHA／AES；Graylog（device 17）由 v2c 改為 v3。
+- 待改善：原有 9 台由 MD5／DES 升級為 SHA／AES，並移除設定中殘留的 v2c community（LibreNMS 已不使用）。
+
+**Graylog 由 v2c 改為 v3**（device 17）：先備份設定，再以 `snmp-v3-add.sh 105 Node10` 覆蓋為只有 v3 的設定，接著直接修改 LibreNMS 資料庫，帳號密碼從既有 v3 設備複製（不經過畫面）：
+
+~~~bash
+pct exec 105 -- cp -a /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-v2c-$(date +%F-%H%M)
+/root/snmp-v3-add.sh 105 Node10
+pct exec 102 -- mysql librenms -e "
+UPDATE devices d JOIN devices s ON s.device_id = 13
+SET d.snmpver = 'v3', d.authlevel = 'authPriv',
+    d.authname = s.authname, d.authpass = s.authpass, d.authalgo = 'SHA',
+    d.cryptopass = s.cryptopass, d.cryptoalgo = 'AES',
+    d.community = NULL
+WHERE d.device_id = 17;"
+~~~
+
+驗證：`lnms device:poll 17 -m core` 出現 `Snmpget[3/0.05s]`；以原 community 執行 `snmpget -v2c` 回 `Timeout: No Response`，確認 v2c 已失效。
 
 ## 風險與注意事項
 
