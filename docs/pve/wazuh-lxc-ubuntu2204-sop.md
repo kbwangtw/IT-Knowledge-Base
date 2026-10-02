@@ -2113,8 +2113,6 @@ pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo
 
 **最終狀態**：LibreNMS 監控的 15 台全部為 SNMPv3 authPriv／SHA／AES、唯讀，無 v2c community。
 
-**待辦**：`snmpuser` 的密碼目前只存在 LibreNMS 資料庫，管理者本身不知道；LibreNMS 損壞且無備份時無法復原。需另行記錄到密碼管理器，或規劃更換新密碼。
-
 還原（以容器為例；節點本身在節點上執行迴圈那一行）：
 
 ~~~bash
