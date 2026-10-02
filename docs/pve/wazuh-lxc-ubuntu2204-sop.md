@@ -27,6 +27,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 7 | 安全收尾（密碼、防火牆、鎖定套件庫） | 已實測 | 2026-09-30：7-1 密碼更換完成、Dashboard 新密碼登入 OK；7-2 套件庫已停用；7-3 資料中心防火牆未啟用、另案規劃；7-4 API 只聽 127.0.0.1，外部 55000 已不通、443 正常 |
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
+| 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
 
 ## 先認識四個名詞
 
@@ -1029,7 +1030,7 @@ pct delsnapshot <CTID> pre-wazuh-agent
 
 回復方式：`pct rollback <CTID> pre-wazuh-agent`（會回到快照當下，快照之後的變更全部消失）。
 
-本案結果（2026-09-30）：AdGuard（100，node10）與 Pi-hole（101，node12）先做快照再安裝；安裝後 `AdGuardHome`、`pihole-FTL` 皆 active；Manager 顯示 `ID: 008, Name: AdGuard, Active`、`ID: 009, Name: Pihole, Active`。快照待觀察一兩天、DNS 正常後刪除。
+本案結果（2026-09-30）：AdGuard（100，node10）與 Pi-hole（101，node12）先做快照再安裝；安裝後 `AdGuardHome`、`pihole-FTL` 皆 active；Manager 顯示 `ID: 008, Name: AdGuard, Active`、`ID: 009, Name: Pihole, Active`。快照觀察兩天、DNS 正常後，已於 2026-10-02 刪除（CT 100、101、109）。
 
 WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking wazuh-agent (4.14.8-1) over (4.14.8-1)`，代表容器內**原本已裝過 Agent**，這次是同版本覆蓋安裝；設定檔位址正確、服務 active，`wg show` 顯示 wg0 不受影響。Manager 端只有一筆 `ID: 010, Name: wireguard, Active`，沒有重複註冊。另以 `apt autoremove`（先 `--dry-run` 確認）移除容器內用不到的 `linux-image-6.12.73+deb13-rt-amd64`，釋放 111 MB；容器使用主機 kernel，不需要自己的 kernel 套件。安裝前可先用 `pct exec <CTID> -- dpkg -l wazuh-agent` 確認，避免重複安裝。
 
@@ -1276,7 +1277,7 @@ certutil -ping
 #### 注意
 
 - 網域控制站的 Security 事件記錄量很大（登入、Kerberos 票證等），接上後告警與 Indexer 使用量會明顯增加，需觀察 CT 112 的 rootfs 與 CPU。
-- 快照觀察 1～2 天後刪除：`qm delsnapshot <VMID> pre-wazuh-agent`。
+- 快照觀察 1～2 天後刪除：`qm delsnapshot <VMID> pre-wazuh-agent`。本案已於 2026-10-02 刪除 VM 106、107、111 的快照；刪除前先用 `qm listsnapshot` 確認只刪 `pre-wazuh-agent`。DC02 當時已不在原節點（`107.conf does not exist`），需先用 `pvesh get /cluster/resources --type vm` 找到所在節點再操作；兩台 DC 仍在不同節點。
 
 ### 9-10 Proxmox Backup Server（PBS31）
 
@@ -1323,6 +1324,92 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 | Manager | `ID: 017, Name: pbs31, Active` |
 
 第一次貼上 Port 測試指令時被換行截斷，出現 `bash: -c: option requires an argument`；重新完整貼上一行即正常。
+
+## 10. 資料保留（30 天）
+
+### 10-1 先看空間用在哪裡（2026-10-02 實測，17 台 Agent 上線約 2 天）
+
+| 位置 | 大小 | 內容 |
+| --- | --- | --- |
+| `/var/ossec/queue/vd` | 9.9 GB | 弱點偵測內容資料庫（CVE 情資），大小相對固定 |
+| `/var/ossec/queue/indexer` | 1.7 GB | 等待送往 Indexer 的佇列，需觀察是否持續成長 |
+| `/var/ossec/queue/db` | 201 MB | 各 Agent 的本機資料庫 |
+| `/var/lib/wazuh-indexer` | 131 MB | 全部索引 |
+| `/var/ossec/logs/alerts` | 95 MB | 告警的文字檔備份（alerts.json／alerts.log），**預設永不刪除** |
+
+每日告警索引：9/30 約 48 MB（含初始掃描）、10/01 約 42.5 MB（第一個完整的一天）。索引日期以 UTC 切分。告警本身佔用很小，磁碟主要被弱點資料庫使用。
+
+### 10-2 Indexer：告警索引保留 30 天（ISM）
+
+在 CT 112 內建立政策檔：
+
+~~~bash
+cat > /root/wazuh-alerts-30d.json <<'JSONEOF'
+{
+  "policy": {
+    "description": "Delete wazuh-alerts indices older than 30 days",
+    "default_state": "hot",
+    "states": [
+      {
+        "name": "hot",
+        "actions": [],
+        "transitions": [ { "state_name": "delete", "conditions": { "min_index_age": "30d" } } ]
+      },
+      {
+        "name": "delete",
+        "actions": [ { "delete": {} } ],
+        "transitions": []
+      }
+    ],
+    "ism_template": [ { "index_patterns": ["wazuh-alerts-*"], "priority": 100 } ]
+  }
+}
+JSONEOF
+~~~
+
+建立政策，並套用到**已經存在**的告警索引（`ism_template` 只會自動套用到之後新建的索引）：
+
+~~~bash
+curl -sk -u admin -X PUT 'https://127.0.0.1:9200/_plugins/_ism/policies/wazuh-alerts-30d' \
+  -H 'Content-Type: application/json' -d @/root/wazuh-alerts-30d.json
+
+curl -sk -u admin -X POST 'https://127.0.0.1:9200/_plugins/_ism/add/wazuh-alerts-*' \
+  -H 'Content-Type: application/json' -d '{"policy_id": "wazuh-alerts-30d"}'
+
+curl -sk -u admin 'https://127.0.0.1:9200/_plugins/_ism/explain/wazuh-alerts-*?pretty' | grep -E '"index"|policy_id'
+~~~
+
+每個指令都會詢問 admin 密碼。也可以在 Dashboard 的 **Index Management → Index policies** 建立同樣的政策。
+
+**本案實測（2026-10-02）**：
+
+| 步驟 | 結果 |
+| --- | --- |
+| PUT 政策 | 回傳 `"_id":"wazuh-alerts-30d"`；系統自動為 delete 動作加上重試（3 次、指數退避、初始 1 分鐘） |
+| 套用到現有索引 | `"updated_indices":3`、`"failures":false` |
+| explain | 9/30、10/01、10/02 三個告警索引的 `policy_id` 皆為 `wazuh-alerts-30d` |
+
+`min_index_age` 從索引建立時間起算，9/30 的索引預計在 10/30 左右被刪除；ISM 每隔一段時間才檢查一次，實際刪除時間會稍晚。
+
+### 10-3 Manager：告警文字檔保留 30 天
+
+Indexer 的政策管不到 `/var/ossec/logs/alerts/`。以排程刪除 30 天前、已按日期歸檔的檔案（只處理年份子目錄，不碰目前正在寫入的 alerts.json）：
+
+~~~bash
+cat > /etc/cron.d/wazuh-alerts-cleanup <<'CRONEOF'
+# Remove archived Wazuh alert logs older than 30 days
+17 3 * * * root find /var/ossec/logs/alerts/20* -type f -mtime +30 -delete; find /var/ossec/logs/alerts/20* -mindepth 1 -type d -empty -delete
+CRONEOF
+chmod 644 /etc/cron.d/wazuh-alerts-cleanup
+find /var/ossec/logs/alerts/20* -type f -mtime +30 | head    # 先預覽：目前應沒有符合的檔案
+~~~
+
+本案實測（2026-10-02）：已建立 `/etc/cron.d/wazuh-alerts-cleanup`（權限 644）；預覽沒有符合的檔案。cron 會忽略權限或擁有者不正確的設定檔且不報錯，建立後用 `ls -l` 確認為 `-rw-r--r-- root`。
+
+### 10-4 注意
+
+- 30 天後的告警無法再查詢。PBS 排程的保留策略（keep-daily 7、keep-last 3）也只涵蓋約一週，**沒有更長期的告警副本**；若日後有稽核或事件調查需求，需重新評估保留天數或另行封存。
+- `/var/ossec/queue` 內的檔案由 Manager 管理，不要手動刪除。持續觀察 `du -sh /var/ossec/queue/*`，特別是 `indexer` 是否不斷成長。
 
 ## 風險與注意事項
 
