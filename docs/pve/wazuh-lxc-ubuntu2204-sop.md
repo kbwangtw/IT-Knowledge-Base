@@ -1380,6 +1380,16 @@ curl -sk -u admin 'https://127.0.0.1:9200/_plugins/_ism/explain/wazuh-alerts-*?p
 
 每個指令都會詢問 admin 密碼。也可以在 Dashboard 的 **Index Management → Index policies** 建立同樣的政策。
 
+**本案實測（2026-10-02）**：
+
+| 步驟 | 結果 |
+| --- | --- |
+| PUT 政策 | 回傳 `"_id":"wazuh-alerts-30d"`；系統自動為 delete 動作加上重試（3 次、指數退避、初始 1 分鐘） |
+| 套用到現有索引 | `"updated_indices":3`、`"failures":false` |
+| explain | 9/30、10/01、10/02 三個告警索引的 `policy_id` 皆為 `wazuh-alerts-30d` |
+
+`min_index_age` 從索引建立時間起算，9/30 的索引預計在 10/30 左右被刪除；ISM 每隔一段時間才檢查一次，實際刪除時間會稍晚。
+
 ### 10-3 Manager：告警文字檔保留 30 天
 
 Indexer 的政策管不到 `/var/ossec/logs/alerts/`。以排程刪除 30 天前、已按日期歸檔的檔案（只處理年份子目錄，不碰目前正在寫入的 alerts.json）：
