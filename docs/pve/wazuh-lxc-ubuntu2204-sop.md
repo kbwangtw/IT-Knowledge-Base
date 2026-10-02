@@ -925,7 +925,7 @@ rm -rf /var/ossec
 
 ### 9-6 Debian 13 LXC 容器：從 PVE 節點推送安裝
 
-本案 Debian 13 的服務都跑在 LXC 容器裡（AdGuard、Graylog、IPAM、LibreNMS、Pi-hole、ProxCenter、WireGuard）。做法是在 PVE 節點把 .deb 推進容器、用 `pct exec` 安裝：
+本案 Debian 13 的服務都跑在 LXC 容器裡（AdGuard、Graylog、ipam、LibreNMS、Pi-hole、ProxCenter、WireGuard）。做法是在 PVE 節點把 .deb 推進容器、用 `pct exec` 安裝：
 
 - 容器內不需要 wget／curl，也不必能連到 packages.wazuh.com。
 - 所有指令都在節點上執行，容易逐台複製。
@@ -941,7 +941,7 @@ pct list        # 在每台節點各執行一次
 
 | CT ID | 名稱 | 節點 | 狀態 | 安裝順序 |
 | --- | --- | --- | --- | --- |
-| 103 | IPAM | node10 | running | ① 試裝 |
+| 103 | ipam | node10 | running | ① 試裝 |
 | 102 | librenms | node10 | running | ② |
 | 105 | Graylog | node10 | running | ② |
 | 110 | ProxCenter | node10 | running | ② |
@@ -973,7 +973,7 @@ pct exec <CTID> -- bash -c 'systemctl daemon-reload && systemctl enable --now wa
 pct exec <CTID> -- rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 ~~~
 
-#### 本案實測：IPAM（CT 103，2026-09-30）
+#### 本案實測：ipam（CT 103，2026-09-30）
 
 | 步驟 | 結果 |
 | --- | --- |
@@ -1041,7 +1041,7 @@ WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking
 
 | ID | 名稱 | CT | 節點 | 狀態 |
 | --- | --- | --- | --- | --- |
-| 004 | IPAM | 103 | node10 | Active |
+| 004 | ipam | 103 | node10 | Active |
 | 005 | librenms | 102 | node10 | Active |
 | 006 | Graylog | 105 | node10 | Active |
 | 007 | ProxCenter | 110 | node10 | Active |
@@ -1160,7 +1160,7 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 | 類型 | ID | 名稱 | 安裝方式 |
 | --- | --- | --- | --- |
 | PVE 節點 | 001～003 | node11、node10、node12 | 節點上下載 .deb，`dpkg -i` |
-| Debian 13 容器 | 004～010 | IPAM、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
+| Debian 13 容器 | 004～010 | ipam、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
 | Ubuntu VM | 011 | ubclient | SSH 登入，`sudo 變數=值 dpkg -i` |
 | Windows VM | 012 | WinClient | PowerShell，MSI + `WAZUH_MANAGER` |
 | Windows 網域控制站 | 014～015 | DC02、DC01 | 同 Windows VM；裝前快照、AD 健康基準，裝後比對（9-9） |
@@ -1807,7 +1807,7 @@ grep -c 'VSS' /var/ossec/etc/shared/default/merged.mg            # ≥ 1 代表�
 
 ### 11-9 第二輪：LibreNMS Web 404（31101）—— jt-ipam 的過期設備
 
-**分析**：31101 每天 1,712 筆，全部來自 IPAM 主機（CT 103，執行開源的 jt-ipam）呼叫 LibreNMS API，約每 5 分鐘一輪：
+**分析**：31101 每天 1,712 筆，全部來自 ipam 主機（CT 103，執行開源的 jt-ipam）呼叫 LibreNMS API，約每 5 分鐘一輪：
 
 | 路徑 | 原因 |
 | --- | --- |
@@ -1962,7 +1962,7 @@ pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:poll 13 -m core" 2>&1
 
 ### 11-11 延伸：未監控的 LXC 加入 LibreNMS（SNMPv3 SHA／AES）
 
-掃描時發現 IPAM、ProxCenter、ai、wazuh 四個容器沒有 snmpd，也不在 LibreNMS。另外發現現有 9 台設備的 SNMPv3 使用 **MD5／DES**（已過時），因此新加入的主機直接改用 **SHA／AES**；帳號與密碼沿用 `snmpuser`，LibreNMS 的演算法以設備為單位設定，可以並存。
+掃描時發現 ipam、ProxCenter、ai、wazuh 四個容器沒有 snmpd，也不在 LibreNMS。另外發現現有 9 台設備的 SNMPv3 使用 **MD5／DES**（已過時），因此新加入的主機直接改用 **SHA／AES**；帳號與密碼沿用 `snmpuser`，LibreNMS 的演算法以設備為單位設定，可以並存。
 
 **做法重點**：
 
@@ -2029,7 +2029,7 @@ chmod 700 /root/snmp-v3-lnms.sh
 | --- | --- | --- | --- |
 | ai（CT113） | node10 | Ubuntu 24.04 | device 18，v3／authPriv／SHA／AES |
 | ProxCenter（CT110） | node10 | Debian 13 | device 19 |
-| IPAM（CT103） | node10 | Debian 13 | device 20（先在 AdGuard 與 Pihole 補上 DNS 紀錄） |
+| ipam（CT103） | node10 | Debian 13 | device 20（先在 AdGuard 與 Pihole 補上 DNS 紀錄） |
 | wazuh（CT112） | node12 | Ubuntu 22.04 | device 21 |
 
 注意：
