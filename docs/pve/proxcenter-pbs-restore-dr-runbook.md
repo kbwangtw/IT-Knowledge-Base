@@ -3,12 +3,14 @@ layout: default
 title: "從 PBS 還原 ProxCenter：先複製一台，再確認能用"
 date: 2026-08-28
 categories: [PVE, PBS, ProxCenter, DR]
-last_modified_at: 2026-09-18
+last_modified_at: 2026-10-02
 ---
 
 # 從 PBS 還原 ProxCenter：先複製一台，再確認能用
 
 本次把正式 ProxCenter 容器 CT110 的 PBS 備份，還原成 node12 上的新容器 CT210。最後確認系統能開機、四個 Docker 容器 healthy，網頁可從 3000 埠連入。
+
+> 文中 IP 皆為文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24），並非實際環境位址；照做前請換成自己的位址。
 
 這是一次**系統與基本服務恢復**的驗證，還沒有證明所有業務功能、排程或資料都完全正確。
 
@@ -51,14 +53,14 @@ pct status 210
 No PVE storage on node node12 maps to PBS datastore Tokyo16
 ~~~
 
-PVE 使用 PBS 的資料網地址 172.16.10.31，ProxCenter 原本使用管理網地址。替 ProxCenter 增加 172.16.10.30/24 網卡、不新增預設閘道，並對齊 PBS endpoint 後，還原才能繼續。
+PVE 使用 PBS 的資料網地址 198.51.100.31，ProxCenter 原本使用管理網地址。替 ProxCenter 增加 198.51.100.30/24 網卡、不新增預設閘道，並對齊 PBS endpoint 後，還原才能繼續。
 
 可以先查位址與路由：
 
 ~~~bash
 ip -br addr
 ip route
-ping -c 4 172.16.10.31
+ping -c 4 198.51.100.31
 ~~~
 
 本次調整後成功，但產品內部如何比對 endpoint 並未由程式碼證實。遇到相同錯誤仍應一起核對目標節點、datastore 名稱、PVE storage 與認證。
@@ -94,7 +96,7 @@ pct status 210
 pct config 210
 ~~~
 
-本次 rootfs 為 VM_Pool:vm-210-disk-0，大小 10G；管理 IP 改為 192.168.10.210/24。
+本次 rootfs 為 VM_Pool:vm-210-disk-0，大小 10G；管理 IP 改為 192.0.2.210/24。
 
 修改網路時逐張核對網卡。若複製了第二張資料網網卡，它的 IP 也可能重複。保留原有 bridge、VLAN、MTU、防火牆與其他必要欄位，不要只複製一條精簡的 net0 範例去覆蓋完整設定。
 
@@ -107,7 +109,7 @@ ProxCenter 是管理工具，副本裡的 API token 和自動排程也可能仍�
 ~~~bash
 pct start 210
 pct status 210
-ping -c 4 192.168.10.210
+ping -c 4 192.0.2.210
 pct enter 210
 ~~~
 
@@ -134,7 +136,7 @@ ss -lntp
 網頁入口是：
 
 ~~~bash
-curl -I http://192.168.10.210:3000
+curl -I http://192.0.2.210:3000
 ~~~
 
 若誤用 443 埠，連不上不代表還原失敗。先看實際監聽位置，再查網路。
