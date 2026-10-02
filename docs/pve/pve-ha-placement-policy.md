@@ -207,6 +207,8 @@ qm migrate 107 node11 --online       # 在 VM 目前所在的節點執行
 
 本案結果：記憶體 4 GB、實際傳輸 3.4 GiB，平均 342.9 MiB/s，**停頓 63 ms**（上限 100 ms），整體 17 秒完成；DC01 在 node12、DC02 在 node11，仍符合互斥。輸出中的 `conntrack state migration not supported or disabled` 表示防火牆連線追蹤狀態不會跟著搬，本案資料中心防火牆未啟用，影響不大。
 
+遷移後在 DC02 上確認：`dcdiag /q` 無輸出、`repadmin /replsummary` 兩台 DC 皆 0／5 失敗、DNS／Kdc／Netlogon／NTDS 皆 Running；Wazuh 上 DC02（ID 014）維持 Active。
+
 調整後各節點台數由 9／2／3 變為 7／3／4（node10／node11／node12）。
 
 ## 待驗證與後續
