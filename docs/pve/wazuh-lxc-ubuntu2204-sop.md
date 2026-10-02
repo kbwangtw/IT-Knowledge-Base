@@ -1590,6 +1590,17 @@ systemctl restart wazuh-manager && systemctl is-active wazuh-manager
 | `(@.*)?` | 後面可接、可不接 `@網域` |
 | `$` | 到此結束 |
 
+**驗證（套用後，在 DC02 實際登入、登出一次）**：
+
+| 規則 | 帳號 | 判讀 |
+| --- | --- | --- |
+| 60106 Logon Success | `Administrator@網域`（1） | 人員登入保留 ✅ |
+| 60137 Logoff | Administrator（2） | 人員登出保留 ✅ |
+| 67022／67023 | administrator、DWM-n、UMFD-n | 主控台互動登入時伴隨產生（DWM、UMFD 是桌面視窗管理員與字型驅動的虛擬帳號），量少，保留 |
+| — | DC01$、DC02$ | 未再出現 ✅ |
+
+重啟後前 3 分鐘內 60137／60106 為 0（調校前約每分鐘 15 筆）。
+
 ### 11-5 PVE 節點的 sudo（5402、5501、5502）
 
 **分析**：原先推測是 ProxCenter 定期 SSH 登入，實際日誌顯示來源是 **LibreNMS 的 SNMP 監控**：
@@ -1703,6 +1714,10 @@ rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿
 /var/ossec/bin/agent_control -r -u 000          # Manager 本機
 /var/ossec/bin/agent_control -r -u 005          # 例：librenms
 ~~~
+
+**驗證**：觸發掃描約 20 分鐘後查詢 510，`510 total = 0`。
+
+查詢檔若不存在，`curl -d @檔案` 會送出空查詢，Indexer 回傳全部告警（`total = 10000` 是計數上限）而沒有 `aggregations`；看到這種結果先確認查詢檔已建立。
 
 ## 風險與注意事項
 
