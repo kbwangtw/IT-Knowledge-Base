@@ -2003,6 +2003,8 @@ ADDEOF
 chmod 700 /root/snmp-v3-add.sh
 ~~~
 
+PBS 這類不在 PVE 內的獨立主機使用 `snmp-v3-add-host.sh root@主機 Location`：在 LibreNMS 所在節點產生設定檔、distro 腳本、`createUser` 與安裝程式，打包後以**單一 SSH 連線**（`tar | ssh`）傳到目標主機執行，只需輸入一次密碼，結束後兩邊的暫存檔都刪除。`apt update` 若因企業版套件來源回報 401 會忽略並繼續；最後同時顯示 `proxmox-backup-proxy` 狀態，確認備份服務未受影響。避開排程備份時段（本案 21:00）執行。
+
 其他節點上的容器使用同樣邏輯的 `snmp-v3-add-remote.sh NODE CTID Location`：暫存檔以 `scp` 傳到目標節點，所有 `pct` 指令改以 `ssh NODE` 執行，結束後兩邊的暫存檔都刪除。
 
 加入 LibreNMS（`lnms device:add` 的 `-a` 預設為 MD5，必須明確指定 SHA；安全等級會依有無加密密碼自動判斷為 authPriv）：
@@ -2031,13 +2033,92 @@ chmod 700 /root/snmp-v3-lnms.sh
 | ProxCenter（CT110） | node10 | Debian 13 | device 19 |
 | ipam（CT103） | node10 | Debian 13 | device 20（先在 AdGuard 與 Pihole 補上 DNS 紀錄） |
 | wazuh（CT112） | node12 | Ubuntu 22.04 | device 21 |
+| PBS31（獨立主機） | — | Debian 13（PBS） | device 22 |
 
 注意：
 
 - 加入前先確認主機名稱解析得到：`pct exec 102 -- getent hosts <主機名稱>`；兩台 DNS 伺服器都要加紀錄。
 - 安裝時的 `perl: warning: Setting locale failed` 是容器內沒有 `en_US.UTF-8` 語系，不影響功能。
 - jt-ipam 下一次同步時會自動帶入新設備，`devices_seen` 隨之增加。
-- 待改善：原有 9 台由 MD5／DES 升級為 SHA／AES；Graylog（device 17）由 v2c 改為 v3。
+- 待改善：原有 9 台由 MD5／DES 升級為 SHA／AES，並移除設定中殘留的 v2c community（LibreNMS 已不使用）。
+
+**Graylog 由 v2c 改為 v3**（device 17）：先備份設定，再以 `snmp-v3-add.sh 105 Node10` 覆蓋為只有 v3 的設定，接著直接修改 LibreNMS 資料庫，帳號密碼從既有 v3 設備複製（不經過畫面）：
+
+~~~bash
+pct exec 105 -- cp -a /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-v2c-$(date +%F-%H%M)
+/root/snmp-v3-add.sh 105 Node10
+pct exec 102 -- mysql librenms -e "
+UPDATE devices d JOIN devices s ON s.device_id = 13
+SET d.snmpver = 'v3', d.authlevel = 'authPriv',
+    d.authname = s.authname, d.authpass = s.authpass, d.authalgo = 'SHA',
+    d.cryptopass = s.cryptopass, d.cryptoalgo = 'AES',
+    d.community = NULL
+WHERE d.device_id = 17;"
+~~~
+
+驗證：`lnms device:poll 17 -m core` 出現 `Snmpget[3/0.05s]`；以原 community 執行 `snmpget -v2c` 回 `Timeout: No Response`，確認 v2c 已失效。
+
+### 11-12 原有主機升級為 SHA／AES 並移除 v2c
+
+原有 7 台 Linux 主機（3 台節點、AdGuard、Pihole、librenms、wireguard）不能用 11-11 的腳本整份覆蓋設定，因為節點上有 LibreNMS 讀取 VM 資訊用的 `extend proxmox`，librenms 有 `extend distro`。改為**就地修改**。
+
+**先唯讀檢查設定內容**（community 與密碼遮蔽）：
+
+~~~bash
+grep -vE '^[[:space:]]*(#|$)' /etc/snmp/snmpd.conf | sed -E \
+  -e 's/^(com2sec[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+).*/\1***/' \
+  -e 's/^(rocommunity6?|rwcommunity6?)[[:space:]]+[^[:space:]]+/\1 ***/' \
+  -e 's/^(createUser[[:space:]]+[^[:space:]]+).*/\1 ***/'
+awk '/^usmUser/{print $5}' /var/lib/snmp/snmpd.conf      # 實際存在的 v3 帳號
+~~~
+
+本案發現：
+
+| 主機 | 發現 |
+| --- | --- |
+| node12、AdGuard、wireguard、Pihole | Debian 預設的 `rocommunity`／`rocommunity6`（限 systemonly 範圍）仍開著 |
+| librenms | `com2sec` 搭配 `view all`，v2c 可讀取全部資料 |
+| 多台 | `rouser authPrivUser`，但該帳號不存在，無作用 |
+| node11 | 多一個打錯字的 v3 帳號 `anmpuser`，沒有任何權限 |
+
+**每台的處理**（腳本 `snmp-v3-upgrade.sh NODE host|CTID LIBRENMS_DEVICE_ID`，密碼一樣由 LibreNMS 資料庫讀入、以單一 SSH 連線傳送）：
+
+1. 備份 `/etc/snmp/snmpd.conf` 與 `/var/lib/snmp/snmpd.conf`。
+2. 刪除 `com2sec`、`rocommunity(6)`、`group … v1/v2c`、`access`、`view` 與 `rouser authPrivUser`；`extend`、`master agentx`、`includeDir` 等其他設定保留。
+3. 停止 snmpd，刪除舊的 `snmpuser`（MD5／DES）與 `anmpuser` 的 `usmUser` 行，以 `createUser snmpuser SHA … AES …` 重建（密碼不變）。
+4. 啟動 snmpd，將 LibreNMS 該設備的 `authalgo`、`cryptoalgo` 改為 SHA／AES，立即輪詢驗證。
+
+核心修改：
+
+~~~bash
+sed -i -E '/^[[:space:]]*(com2sec|access|view|rocommunity6?)[[:space:]]/d; /^[[:space:]]*group[[:space:]]+[^[:space:]]+[[:space:]]+v(1|2c)[[:space:]]/d; /^[[:space:]]*rouser[[:space:]]+authPrivUser[[:space:]]/d' /etc/snmp/snmpd.conf
+systemctl stop snmpd
+sed -i -E '/^usmUser .*"(snmpuser|anmpuser)"/d' /var/lib/snmp/snmpd.conf
+# 追加 createUser 行（由腳本從 LibreNMS 資料庫產生），再啟動
+systemctl start snmpd
+pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo='AES' WHERE device_id=<ID>;"
+~~~
+
+先做一台（wireguard）確認，其餘以迴圈執行，任一台輸出沒有 `poll: Snmpget` 即停止。每台都要檢查 `usm="snmpuser" createUser=0 v2c=0`，且 `extend=` 數量與原本相同（節點與 librenms 為 1）。
+
+**結果**：7 台全部完成。node11、node12 第一次輪詢花了 5.09 秒（推測是 v3 帳號重建後的時間同步），再輪詢一次即恢復 0.05 秒。LibreNMS 中除 2 台 Synology NAS 外，全部為 v3／SHA／AES，且已無 v2c 與寫入權限。
+
+**Synology NAS（2 台）**：在 DSM「控制台 → 終端機 & SNMP → SNMP」取消 SNMPv1／v2c，SNMPv3 的驗證協定改為 SHA、隱私權協定改為 AES，按套用；DSM 會沿用已儲存的密碼重新產生金鑰，不必重新輸入。接著只更新 LibreNMS 的演算法並輪詢：
+
+~~~bash
+pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo='AES' WHERE device_id IN (5,6);"
+~~~
+
+兩台輪詢皆為 `Snmpget[3/0.04s]`。若輪詢逾時，代表 DSM 未沿用舊密碼，改為設定新密碼：DSM 與 LibreNMS 兩邊都填新密碼，LibreNMS 端以 `read -s` 輸入、只更新這兩台的 `authpass`／`cryptopass`。
+
+**最終狀態**：LibreNMS 監控的 15 台全部為 SNMPv3 authPriv／SHA／AES、唯讀，無 v2c community。
+
+還原（以容器為例；節點本身在節點上執行迴圈那一行）：
+
+~~~bash
+pct exec <CTID> -- bash -c 'for f in /etc/snmp/snmpd.conf /var/lib/snmp/snmpd.conf; do cp -a $(ls -t $f.bak-v3upg-* | head -1) $f; done; systemctl restart snmpd'
+pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='MD5', cryptoalgo='DES' WHERE device_id=<ID>;"
+~~~
 
 ## 風險與注意事項
 
