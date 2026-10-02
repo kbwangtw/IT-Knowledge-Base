@@ -1514,6 +1514,10 @@ pct exec 113 -- apparmor_parser -R /etc/apparmor.d/usr.sbin.rsyslogd
 pct exec 113 -- systemctl restart rsyslog
 ~~~
 
+本案結果（2026-10-02）：三行指令第一次執行皆無輸出（成功）；重複執行時出現 `File exists`、`Profile doesn't exist`，代表第一次已完成，不是錯誤。`/sys/kernel/security/apparmor/profiles` 已無 rsyslogd，rsyslog 維持 active。
+
+復原方式：刪除 `disable/` 內的連結，再以 `apparmor_parser -r` 重新載入並重啟 rsyslog。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
