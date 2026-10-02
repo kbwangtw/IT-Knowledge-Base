@@ -1650,6 +1650,60 @@ for n in node10 node11 node12; do echo -n "$n: "; ssh $n id -u Debian-snmp; done
 
 人員執行 sudo 時，5402（含指令）與 5501 都保留，少了關閉紀錄不影響追查。人員的 SSH 登入（5715）也不受影響。
 
+### 11-6 容器的 rootcheck 隱藏檔誤報（510）
+
+**分析**：`full_log` 是全文欄位，不能直接做 terms 彙總（會回傳錯誤，沒有 `aggregations`），改為抓回原始告警再用 Python 計數：
+
+~~~bash
+cat > /root/rootcheck.json <<'JSONEOF'
+{
+  "size": 2000,
+  "_source": ["agent.name", "full_log"],
+  "query": { "bool": { "filter": [
+    { "range": { "timestamp": { "gte": "now-24h" } } },
+    { "term": { "rule.id": "510" } }
+  ] } }
+}
+JSONEOF
+curl -sk -u admin 'https://127.0.0.1:9200/wazuh-alerts-*/_search' \
+  -H 'Content-Type: application/json' -d @/root/rootcheck.json > /root/rootcheck.out
+python3 - <<'PYEOF2'
+import json, collections
+d = json.load(open('/root/rootcheck.out'))
+c = collections.Counter((h['_source']['agent']['name'], h['_source'].get('full_log', '')[:200]) for h in d['hits']['hits'])
+for (agent, msg), n in sorted(c.items()): print(f"{agent:10} ({n}) {msg}")
+PYEOF2
+~~~
+
+本案 24 小時 1,440 筆，**10 台 LXC 全部**觸發，內容只有兩種：
+
+| 檔案 | 用途 |
+| --- | --- |
+| `/dev/.lxc-boot-id` | LXC 記錄容器開機識別碼 |
+| `/dev/.lxc/proc/*`（cpuinfo、meminfo、uptime 等約 47 個） | lxcfs 提供，讓容器看到自己被分配的資源 |
+
+rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿檔，LXC 的正常檔案因此被誤判；每台約 48 筆、每 12 小時掃描一次。
+
+**做法**：不關閉 `/dev` 檢查，只以完整路徑放過這兩類檔案；`/dev` 出現其他隱藏檔（例如 `/dev/.x`、`/dev/.lxc-backdoor`）仍會告警。
+
+~~~xml
+<group name="local,rootcheck,tuning,">
+  <rule id="100120" level="0">
+    <if_sid>510</if_sid>
+    <regex type="pcre2">^File '/dev/\.lxc(-boot-id|/proc/[a-z_-]+)' present on /dev\. Possible hidden file\.$</regex>
+    <description>rootcheck: LXC runtime file in /dev (suppressed)</description>
+  </rule>
+</group>
+~~~
+
+套用後（先 `-t` 再重啟），可手動觸發掃描驗證，不必等 12 小時：
+
+~~~bash
+/var/ossec/bin/agent_control -l                 # 查 Agent ID
+/var/ossec/bin/agent_control -r -u 000          # Manager 本機
+/var/ossec/bin/agent_control -r -u 005          # 例：librenms
+~~~
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
