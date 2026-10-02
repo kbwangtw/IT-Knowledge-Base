@@ -1805,6 +1805,90 @@ grep -c 'VSS' /var/ossec/etc/shared/default/merged.mg            # ≥ 1 代表�
 - `/etc/pve` 內的 VM 設定（`qemu-server/*.conf`）、`user.cfg`、`corosync.conf`、防火牆規則**仍受監控**，這些檔案被修改一定要告警，所以只排除會自行變動的狀態檔。
 - 修改 `agent.conf` **不需要重啟 Manager**；Agent 幾分鐘內自動下載新設定並自行重啟 Agent 程式（不影響主機上的服務）。
 
+### 11-9 第二輪：LibreNMS Web 404（31101）—— jt-ipam 的過期設備
+
+**分析**：31101 每天 1,712 筆，全部來自 IPAM 主機（CT 103，執行開源的 jt-ipam）呼叫 LibreNMS API，約每 5 分鐘一輪：
+
+| 路徑 | 原因 |
+| --- | --- |
+| `/api/v0/devices/12/fdb`、`/devices/12/ports?...` | jt-ipam 的 `librenms_devices` 表仍留有 device 12（graylog），但 LibreNMS 已無此設備（網頁 `/device/12` 為 404） |
+| `/api/v0/resources/vlans`、`/resources/links` | 環境中沒有 VLAN 與 LLDP/CDP 鄰居資料，LibreNMS API 查無資料時回 404 |
+
+來源追查（PVE 節點）：
+
+~~~bash
+grep -il 'hostname: *ipam' /etc/pve/nodes/*/lxc/*.conf          # 找出 CT 與所在節點
+pct exec 103 -- systemctl list-timers --no-pager                 # jt-ipam-sync.timer 每 5 分鐘
+pct exec 103 -- systemctl cat --no-pager jt-ipam-sync.service    # 加 --no-pager 避免停在分頁畫面
+pct exec 103 -- journalctl -u jt-ipam-sync --since '-30min' --no-pager | tail -20
+~~~
+
+比對兩邊的設備清單：
+
+~~~bash
+# LibreNMS（CT 102）
+pct exec 102 -- mysql librenms -e "select device_id, hostname, sysName, disabled, \`ignore\`, status from devices order by device_id;"
+# jt-ipam（CT 103，PostgreSQL 資料庫 jt_ipam）
+pct exec 103 -- su - postgres -c "psql -d jt_ipam -c 'select id, legacy_device_id, hostname, version from librenms_devices'"
+~~~
+
+LibreNMS 有 9 台、jt-ipam 有 10 台，多出的 legacy_device_id 12 為 graylog（kernel 版本也停留在較舊的 `-15-pve`）。jt-ipam 同步時**不會刪除** LibreNMS 已移除的設備。
+
+**處理一：清除 jt-ipam 的過期紀錄**。先確認外鍵影響：
+
+~~~bash
+pct exec 103 -- su - postgres -c "psql -d jt_ipam -c \"select conrelid::regclass, conname, confdeltype from pg_constraint where confrelid = 'librenms_devices'::regclass;\""
+~~~
+
+本案：`arp_entries`、`fdb_entries` 為 `n`（SET NULL），`device_vlans` 為 `c`（CASCADE），沒有會擋下刪除的 `a`／`r`。備份後刪除：
+
+~~~bash
+pct exec 103 -- su - postgres -c "pg_dump -Fc -d jt_ipam -f /var/lib/postgresql/jt_ipam-before-graylog12-$(date +%F-%H%M).dump"
+pct exec 103 -- su - postgres -c "psql -d jt_ipam -c \"select id, legacy_device_id, hostname from librenms_devices where legacy_device_id = 12 and hostname like 'graylog%';\""   # 應只有 1 筆
+pct exec 103 -- su - postgres -c "psql -d jt_ipam -c \"delete from librenms_devices where legacy_device_id = 12 and hostname like 'graylog%';\""                         # DELETE 1
+~~~
+
+注意：直接改資料庫不會留在 jt-ipam 的稽核紀錄；有網頁刪除功能時優先使用。手動 `systemctl start jt-ipam-sync` 若距上次排程未滿 `sync_interval_seconds` 會被略過，要等下一次排程同步再驗證。
+
+**處理二：Graylog 重新加入 LibreNMS**。Graylog 容器（CT 105）的 snmpd 套件仍在，但設定檔已刪除、服務停用。從 LibreNMS 容器複製設定：
+
+~~~bash
+pct pull 102 /etc/snmp/snmpd.conf /root/snmpd.conf.tmp
+pct pull 102 /usr/bin/distro /root/distro.tmp                    # extend distro 使用的腳本
+sed -i -e '/^rwuser /d' -e 's/^syslocation .*/syslocation Node10/' /root/snmpd.conf.tmp
+pct push 105 /root/snmpd.conf.tmp /etc/snmp/snmpd.conf --perms 600
+pct push 105 /root/distro.tmp /usr/bin/distro --perms 755
+rm -f /root/snmpd.conf.tmp /root/distro.tmp
+pct exec 105 -- systemctl enable snmpd
+pct exec 105 -- systemctl restart snmpd
+
+# 從 LibreNMS 測試（容器內沒有 MIB 檔，用數字 OID；community 不顯示在畫面上）
+C=$(pct exec 102 -- awk '/^com2sec/{print $NF}' /etc/snmp/snmpd.conf)
+pct exec 102 -- snmpget -v2c -c "$C" <graylog 主機名稱> .1.3.6.1.2.1.1.5.0 .1.3.6.1.2.1.1.6.0
+pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:add --v2c -c '$C' <graylog 主機名稱>"
+unset C
+~~~
+
+本案加入後為 device 17（LibreNMS 的編號不重複使用）。
+
+⚠️ 範本設定中有 `rwuser snmpuser`（具**寫入權限**的 SNMPv3 帳號）。LibreNMS 監控只需讀取，複製時已移除；其他沿用同一範本的主機需另行檢查移除。`pct exec` 時出現的 `perl: warning: Setting locale failed` 是容器內未產生 `en_US.UTF-8` 語系，不影響功能。
+
+**處理三：剩下的空結果 404 以子規則降級**（srcip、id、url 為靜態欄位，用專用標籤）：
+
+~~~xml
+<group name="local,web,tuning,">
+  <rule id="100140" level="0">
+    <if_sid>31101</if_sid>
+    <srcip>192.0.2.29</srcip>
+    <id>^404$</id>
+    <url>^/api/v0/resources/vlans$|^/api/v0/resources/links$</url>
+    <description>LibreNMS API empty result for jt-ipam sync (suppressed)</description>
+  </rule>
+</group>
+~~~
+
+三個條件都符合才降級；其他來源、其他路徑、其他狀態碼（例如 401、403）仍告警。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
