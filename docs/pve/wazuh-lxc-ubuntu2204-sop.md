@@ -28,7 +28,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
-| 11 | 告警調校 | 進行中 | 2026-10-02：找出前 15 名；修正 ai 容器重複的 hermes-gateway 與 IPv6 優先順序，AppArmor 告警與服務失敗告警皆歸零，ai 容器停擺三天的 syslog 恢復 |
+| 11 | 告警調校 | 進行中 | 2026-10-02：找出前 15 名；修正 ai 容器重複的 hermes-gateway 與 IPv6 優先順序，AppArmor 告警與服務失敗告警皆歸零，ai 容器停擺三天的 syslog 恢復；Windows 電腦帳號登入／登出與 LibreNMS SNMP 的 sudo 已降級（驗證中） |
 
 ## 先認識四個名詞
 
@@ -1528,6 +1528,127 @@ pct exec 113 -- tail -3 /var/log/syslog      # 最後一行出現 wazuhtest 即�
 ~~~
 
 本案結果：syslog 出現 03:27（UTC）rsyslog 啟動紀錄與測試訊息，停擺三天的 syslog 恢復寫入。之後追蹤 node10 的 kernel 日誌，最後一筆 DENIED 發生在重啟當下的 11:27:09（台灣時間），之後不再出現，52002 告警歸零。rsyslog 啟動時的 `imklog: cannot open kernel log (/proc/kmsg): Permission denied` 是非特權容器的正常限制。
+
+### 11-3 自訂降級規則的寫法與注意事項
+
+正常活動的降級一律寫在 `/var/ossec/etc/rules/local_rules.xml`，做法是為原規則加一條 **level 0 的子規則**（`if_sid` 指向原規則，再加上比對條件）。level 0 不寫入告警，但事件仍會被分析，例如暴力破解偵測不受影響。
+
+**修改流程（順序不可顛倒）**：
+
+~~~bash
+cp -a /var/ossec/etc/rules/local_rules.xml /var/ossec/etc/rules/local_rules.xml.bak-$(date +%F-%H%M)
+# ...編輯 local_rules.xml...
+/var/ossec/bin/wazuh-analysisd -t ; echo "exit=$?"            # 必須是 exit=0
+systemctl restart wazuh-manager && systemctl is-active wazuh-manager
+~~~
+
+規則寫錯時 Manager 會無法啟動，17 台 Agent 全部斷線；**先 `-t` 再重啟**。`-t` 失敗時硬碟上的檔案已經是壞的，要立刻修正或還原備份，否則下次 CT 遷移、重開機就會起不來。
+
+**欄位寫法**：
+
+| 類型 | 例子 | 規則寫法 |
+| --- | --- | --- |
+| 靜態欄位（內建） | `srcuser`、`dstuser`、`srcip`、`dstip`、`url` | 專用標籤（`<srcip>`、`<user>`）或用 `<match>` 比對日誌文字 |
+| 動態欄位（解碼器解析） | `command`、`uid`、`win.eventdata.*` | `<field name="...">` |
+
+本案踩到的錯誤：以 `<field name="srcuser">` 撰寫時，`-t` 回報 `Field 'srcuser' is static.` 並 `exit=1`。
+
+### 11-4 Windows 登入／登出（60137、60106）
+
+**分析**（過去 24 小時，依帳號彙總 `data.win.eventdata.targetUserName`）：
+
+| 帳號 | 60137 Logoff | 60106 Logon Success |
+| --- | --- | --- |
+| DC01$、DC02$（含 `$@網域` 寫法） | 11,874 | 7,913 |
+| CA$、WINCLIENT$ | 1,788 | 86 |
+| Administrator | 303 | 3 |
+
+約 98% 是電腦帳號（`$` 結尾），屬 AD 複寫、Kerberos、群組原則等正常活動。人員帳號必須保留告警。
+
+**做法**：只比對**已知**的電腦帳號，不比對所有 `$` 結尾的帳號。陌生或偽造的電腦帳號登入時仍會告警（攻擊者會濫用電腦帳號）；代價是新增 Windows 主機時要把名稱加入規則。
+
+~~~xml
+<group name="local,windows,tuning,">
+  <rule id="100100" level="0">
+    <if_sid>60137</if_sid>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)^(DC01|DC02|CA|WINCLIENT)\$(@.*)?$</field>
+    <description>Windows logoff by known computer account (suppressed)</description>
+  </rule>
+  <rule id="100101" level="0">
+    <if_sid>60106</if_sid>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)^(DC01|DC02|CA|WINCLIENT)\$(@.*)?$</field>
+    <description>Windows logon success by known computer account (suppressed)</description>
+  </rule>
+</group>
+~~~
+
+| regex 片段 | 意思 |
+| --- | --- |
+| `(?i)` | 不分大小寫 |
+| `^(DC01\|DC02\|CA\|WINCLIENT)` | 開頭必須是這 4 個名稱之一 |
+| `\$` | 接著一個 `$` 字元 |
+| `(@.*)?` | 後面可接、可不接 `@網域` |
+| `$` | 到此結束 |
+
+### 11-5 PVE 節點的 sudo（5402、5501、5502）
+
+**分析**：原先推測是 ProxCenter 定期 SSH 登入，實際日誌顯示來源是 **LibreNMS 的 SNMP 監控**：
+
+~~~text
+node10 sudo: Debian-snmp : PWD=/ ; USER=root ; COMMAND=/usr/local/bin/proxmox
+node10 sudo: pam_unix(sudo:session): session opened for user root(uid=0) by (uid=109)
+~~~
+
+LibreNMS 每 5 分鐘以 SNMP 輪詢 → snmpd 的 `extend proxmox /usr/bin/sudo /usr/local/bin/proxmox` → 以 root 執行腳本讀取 PVE 資訊。每次輪詢在每台節點產生 5402（sudo）、5501（工作階段開啟）、5502（工作階段關閉）各一筆。
+
+**降級前先確認權限安全**（任一節點）：
+
+~~~bash
+grep -rn 'Debian-snmp' /etc/sudoers /etc/sudoers.d/
+ls -l /usr/local/bin/proxmox; ls -ld /usr/local/bin
+grep -n 'proxmox' /etc/snmp/snmpd.conf
+for n in node10 node11 node12; do echo -n "$n: "; ssh $n id -u Debian-snmp; done   # UID 由各節點分配，需逐台確認
+~~~
+
+| 項目 | 本案結果 | 判讀 |
+| --- | --- | --- |
+| sudoers | `Debian-snmp ALL=(ALL) NOPASSWD: /usr/local/bin/proxmox` | 只允許單一指令 ✅ |
+| 腳本／目錄 | `root root`、755 | 其他人不可寫入 ✅ |
+| Debian-snmp UID | 三台皆為 109 | 可共用同一條規則 |
+
+可再收緊（選擇性）：`(ALL)` 改為 `(root)`；指令後加 `""` 禁止帶參數（sudoers 中未寫參數代表允許任意參數）；把設定從主檔 `/etc/sudoers` 移到 `/etc/sudoers.d/` 獨立檔，避免 sudo 套件更新時被詢問是否覆蓋。修改 sudoers 一律用 `visudo` 或先 `visudo -c` 檢查。
+
+**規則**：
+
+~~~xml
+<group name="local,sudo,tuning,">
+  <rule id="100110" level="0">
+    <if_sid>5402</if_sid>
+    <match>Debian-snmp : PWD=</match>
+    <field name="command">^/usr/local/bin/proxmox$</field>
+    <description>sudo by Debian-snmp for LibreNMS proxmox extend (suppressed)</description>
+  </rule>
+  <rule id="100111" level="0">
+    <if_sid>5501</if_sid>
+    <match>pam_unix(sudo:session)</match>
+    <field name="uid">^109$</field>
+    <description>sudo session opened by Debian-snmp (suppressed)</description>
+  </rule>
+  <rule id="100112" level="0">
+    <if_sid>5502</if_sid>
+    <match>pam_unix(sudo:session)</match>
+    <description>sudo session closed (suppressed; open and command are still logged)</description>
+  </rule>
+</group>
+~~~
+
+| 規則 | 條件 | 仍會告警的情況 |
+| --- | --- | --- |
+| 100110 | Debian-snmp **且**指令完全等於該腳本 | Debian-snmp 執行其他指令 |
+| 100111 | sudo 工作階段 **且** uid 109 | 其他使用者執行 sudo |
+| 100112 | sudo 工作階段關閉（日誌中沒有執行者，無法區分） | SSH 工作階段關閉 |
+
+人員執行 sudo 時，5402（含指令）與 5501 都保留，少了關閉紀錄不影響追查。人員的 SSH 登入（5715）也不受影響。
 
 ## 風險與注意事項
 
