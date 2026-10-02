@@ -1960,6 +1960,85 @@ pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:poll 13 -m core" 2>&1
 
 待改善：Graylog 目前以 v2c 輪詢（community 明文傳送），其他設備為 v3，之後可改為 v3 一致。
 
+### 11-11 延伸：未監控的 LXC 加入 LibreNMS（SNMPv3 SHA／AES）
+
+掃描時發現 IPAM、ProxCenter、ai、wazuh 四個容器沒有 snmpd，也不在 LibreNMS。另外發現現有 9 台設備的 SNMPv3 使用 **MD5／DES**（已過時），因此新加入的主機直接改用 **SHA／AES**；帳號與密碼沿用 `snmpuser`，LibreNMS 的演算法以設備為單位設定，可以並存。
+
+**做法重點**：
+
+- SNMPv3 帳號的金鑰會依各主機的 engineID 本地化，不能複製別台的 `/var/lib/snmp/snmpd.conf`，每台要重新建立帳號。
+- 密碼直接從 LibreNMS 資料庫讀入變數（`devices.authpass`、`devices.cryptopass`），不顯示在畫面上，用完即清除。
+- 設定只有 `rouser snmpuser priv`（唯讀、必須加密），沒有 v2c community。
+- 帳號以 `createUser` 寫入 `/var/lib/snmp/snmpd.conf`，snmpd 啟動時會轉成 `usmUser` 並刪除含明文密碼的那一行；以 `createUser=0` 驗證。
+
+安裝腳本（在 LibreNMS 所在節點執行，對象為同節點的容器）：
+
+~~~bash
+cat > /root/snmp-v3-add.sh <<'ADDEOF'
+#!/bin/bash
+# Install snmpd with a read-only SNMPv3 user (SHA/AES) in a local LXC; secrets are never printed
+set -e
+CT=$1; LOC=$2
+[ -n "$CT" ] && [ -n "$LOC" ] || { echo "usage: $0 CTID Location"; exit 1; }
+umask 077
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+AP=$(pct exec 102 -- mysql -N librenms -e "select authpass from devices where device_id=13")
+PP=$(pct exec 102 -- mysql -N librenms -e "select cryptopass from devices where device_id=13")
+CONTACT=$(pct exec 102 -- grep -m1 '^syscontact' /etc/snmp/snmpd.conf)
+pct pull 102 /usr/bin/distro $T/distro
+printf 'agentAddress udp:161\nrouser snmpuser priv\nsyslocation %s\n%s\nextend distro /usr/bin/distro\n' "$LOC" "$CONTACT" > $T/snmpd.conf
+printf 'createUser snmpuser SHA "%s" AES "%s"\n' "$AP" "$PP" > $T/cu
+unset AP PP
+pct exec $CT -- bash -c "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq snmpd >/dev/null"
+pct exec $CT -- systemctl stop snmpd
+pct push $CT $T/snmpd.conf /etc/snmp/snmpd.conf --perms 600
+pct push $CT $T/distro /usr/bin/distro --perms 755
+pct push $CT $T/cu /root/.snmp-cu --perms 600
+pct exec $CT -- bash -c 'mkdir -p /var/lib/snmp && cat /root/.snmp-cu >> /var/lib/snmp/snmpd.conf && rm -f /root/.snmp-cu && chown Debian-snmp:Debian-snmp /var/lib/snmp/snmpd.conf 2>/dev/null || true'
+pct exec $CT -- systemctl enable snmpd >/dev/null 2>&1
+pct exec $CT -- systemctl restart snmpd
+sleep 2
+pct exec $CT -- bash -c 'echo "CT'"$CT"': snmpd=$(systemctl is-active snmpd) usmUser=$(grep -c ^usmUser /var/lib/snmp/snmpd.conf) createUser=$(grep -c ^createUser /var/lib/snmp/snmpd.conf) udp161=$(ss -ulnp | grep -c ":161 ")"'
+ADDEOF
+chmod 700 /root/snmp-v3-add.sh
+~~~
+
+其他節點上的容器使用同樣邏輯的 `snmp-v3-add-remote.sh NODE CTID Location`：暫存檔以 `scp` 傳到目標節點，所有 `pct` 指令改以 `ssh NODE` 執行，結束後兩邊的暫存檔都刪除。
+
+加入 LibreNMS（`lnms device:add` 的 `-a` 預設為 MD5，必須明確指定 SHA；安全等級會依有無加密密碼自動判斷為 authPriv）：
+
+~~~bash
+cat > /root/snmp-v3-lnms.sh <<'LNMSEOF'
+#!/bin/bash
+# Add a host to LibreNMS with SNMPv3 SHA/AES (secrets read from LibreNMS DB, never printed)
+set -e
+H=$1
+[ -n "$H" ] || { echo "usage: $0 hostname-or-ip"; exit 1; }
+AP=$(pct exec 102 -- mysql -N librenms -e "select authpass from devices where device_id=13")
+PP=$(pct exec 102 -- mysql -N librenms -e "select cryptopass from devices where device_id=13")
+pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:add -3 -u snmpuser -a SHA -A '$AP' -x AES -X '$PP' $H" 2>&1 | grep -v -- "$AP" | grep -v -- "$PP"
+unset AP PP
+pct exec 102 -- mysql librenms -e "select device_id, hostname, snmpver, authlevel, authalgo, cryptoalgo from devices where hostname='$H';"
+LNMSEOF
+chmod 700 /root/snmp-v3-lnms.sh
+~~~
+
+**本案結果**（每台一台一台執行並確認）：
+
+| 容器 | 所在節點 | 作業系統 | LibreNMS |
+| --- | --- | --- | --- |
+| ai（CT113） | node10 | Ubuntu 24.04 | device 18，v3／authPriv／SHA／AES |
+| ProxCenter（CT110） | node10 | Debian 13 | device 19 |
+| IPAM（CT103） | node10 | Debian 13 | device 20（先在 AdGuard 與 Pihole 補上 DNS 紀錄） |
+| wazuh（CT112） | node12 | Ubuntu 22.04 | device 21 |
+
+注意：
+
+- 加入前先確認主機名稱解析得到：`pct exec 102 -- getent hosts <主機名稱>`；兩台 DNS 伺服器都要加紀錄。
+- 安裝時的 `perl: warning: Setting locale failed` 是容器內沒有 `en_US.UTF-8` 語系，不影響功能。
+- jt-ipam 下一次同步時會自動帶入新設備，`devices_seen` 隨之增加。
+- 待改善：原有 9 台由 MD5／DES 升級為 SHA／AES；Graylog（device 17）由 v2c 改為 v3。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
