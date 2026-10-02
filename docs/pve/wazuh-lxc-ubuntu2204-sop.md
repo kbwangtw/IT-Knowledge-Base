@@ -1747,6 +1747,64 @@ rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿
 - 新增 LXC 時不需修改（100120 以路徑比對，適用所有容器）。
 - `local_rules.xml` 在 Wazuh 升級時會保留，但升級後仍要以 `-t` 確認規則可以載入。
 
+### 11-8 第二輪：BITS、VSS 登錄檔、/etc/pve 狀態檔
+
+**分析**（過去 24 小時）：
+
+| 規則 | 每天 | 原因 |
+| --- | --- | --- |
+| 61104 服務啟動類型變更 | 926 | 所有 Windows 主機的 **BITS** 在「自動啟動」與「指定啟動（手動）」之間來回切換，是 Windows Update 的正常行為 |
+| 750 登錄檔 FIM | 1,693 | VSS 每次建立陰影複製都更新 `HKLM\System\CurrentControlSet\Services\VSS\Diag` 的診斷時間戳 |
+| 550 檔案 FIM | 326 | PVE 叢集檔案系統 `/etc/pve` 的狀態檔（`.rrd`、`.version`、`.clusterlog`、`lrm_status` 等）持續變動 |
+
+**61104：子規則**。以服務名稱（`param4`，不受介面語言影響）比對；其他服務的啟動類型變更（例如 Windows Modules Installer，一天約 3 筆）仍告警。攻擊者濫用 BITS 是建立下載工作，記錄在另一個事件頻道，不受此規則影響。
+
+~~~xml
+<group name="local,windows,tuning,">
+  <rule id="100130" level="0">
+    <if_sid>61104</if_sid>
+    <field name="win.eventdata.param4" type="pcre2">(?i)^BITS$</field>
+    <description>BITS start type toggled by Windows (suppressed)</description>
+  </rule>
+</group>
+~~~
+
+事件欄位實例：`param1` = Background Intelligent Transfer Service、`param2` = 指定啟動、`param3` = 自動啟動、`param4` = BITS。
+
+**750、550：集中式 Agent 設定**。不寫降級規則，而是讓 Agent 不掃描這些路徑，同時省下掃描資源。編輯 Manager 上的 `/var/ossec/etc/shared/default/agent.conf`（預設群組，所有 Agent 都會套用；原本只有空範本）：
+
+~~~xml
+<!-- Windows: VSS updates diagnostic timestamps on every shadow copy -->
+<agent_config os="Windows">
+  <syscheck>
+    <registry_ignore arch="both">HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\VSS\Diag</registry_ignore>
+  </syscheck>
+</agent_config>
+
+<!-- Linux (PVE nodes): pmxcfs runtime state files; config files stay monitored -->
+<agent_config os="Linux">
+  <syscheck>
+    <ignore type="sregex">^/etc/pve/\.</ignore>
+    <ignore>/etc/pve/ha/manager_status</ignore>
+    <ignore>/etc/pve/ha/crm_commands</ignore>
+    <ignore type="sregex">^/etc/pve/nodes/\w+/lrm_status$</ignore>
+  </syscheck>
+</agent_config>
+~~~
+
+~~~bash
+chown root:wazuh /var/ossec/etc/shared/default/agent.conf
+chmod 660 /var/ossec/etc/shared/default/agent.conf
+/var/ossec/bin/verify-agent-conf                                  # 必須顯示 OK
+grep -c 'VSS' /var/ossec/etc/shared/default/merged.mg            # ≥ 1 代表已打包給 Agent
+~~~
+
+注意：
+
+- `registry_ignore` 預設只排除 32 位元檢視，要加 `arch="both"`。
+- `/etc/pve` 內的 VM 設定（`qemu-server/*.conf`）、`user.cfg`、`corosync.conf`、防火牆規則**仍受監控**，這些檔案被修改一定要告警，所以只排除會自行變動的狀態檔。
+- 修改 `agent.conf` **不需要重啟 Manager**；Agent 幾分鐘內自動下載新設定並自行重啟 Agent 程式（不影響主機上的服務）。
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
