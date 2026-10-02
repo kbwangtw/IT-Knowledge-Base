@@ -28,7 +28,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
-| 11 | 告警調校 | 第一輪完成 | 2026-10-02：修正 ai 容器根因（AppArmor、服務失敗歸零）；Windows 電腦帳號登入登出、LibreNMS SNMP 的 sudo、LXC rootcheck 誤報以子規則降級並驗證；剩 librenms 400、61104、FIM 待處理 |
+| 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
 
 ## 先認識四個名詞
 
@@ -1888,6 +1888,25 @@ unset C
 ~~~
 
 三個條件都符合才降級；其他來源、其他路徑、其他狀態碼（例如 401、403）仍告警。
+
+**用 wazuh-logtest 直接驗證規則**：等告警數量下降要花時間，而且查詢範圍容易混到重啟前的紀錄。直接把一行實際日誌交給 `wazuh-logtest`，可立即看到解碼欄位與最後比對到的規則：
+
+~~~bash
+# 從查詢結果取出一行原始日誌存檔（full_log），再交給 logtest
+/var/ossec/bin/wazuh-logtest < /root/vlans-line.txt 2>&1 | grep -E "id:|level:|description:|srcip|url|^\*\*Phase"
+~~~
+
+本案結果：Phase 2 解出 `id: '404'`、`srcip`、`url: '/api/v0/resources/vlans'`；Phase 3 為 `id: '100140'`、`level: '0'`，規則生效。
+
+**第二輪驗證**：61104、750、550 在套用後 30 分鐘內皆為 0；jt-ipam 同步 `devices_seen=10`，不再查詢 device 12。
+
+剩餘觀察項目：
+
+| 項目 | 說明 |
+| --- | --- |
+| `devices/17/ports` 404 | Graylog 剛重新加入 LibreNMS，連接埠探索完成前查不到，預期自行消失 |
+| 31301 PHP `ctype_digit(): Argument of type null` | LibreNMS 程式在新版 PHP 的 deprecated 警告（8192），與 `ports?columns=` 請求同時出現；待評估更新 LibreNMS 或以訊息內容降級 |
+| jt-ipam 網頁 401 | 瀏覽器開著登入已過期的 jt-ipam 頁面持續輪詢通知；401 屬認證失敗，保留告警 |
 
 ## 風險與注意事項
 
