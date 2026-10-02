@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 資訊黑手的 Knowledge Base
-last_modified_at: 2026-09-30
+last_modified_at: 2026-10-02
 ---
 
 # 資訊黑手的 IT 維運筆記
@@ -22,6 +22,7 @@ last_modified_at: 2026-09-30
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
+| [PVE HA 放置策略：PVE 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy/) | 10/2 補 DNS 互斥 HA 規則、CRS 改 Static；說明為何不能只靠 ProxCenter |
 | [ProxCenter 逐台更新：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 來源檢查、SSH 網段和 sudo 問題；完整三台驗收待補 |
 | [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新、重開、網路掛載，以及備份與還原的不同判準 |
 | [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification/) | 安裝、移除與模板驗證；PVE 已測，PBS 完整流程待測 |
