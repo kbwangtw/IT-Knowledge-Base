@@ -4,7 +4,7 @@ title: "把三台 PVE 的日誌集中到 Graylog"
 date: 2026-09-17
 categories: [PVE, Graylog, Syslog]
 permalink: /docs/pve/proxmox-graylog-syslog-pipeline-sop/
-last_modified_at: 2026-09-22
+last_modified_at: 2026-10-03
 ---
 
 # 把三台 PVE 的日誌集中到 Graylog
@@ -367,6 +367,46 @@ openssl s_client -starttls smtp -connect smtp.gmail.com:587 -crlf
 Grace Period 設為 5 分鐘，用於限制重複通知；實際連續事件下的通知行為仍待測。Message Backlog=0，所以 Summary 出現 `Notifications will not include any messages.`：信件不附帶 backlog 原始訊息，並非通知沒有綁定。
 
 按下 **Update event definition** 後，畫面顯示 `Event Definition "PVE 任務失敗警報" was updated successfully.`，確認通知綁定已儲存。這與只在下拉選單選到通知、尚未完成儲存不同。
+
+## 9. 套件更新（2026-10-03）
+
+Graylog 容器（CT105，Debian 12 bookworm）有 9 個套件待更新：6 個 Debian 安全性更新（openssl、libssl3、libexpat1、liblzma5、xz-utils、tzdata）、2 個 MongoDB 用戶端工具（mongodb-database-tools、mongodb-mongosh），以及 opensearch 2.19.5 → 2.19.6。MongoDB 伺服器與 graylog-server 不在清單中，沒有版本相容問題。
+
+**更新前**：確認三個服務 active、OpenSearch `green`，並建立快照（說明一律用英文，避免 listsnapshot 亂碼）：
+
+~~~bash
+pct exec 105 -- systemctl is-active graylog-server mongod opensearch
+pct exec 105 -- curl -s 'http://127.0.0.1:9200/_cluster/health?pretty' | grep -E '"status"|number_of_nodes'
+pct snapshot 105 pre-apt-20261003 --description "Before apt upgrade (opensearch 2.19.6, openssl)"
+~~~
+
+**更新順序**：停止 graylog-server → `apt-get upgrade`（`--force-confold` 保留現有設定檔）→ 重啟 mongod（套用新版 OpenSSL）→ 重啟 opensearch 並等到 `green` → 啟動 graylog-server，等 `/api/system/lbstatus` 回 `ALIVE`。
+
+注意事項：
+
+- **opensearch 與 graylog-server 被 `apt-mark hold` 鎖定**（Graylog 安裝說明的建議，避免 `apt upgrade` 意外升級成不相容版本），所以第一次 `apt-get upgrade` 只更新了其他 8 個套件。以 `apt-mark showhold` 確認，`apt-get -s install opensearch` 模擬確認沒有其他相依變動後，另做有控制的升級。
+- OpenSearch 剛重啟時健康狀態會短暫為 `red`（分片載入中），要用 `_cluster/health?wait_for_status=green&timeout=120s` 等待，不能只看第一次回應。
+- 停止期間 PVE 節點以 UDP 送來的 syslog 會漏收。
+
+**opensearch 有控制的升級**（先建新快照，暫時解鎖、只升級這一個套件、立即重新鎖定）：
+
+~~~bash
+pct snapshot 105 pre-opensearch-2196 --description "Before opensearch 2.19.5 to 2.19.6"
+# 容器內執行
+systemctl stop graylog-server
+apt-mark unhold opensearch
+DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install opensearch
+apt-mark hold opensearch
+systemctl restart opensearch
+curl -s 'http://127.0.0.1:9200/_cluster/health?wait_for_status=green&timeout=120s'
+curl -s http://127.0.0.1:9200 | grep '"number"'        # 執行中的版本
+systemctl start graylog-server
+curl -s http://<Graylog 位址>:9000/api/system/lbstatus  # ALIVE
+~~~
+
+**結果**：OpenSearch 2.19.6、`green`、分片 100%；Graylog `ALIVE`，啟動後沒有新的 ERROR；`apt-mark showhold` 仍為 graylog-server、opensearch；已無待更新套件。
+
+**待辦**：快照保留一兩天，確認運作正常後刪除（`pct delsnapshot 105 <名稱>`）；容器仍為 Debian 12，需規劃升級到 Debian 13。
 
 ## 目前完成與待辦
 
