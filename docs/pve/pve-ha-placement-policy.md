@@ -4,7 +4,7 @@ title: "PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？"
 date: 2026-10-02
 categories: [PVE, HA, ProxCenter]
 permalink: /docs/pve/pve-ha-placement-policy/
-last_modified_at: 2026-10-02
+last_modified_at: 2026-10-03
 ---
 
 # PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？
@@ -158,8 +158,8 @@ ProxCenter 的 Load Overview 會在叢集名稱旁顯示模式標籤（例如 AU
 | 規則 | 正本 | 副本 | 說明 |
 | --- | --- | --- | --- |
 | DNS 互斥 | **PVE HA rules** | ProxCenter | HA 資源，維護與故障時由 PVE 搬 |
-| DC 互斥 | **ProxCenter** | — | DC 不是 HA 資源，PVE 不會搬 |
-| VGA 固定 node11 | **ProxCenter** | — | 顯示卡直通的 VM 本來就無法遷移 |
+| DC 互斥 | **PVE HA rules**（2026-10-03 起） | ProxCenter | DC01、DC02 已加入 HA，維護與故障時由 PVE 搬（見第 5 節） |
+| VGA 固定 node11 | **ProxCenter** | — | 顯示卡直通的 VM 本來就無法遷移，**不可加入 HA** |
 
 DRS 關閉時，ProxCenter 的規則不會自動執行；但逐台更新搬移非 HA VM、手動遷移等功能是否會參考這些規則尚未確認。規則開著沒有副作用，本案三條規則維持 **Active**。
 
@@ -167,7 +167,9 @@ DRS 關閉時，ProxCenter 的規則不會自動執行；但逐台更新搬移�
 
 ### DC 的提醒
 
-ProxCenter DRS 關閉、DC 又不是 HA 資源，所以 **目前沒有機制會自動檢查 DC 互斥**：
+> 2026-10-03 起 DC01、DC02 已加入 HA 並建立 PVE 互斥規則，以下為加入前的狀況，保留作為紀錄。
+
+ProxCenter DRS 關閉、DC 又不是 HA 資源，所以 **當時沒有機制會自動檢查 DC 互斥**：
 
 - 手動遷移 DC 時，自己確認不要搬到另一台 DC 所在的節點。
 - 每更新完一台節點，檢查兩台 DC 是否被搬到一起：
@@ -214,14 +216,75 @@ qm migrate 107 node11 --online       # 在 VM 目前所在的節點執行
 
 調整後各節點台數由 9／2／3 變為 7／3／4（node10／node11／node12）。
 
+## 5. 逐台更新結果與 DC 加入 HA（2026-10-03）
+
+三台以 ProxCenter Rolling Update 一次一台更新為 pve-manager 9.2.21、kernel 7.0.14-20（順序 node11 → node12 → node10；ProxCenter 所在的 node11 先更新，之後更新其他節點時 ProxCenter 不會中斷）。
+
+**更新前後的檢查腳本**（唯讀，每台更新後執行一次）：
+
+~~~bash
+cat > /root/cluster-check.sh <<'CKEOF'
+#!/bin/bash
+loc() { pvesh get /cluster/resources --type vm --output-format json | python3 -c "import json,sys; print({r['vmid']:r['node'] for r in json.load(sys.stdin)}.get($1,'?'))"; }
+echo "===== Ceph"; ceph health; ceph osd stat; ceph osd dump | grep -E '^flags' | grep -o 'noout' || echo "noout: not set"
+ceph -s | grep -E 'pgs:'
+echo "===== Versions"; for n in node10 node11 node12; do echo "$n: $(ssh $n "pveversion | cut -d' ' -f1; uname -r" | tr '\n' ' ')"; done
+echo "===== HA"; ha-manager status | grep -E 'lrm|service' | grep -vE 'started\)$|active,' || echo "all services started, all lrm active"
+echo "===== Placement"
+pvesh get /cluster/resources --type vm --output-format json | python3 -c "
+import json,sys,collections
+c=collections.defaultdict(list)
+for r in json.load(sys.stdin): c[r['node']].append(f\"{r.get('name','')}({r['status'][0]})\")
+for n in sorted(c): print(n, len(c[n]), ' '.join(sorted(c[n])))"
+a=$(loc 100); p=$(loc 101); d1=$(loc 106); d2=$(loc 107)
+echo "DNS: AdGuard=$a Pihole=$p $([ "$a" != "$p" ] && echo OK-separate || echo '!!! SAME NODE')"
+echo "DC : DC01=$d1 DC02=$d2 $([ "$d1" != "$d2" ] && echo OK-separate || echo '!!! SAME NODE')"
+echo "===== Wazuh agents"; w=$(loc 112); echo "active=$(ssh $w "pct exec 112 -- /var/ossec/bin/agent_control -l" | grep -c Active) (17 agents + manager = 18)"
+echo "===== LibreNMS down devices"; l=$(loc 102); ssh $l "pct exec 102 -- mysql -N librenms -e \"select hostname from devices where status=0\"" | tr '\n' ' '; echo "(end)"
+CKEOF
+chmod 700 /root/cluster-check.sh
+~~~
+
+**結果**：Ceph `HEALTH_OK`、`noout` 已解除、PG 全部 active+clean；HA 全部 started；Wazuh 18（17 Agent + Manager）、LibreNMS 無斷線設備。
+
+**發現**：
+
+| 現象 | 原因／處理 |
+| --- | --- |
+| 更新過程中 DC01、DC02 一度在同一台節點 | 更新時把 DC 手動加入 HA，但當時尚無 DC 互斥規則，維護模式由 PVE 依負載選擇目的地；之後建立 PVE 規則 |
+| 更新後服務集中在 node10（8／4／2） | 維護結束後服務沒有全部回到原節點；以 `ha-manager migrate` 與 `qm migrate --online` 移回，恢復 6／4／4 |
+| VM 加入 HA 後 `qm migrate` 顯示 `Requesting HA migration` | HA 資源的遷移會交給 HA 執行，VM 仍為 live migration |
+
+**目前 HA 資源**：9 個 LXC（100、101、102、103、105、109、110、112、113）與 VM 106（DC01）、107（DC02）、111（CA）。WinClient（108）有 `hostpci0` 顯示卡直通、UBClient（104）同屬 VGA 固定規則，**不加入 HA**（其他節點沒有對應硬體，維護時遷移會失敗）。
+
+**PVE HA 規則**（`/etc/pve/ha/rules.cfg`）：
+
+~~~text
+resource-affinity: <自動產生的名稱>
+        comment AdGuard and Pi-hole must run on different nodes
+        affinity negative
+        resources ct:100,ct:101
+
+resource-affinity: <自動產生的名稱>
+        comment DC01 and DC02 must run on different nodes
+        affinity negative
+        resources vm:106,vm:107
+~~~
+
+VM 加入 HA 後的注意事項：
+
+- 關機要用 HA 操作（`ha-manager set vm:106 --state stopped` 或網頁的 HA 選項），直接在客體內關機，HA 會把它重新開起來。
+- 遷移一律由 HA 執行；互斥規則會讓 HA 拒絕把兩台 DC 放在同一台節點。
+
 ## 待驗證與後續
 
 | 項目 | 狀態 |
 | --- | --- |
-| 用 ProxCenter 完整逐台更新三台，每台確認 DNS／DC 位置 | 待下次更新 |
-| ProxCenter 搬移非 HA VM 時是否遵守 Affinity rules | 未確認 |
+| 用 ProxCenter 完整逐台更新三台，每台確認 DNS／DC 位置 | **完成（2026-10-03）**，見第 5 節 |
+| ProxCenter 搬移非 HA VM 時是否遵守 Affinity rules | 已改為 DC 加入 HA、由 PVE 規則保證，不再依賴 |
+| 下次逐台更新時，確認 DC 規則全程有效、HA 資源維護後是否自動搬回原節點 | 待下次更新 |
 | 單節點故障演練（實測 Ceph I/O latency 與 HA 恢復時間） | 未演練 |
-| node10 承載大部分服務，需分散 | 進行中：Wazuh 移至 node12、DC02 移回 node11，台數 7／3／4 |
+| node10 承載大部分服務，需分散 | 完成：更新後恢復為 6／4／4 |
 | Dynamic Load 與 Automatic Rebalance 的實際行為 | 未查證 |
 
 單節點故障的預期行為（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，且在節點回來前沒有再壞一顆硬碟的餘裕。
