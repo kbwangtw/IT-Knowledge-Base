@@ -29,6 +29,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
 | 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
+| 12 | 弱點偵測與修補 | 進行中 | 2026-10-03：查詢目前弱點並判讀；8 個容器套件更新完成，Windows 與 ubclient 待更新後重新查詢 |
 
 ## 先認識四個名詞
 
@@ -2151,6 +2152,73 @@ pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo
 pct exec <CTID> -- bash -c 'for f in /etc/snmp/snmpd.conf /var/lib/snmp/snmpd.conf; do cp -a $(ls -t $f.bak-v3upg-* | head -1) $f; done; systemctl restart snmpd'
 pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='MD5', cryptoalgo='DES' WHERE device_id=<ID>;"
 ~~~
+
+## 12. 弱點偵測結果與修補（2026-10-03）
+
+### 12-1 查詢目前的弱點
+
+Wazuh 的弱點偵測把**目前仍存在**的弱點存在 `wazuh-states-vulnerabilities-*` 索引（不是歷史告警）。Agent 每小時回報一次套件清單，套件更新後約 1 小時內會反映。在 CT 112 內：
+
+~~~bash
+cat > /root/vuln.json <<'JSONEOF'
+{
+  "size": 0,
+  "aggs": {
+    "sev": { "terms": { "field": "vulnerability.severity", "size": 10 } },
+    "agents": { "terms": { "field": "agent.name", "size": 30 },
+      "aggs": { "sev": { "terms": { "field": "vulnerability.severity", "size": 10 } } } },
+    "crit_high": { "filter": { "terms": { "vulnerability.severity": ["Critical", "High"] } },
+      "aggs": { "pkg": { "terms": { "field": "package.name", "size": 25 },
+        "aggs": {
+          "cves":   { "cardinality": { "field": "vulnerability.id" } },
+          "score":  { "max": { "field": "vulnerability.score.base" } },
+          "agents": { "terms": { "field": "agent.name", "size": 20 } } } } } }
+  }
+}
+JSONEOF
+curl -sk -u admin 'https://127.0.0.1:9200/wazuh-states-vulnerabilities-*/_search' \
+  -H 'Content-Type: application/json' -d @/root/vuln.json > /root/vuln.out
+~~~
+
+再以 Python 整理為三段：嚴重度總計、各主機 Critical／High／Medium／Low、Critical／High 最多的套件（CVE 數、最高分、出現主機）。`hits.total` 顯示 10000 是計數上限。
+
+### 12-2 判讀（更新前）
+
+| 主機 | Critical／High | 主要來源 | 實際風險 |
+| --- | --- | --- | --- |
+| ubclient | 486／2,766 | 兩個 Ubuntu kernel 套件（舊版未移除），各 1,619 個 CVE | 中；kernel 套件比對也容易誤判 |
+| wireguard | 304／1,357 | `linux-image-rt-amd64`（1,503 個 CVE） | LXC 使用主機 kernel，容器內的 kernel 套件從未執行，實際風險近乎零；但主機對外開放 VPN |
+| DC01、DC02、CA | 各 34／638 | Windows Server（671 個 CVE），缺 Windows Update | **高** |
+| ai | 40／340 | ffmpeg 系列函式庫 | 中 |
+| 其他 Debian 容器與節點 | 0～20／37～162 | vim、perl、bind9 工具、libxml2、libssh2、rsync | 低～中；剛更新的節點仍列出者多為上游尚無修補 |
+
+判讀原則：舊版 kernel 只要有安裝就會被列出；Debian 常把修補移植回舊版本，版本號看似未變；rsync 的高風險漏洞主要影響 rsync daemon（各容器 873 埠皆未監聽）。
+
+### 12-3 容器套件更新
+
+先唯讀掃描各容器的待更新數、容器內 kernel 套件與 rsync daemon：
+
+~~~bash
+probe='apt-get update -qq >/dev/null 2>&1; echo "upg=$(apt list --upgradable 2>/dev/null | grep -c upgradable) sec=$(apt list --upgradable 2>/dev/null | grep -c -- -security) kernel_pkgs=$(dpkg -l "linux-image*" 2>/dev/null | grep -c ^ii) rsyncd=$(ss -tlnp 2>/dev/null | grep -c ":873 ")"'
+for id in $(pct list | awk 'NR>1 && $2=="running"{print $1}'); do
+  echo "CT$id: $(pct exec $id -- bash -c "$probe" 2>/dev/null)"
+done
+~~~
+
+每台的處理（`ct-upgrade.sh NODE CTID [purge-kernel]`，在 node10 執行）：建立快照 `pre-apt-20261003` →（wireguard）移除 `linux-image-*` → `apt-get upgrade --with-new-pkgs`（`--force-confold` 保留設定檔）→ `autoremove` → 從容器內 `reboot` → 等待 `systemctl is-system-running` 為 running／degraded，列出失敗的服務。先以影響最小的容器試做，其餘以迴圈執行，任一台不是 `running` 即停止。兩台 DNS（AdGuard、Pihole）分開執行。
+
+| 容器 | 更新數 | 結果 |
+| --- | --- | --- |
+| IPAM | 13 | degraded → `openipmi.service` 失敗（容器沒有 IPMI 硬體）。由 `ipmitool` 依賴、隨 jt-ipam 安裝；以 `systemctl mask --now openipmi.service` 停用後為 running（遠端 BMC 查詢不需要本機服務） |
+| ProxCenter | 8 | running |
+| librenms | 77 | running |
+| ai | 57 | running；剩 7 個 mesa 套件為 Ubuntu 分階段更新（`deferred due to phasing`），之後自動開放 |
+| wireguard | 75 | running；容器內 kernel 套件已移除 |
+| AdGuard | 44 | running |
+| Pihole | 41 | running |
+| Graylog、wazuh | 0 | 已是最新 |
+
+DC01、DC02、CA 的 Windows Update 由管理者手動執行（順序 DC02 → DC01 → CA，一次一台；DC 已加入 HA，一律選「更新並重新啟動」，不要選「更新並關機」）。
 
 ## 風險與注意事項
 
