@@ -2218,6 +2218,12 @@ done
 | Pihole | 41 | running |
 | Graylog、wazuh | 0 | 已是最新 |
 
+觀察一天服務皆正常後，已刪除各容器的 `pre-apt-20261003` 快照（2026-10-04），避免持續佔用 Ceph 空間：
+
+~~~bash
+for n in node10 node11 node12; do ssh $n 'for id in $(pct list | awk "NR>1{print \$1}"); do pct listsnapshot $id 2>/dev/null | grep -q pre-apt-20261003 && pct delsnapshot $id pre-apt-20261003 && echo "deleted CT$id"; done'; done
+~~~
+
 DC01、DC02、CA 的 Windows Update 由管理者手動執行（順序 DC02 → DC01 → CA，一次一台；DC 已加入 HA，一律選「更新並重新啟動」，不要選「更新並關機」）。
 
 ## 風險與注意事項

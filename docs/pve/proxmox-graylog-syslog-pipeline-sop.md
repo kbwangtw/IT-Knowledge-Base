@@ -406,7 +406,9 @@ curl -s http://<Graylog 位址>:9000/api/system/lbstatus  # ALIVE
 
 **結果**：OpenSearch 2.19.6、`green`、分片 100%；Graylog `ALIVE`，啟動後沒有新的 ERROR；`apt-mark showhold` 仍為 graylog-server、opensearch；已無待更新套件。
 
-**待辦**：快照保留一兩天，確認運作正常後刪除（`pct delsnapshot 105 <名稱>`）；容器仍為 Debian 12，需規劃升級到 Debian 13。
+確認運作正常後已刪除兩個快照（`pct delsnapshot 105 <名稱>`，2026-10-04）。
+
+**待辦**：容器仍為 Debian 12，需規劃升級到 Debian 13。
 
 ## 目前完成與待辦
 
