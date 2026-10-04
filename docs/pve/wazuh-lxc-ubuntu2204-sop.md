@@ -2233,6 +2233,7 @@ DC01、DC02、CA 的 Windows Update 由管理者手動執行（順序 DC02 → D
 - 資料量成長很快，需規劃 Index 保留天數（Index State Management），並監控 rootfs 用量。
 - Indexer 對儲存 I/O 敏感；放在 Ceph 上時，觀察 Ceph 延遲是否因此上升。
 - PVE 節點裝上 Agent 後告警量會明顯增加（`/etc/pve` 變更、套件異動、CIS 設定稽核），先觀察再調校，不要一次關閉大量規則。
+- 容器作業系統為 Ubuntu 22.04.5 LTS（jammy，2026-10-04 確認；LXC 共用主機 kernel，`uname -r` 顯示的是 PVE 的 kernel）。標準支援到 2027 年 4 月，2027 年初規劃升級到 24.04（Wazuh 4.14 支援）；升級前先做快照與 PBS 備份，All-in-one 架構升級期間 Indexer、Manager、Dashboard 會一起中斷。
 - 文中 IP 皆為文件示範位址（192.0.2.0/24），指令執行前請替換。
 
 ## 參考資料
