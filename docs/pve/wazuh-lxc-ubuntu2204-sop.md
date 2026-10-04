@@ -926,7 +926,7 @@ rm -rf /var/ossec
 
 ### 9-6 Debian 13 LXC 容器：從 PVE 節點推送安裝
 
-本案 Debian 13 的服務都跑在 LXC 容器裡（AdGuard、Graylog、ipam、LibreNMS、Pi-hole、ProxCenter、WireGuard）。做法是在 PVE 節點把 .deb 推進容器、用 `pct exec` 安裝：
+本案 Debian 的服務都跑在 LXC 容器裡（AdGuard、Graylog、ipam、LibreNMS、Pi-hole、ProxCenter、WireGuard；其中 Graylog 為 Debian 12，其餘為 Debian 13，安裝方式相同）。做法是在 PVE 節點把 .deb 推進容器、用 `pct exec` 安裝：
 
 - 容器內不需要 wget／curl，也不必能連到 packages.wazuh.com。
 - 所有指令都在節點上執行，容易逐台複製。
@@ -1161,7 +1161,7 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 | 類型 | ID | 名稱 | 安裝方式 |
 | --- | --- | --- | --- |
 | PVE 節點 | 001～003 | node11、node10、node12 | 節點上下載 .deb，`dpkg -i` |
-| Debian 13 容器 | 004～010 | ipam、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
+| Debian 13／12 容器 | 004～010 | ipam、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
 | Ubuntu VM | 011 | ubclient | SSH 登入，`sudo 變數=值 dpkg -i` |
 | Windows VM | 012 | WinClient | PowerShell，MSI + `WAZUH_MANAGER` |
 | Windows 網域控制站 | 014～015 | DC02、DC01 | 同 Windows VM；裝前快照、AD 健康基準，裝後比對（9-9） |
@@ -2218,6 +2218,12 @@ done
 | Pihole | 41 | running |
 | Graylog、wazuh | 0 | 已是最新 |
 
+觀察一天服務皆正常後，已刪除各容器的 `pre-apt-20261003` 快照（2026-10-04），避免持續佔用 Ceph 空間：
+
+~~~bash
+for n in node10 node11 node12; do ssh $n 'for id in $(pct list | awk "NR>1{print \$1}"); do pct listsnapshot $id 2>/dev/null | grep -q pre-apt-20261003 && pct delsnapshot $id pre-apt-20261003 && echo "deleted CT$id"; done'; done
+~~~
+
 DC01、DC02、CA 的 Windows Update 由管理者手動執行（順序 DC02 → DC01 → CA，一次一台；DC 已加入 HA，一律選「更新並重新啟動」，不要選「更新並關機」）。
 
 ## 風險與注意事項
@@ -2227,6 +2233,7 @@ DC01、DC02、CA 的 Windows Update 由管理者手動執行（順序 DC02 → D
 - 資料量成長很快，需規劃 Index 保留天數（Index State Management），並監控 rootfs 用量。
 - Indexer 對儲存 I/O 敏感；放在 Ceph 上時，觀察 Ceph 延遲是否因此上升。
 - PVE 節點裝上 Agent 後告警量會明顯增加（`/etc/pve` 變更、套件異動、CIS 設定稽核），先觀察再調校，不要一次關閉大量規則。
+- 容器作業系統為 Ubuntu 22.04.5 LTS（jammy，2026-10-04 確認；LXC 共用主機 kernel，`uname -r` 顯示的是 PVE 的 kernel）。標準支援到 2027 年 4 月，2027 年初規劃升級到 24.04（Wazuh 4.14 支援）；升級前先做快照與 PBS 備份，All-in-one 架構升級期間 Indexer、Manager、Dashboard 會一起中斷。
 - 文中 IP 皆為文件示範位址（192.0.2.0/24），指令執行前請替換。
 
 ## 參考資料
