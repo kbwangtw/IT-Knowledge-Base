@@ -413,11 +413,11 @@ curl -s http://<Graylog 位址>:9000/api/system/lbstatus  # ALIVE
 | 項目 | 查證結果 |
 | --- | --- |
 | Graylog 官方支援 | 官方相容性表列出 Debian 12（依搜尋結果摘要，官方文件網站本環境無法直接開啟）；GitHub issue「Support for Debian/trixie v13」（Graylog2/graylog2-server #23512，2025-08-30 提出）仍為 Open，沒有官方回覆或時程 |
-| MongoDB | 套件庫依 Debian 版本分開發布，目前使用 `bookworm/mongodb-org/8.0`。網路上的安裝文章多以 bookworm 套件庫裝在 Debian 13 上，但不是官方支援方式；以容器實測 `repo.mongodb.org/apt/debian/dists/trixie/` 是否存在為準 |
+| MongoDB | 套件庫依 Debian 版本分開發布，目前使用 `bookworm/mongodb-org/8.0`。2026-10-04 自容器實測 `repo.mongodb.org/apt/debian/dists/trixie/mongodb-org/8.0` 與 `8.2` 的 Release 檔皆回 **200**，官方套件庫已提供 trixie 版本 |
 | Graylog、OpenSearch 套件 | 內建 Java、不分 Debian 版本，影響較小 |
 | 急迫性 | Debian 12 仍在長期支援期間，持續收到 `oldstable-security` 更新 |
 
-結論：維持 Debian 12，持續套用安全性更新。**符合以下條件再升級**：Graylog 官方相容性表列入 Debian 13，且 MongoDB 提供 trixie 套件庫；或 Debian 12 長期支援即將結束。
+結論：維持 Debian 12，持續套用安全性更新。MongoDB 的條件已具備，**剩下的條件**：Graylog 官方相容性表列入 Debian 13（或 #23512 有官方回覆）；若 Debian 12 長期支援即將結束而 Graylog 仍未支援，改以新建容器重新安裝、再搬移資料的方式進行。升級時 MongoDB 套件來源要一併由 `bookworm` 改為 `trixie`。
 
 確認 MongoDB 套件庫（在 PVE 節點執行，200 代表已提供）：
 
