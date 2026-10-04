@@ -4,7 +4,7 @@ title: "把三台 PVE 的日誌集中到 Graylog"
 date: 2026-09-17
 categories: [PVE, Graylog, Syslog]
 permalink: /docs/pve/proxmox-graylog-syslog-pipeline-sop/
-last_modified_at: 2026-10-03
+last_modified_at: 2026-10-04
 ---
 
 # 把三台 PVE 的日誌集中到 Graylog
@@ -408,7 +408,24 @@ curl -s http://<Graylog 位址>:9000/api/system/lbstatus  # ALIVE
 
 確認運作正常後已刪除兩個快照（`pct delsnapshot 105 <名稱>`，2026-10-04）。
 
-**待辦**：容器仍為 Debian 12，需規劃升級到 Debian 13。
+**Debian 13 升級：暫緩（2026-10-04 查證）**
+
+| 項目 | 查證結果 |
+| --- | --- |
+| Graylog 官方支援 | 官方相容性表列出 Debian 12（依搜尋結果摘要，官方文件網站本環境無法直接開啟）；GitHub issue「Support for Debian/trixie v13」（Graylog2/graylog2-server #23512，2025-08-30 提出）仍為 Open，沒有官方回覆或時程 |
+| MongoDB | 套件庫依 Debian 版本分開發布，目前使用 `bookworm/mongodb-org/8.0`。網路上的安裝文章多以 bookworm 套件庫裝在 Debian 13 上，但不是官方支援方式；以容器實測 `repo.mongodb.org/apt/debian/dists/trixie/` 是否存在為準 |
+| Graylog、OpenSearch 套件 | 內建 Java、不分 Debian 版本，影響較小 |
+| 急迫性 | Debian 12 仍在長期支援期間，持續收到 `oldstable-security` 更新 |
+
+結論：維持 Debian 12，持續套用安全性更新。**符合以下條件再升級**：Graylog 官方相容性表列入 Debian 13，且 MongoDB 提供 trixie 套件庫；或 Debian 12 長期支援即將結束。
+
+確認 MongoDB 套件庫（在 PVE 節點執行，200 代表已提供）：
+
+~~~bash
+for v in 8.0 8.2; do echo -n "mongodb $v trixie: "; pct exec 105 -- curl -s -o /dev/null -w '%{http_code}\n' https://repo.mongodb.org/apt/debian/dists/trixie/mongodb-org/$v/Release; done
+~~~
+
+參考：[Graylog Compatibility Matrix](https://go2docs.graylog.org/current/downloading_and_installing_graylog/compatibility_matrix.htm)、[Graylog2/graylog2-server#23512](https://github.com/Graylog2/graylog2-server/issues/23512)。
 
 ## 目前完成與待辦
 

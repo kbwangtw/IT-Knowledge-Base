@@ -926,7 +926,7 @@ rm -rf /var/ossec
 
 ### 9-6 Debian 13 LXC 容器：從 PVE 節點推送安裝
 
-本案 Debian 13 的服務都跑在 LXC 容器裡（AdGuard、Graylog、ipam、LibreNMS、Pi-hole、ProxCenter、WireGuard）。做法是在 PVE 節點把 .deb 推進容器、用 `pct exec` 安裝：
+本案 Debian 的服務都跑在 LXC 容器裡（AdGuard、Graylog、ipam、LibreNMS、Pi-hole、ProxCenter、WireGuard；其中 Graylog 為 Debian 12，其餘為 Debian 13，安裝方式相同）。做法是在 PVE 節點把 .deb 推進容器、用 `pct exec` 安裝：
 
 - 容器內不需要 wget／curl，也不必能連到 packages.wazuh.com。
 - 所有指令都在節點上執行，容易逐台複製。
@@ -1161,7 +1161,7 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 | 類型 | ID | 名稱 | 安裝方式 |
 | --- | --- | --- | --- |
 | PVE 節點 | 001～003 | node11、node10、node12 | 節點上下載 .deb，`dpkg -i` |
-| Debian 13 容器 | 004～010 | ipam、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
+| Debian 13／12 容器 | 004～010 | ipam、librenms、Graylog、ProxCenter、AdGuard、Pihole、wireguard | 節點上 `pct push` + `pct exec` |
 | Ubuntu VM | 011 | ubclient | SSH 登入，`sudo 變數=值 dpkg -i` |
 | Windows VM | 012 | WinClient | PowerShell，MSI + `WAZUH_MANAGER` |
 | Windows 網域控制站 | 014～015 | DC02、DC01 | 同 Windows VM；裝前快照、AD 健康基準，裝後比對（9-9） |
