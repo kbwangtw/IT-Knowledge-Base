@@ -2278,7 +2278,26 @@ ffmpeg 的漏洞需要處理惡意影音檔才會觸發，對 Hermes 而言來�
 | `~/.hermes/pairing/telegram-approved.json` | 1 筆（配對核准的使用者） |
 | `~/.hermes/pairing/telegram-pending.json` | 1 筆，自 6 月起等待核准 |
 
-結論：Bot 以配對核准與 `allowed_chats` 限制存取，只有核准過的帳號能傳檔案進來，風險低。等待核准的那一筆若不是自己的帳號，應清除。Ubuntu 發布 ffmpeg 修補後隨一般更新套用。
+結論：Bot 以配對核准與 `allowed_chats` 限制存取，只有核准過的帳號能傳檔案進來，風險低。等待核准的那一筆若不是自己的帳號，應清除。
+
+本案等待核准的那一筆經確認**不是管理者認識的帳號**（代表有陌生人找到 Bot 並嘗試配對），已備份後清除：
+
+~~~bash
+pct exec 113 -- python3 -m json.tool /root/.hermes/pairing/telegram-pending.json      # 管理者自行查看，不外傳
+pct exec 113 -- bash -c "cp -a /root/.hermes/pairing/telegram-pending.json /root/.hermes/pairing/telegram-pending.json.bak && echo '{}' > /root/.hermes/pairing/telegram-pending.json"
+~~~
+
+**啟用白名單**（2026-10-05）：`.env` 中原本已有被註解的 `TELEGRAM_ALLOWED_USERS`。先確認該行的數字 ID 與 `telegram-approved.json` 中的帳號相同（否則啟用後連自己都會被擋），再備份並取消註解：
+
+~~~bash
+pct exec 113 -- sed -n '289p' /root/.hermes/.env                         # 自行比對，不外傳
+pct exec 113 -- python3 -m json.tool /root/.hermes/pairing/telegram-approved.json
+pct exec 113 -- cp -a /root/.hermes/.env /root/.hermes/.env.bak-$(date +%F-%H%M)
+pct exec 113 -- sed -i '289s/^#[[:space:]]*//' /root/.hermes/.env
+pct exec 113 -- systemctl restart hermes-gateway
+~~~
+
+結果：`hermes-gateway` active，管理者帳號傳訊息 Bot 正常回應。之後不在白名單內的帳號傳訊息，Bot 不回應、也無法送出配對申請。還原方式：把最新的 `.env.bak-*` 複製回 `.env` 後重啟服務。Ubuntu 發布 ffmpeg 修補後隨一般更新套用。
 
 ## 風險與注意事項
 
