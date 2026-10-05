@@ -29,7 +29,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
 | 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
-| 12 | 弱點偵測與修補 | 進行中 | 2026-10-03：查詢目前弱點並判讀；8 個容器套件更新完成，Windows 與 ubclient 待更新後重新查詢 |
+| 12 | 弱點偵測與修補 | 大部分完成 | 2026-10-05：容器、Windows、ubclient 更新後 Critical 998 → 536、High 7,132 → 3,587；剩 ubclient kernel、ai ffmpeg、ipam pnpm 與上游未修補項目 |
 
 ## 先認識四個名詞
 
@@ -2225,6 +2225,25 @@ for n in node10 node11 node12; do ssh $n 'for id in $(pct list | awk "NR>1{print
 ~~~
 
 DC01、DC02、CA 的 Windows Update 由管理者手動執行（順序 DC02 → DC01 → CA，一次一台；DC 已加入 HA，一律選「更新並重新啟動」，不要選「更新並關機」）。
+
+### 12-4 更新後重新查詢（2026-10-05）
+
+DC02 → DC01 → CA 的 Windows Update 與 ubclient 更新由管理者完成後重新查詢（查詢加上 `"track_total_hits": true` 取得實際總數）。
+
+| 主機 | 更新前 Critical／High | 更新後 Critical／High | 說明 |
+| --- | --- | --- | --- |
+| DC01、DC02、CA | 各 34／638 | 各 **0／1** | Windows Update 完成 |
+| wireguard | 304／1,357 | **0／38** | 移除容器內 kernel 套件並更新 |
+| AdGuard | 18／103 | 0／38 | |
+| Pihole | 16／101 | 0／37 | |
+| librenms | 20／162 | 1／42 | |
+| ipam | 0／85 | 0／64 | 剩 pnpm（13 個 CVE） |
+| ai | 40／340 | 37／295 | 剩 ffmpeg 系列（Ubuntu universe，尚無修補） |
+| Graylog | 12／114 | 12／114 | 已無待更新套件，剩餘為 Debian 12 尚未修補者 |
+| ubclient | 486／2,766 | 486／2,766 | 兩個 Ubuntu kernel 套件仍在清單中，待確認 |
+| 節點、pbs31、ProxCenter | 0／37～38 | 0／37～38 | 主要為 vim、libxml2，Debian 尚未發布修補 |
+
+全部合計：Critical 998 → **536**、High 7,132 → **3,587**，總筆數 9,192。Windows 主機與對外開放的 wireguard 已接近清零；剩下的 Critical 幾乎都在 ubclient 的 kernel 套件與 ai 的 ffmpeg。
 
 ## 風險與注意事項
 
