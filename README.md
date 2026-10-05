@@ -6,6 +6,7 @@
 
 ## 全部文章
 
+- [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05.md)（磁碟、Ops Agent IAM、過期憑證、防火牆；部分項目待確認）
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy.md)
 - [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop.md)（主要流程已實測，17 台 Agent 上線）
 - [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22.md)

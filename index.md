@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 資訊黑手的 Knowledge Base
-last_modified_at: 2026-10-02
+last_modified_at: 2026-10-05
 ---
 
 # 資訊黑手的 IT 維運筆記
@@ -45,6 +45,12 @@ last_modified_at: 2026-10-02
 | [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 9/22 Group by source、Task Failed 修正、三項告警完整驗證 |
 | [PVE 一直被嘗試登入：確認 Fail2Ban 真的有擋](docs/pve/pve-cluster-fail2ban-hardening/) | 逐層核對日誌、封鎖時間與封包命中 |
 | [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop/) | 9/30 主要流程已實測：LXC 規劃、All-in-one 安裝、密碼與 API 收斂、PBS 備份還原、HA、17 台 Agent（PVE 節點、PBS、Linux 容器、Ubuntu／Windows VM、AD 與 CA）|
+
+## 雲端主機（GCP）
+
+| 文章 | 適合什麼時候看 |
+| --- | --- |
+| [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05/) | 10/5 PHP 警告灌爆 log、Ops Agent 403、主機憑證過期、防火牆收斂；部分項目待確認 |
 
 ## 硬體擴充與安裝
 
