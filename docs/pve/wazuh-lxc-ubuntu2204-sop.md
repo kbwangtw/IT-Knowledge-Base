@@ -2243,6 +2243,17 @@ DC02 → DC01 → CA 的 Windows Update 與 ubclient 更新由管理者完成後
 | ubclient | 486／2,766 | 486／2,766 | 兩個 Ubuntu kernel 套件仍在清單中，待確認 |
 | 節點、pbs31、ProxCenter | 0／37～38 | 0／37～38 | 主要為 vim、libxml2，Debian 尚未發布修補 |
 
+**ubclient 的 kernel**：目前使用 `7.0.0-38-generic`；`-31` 是 `autoremove` 刻意保留的備用版本（保留目前與前一版）。使用中的 `-38` 被列出的大量 CVE 多為誤判（Wazuh 以上游 kernel 的 CVE 比對，Ubuntu 會自行移植修補、版本號看不出來）。移除舊版（不需重開機）：
+
+~~~bash
+dpkg -l | grep 7.0.0-31 | awk '{print $2}'                      # 先確認清單只有 -31
+sudo apt purge -y $(dpkg -l | grep 7.0.0-31 | awk '{print $2}')
+dpkg -l | grep -c 7.0.0-31                                      # 0
+sudo systemctl restart wazuh-agent                              # 立即重新回報套件清單
+~~~
+
+移除後只剩一個 kernel，下次 kernel 更新時 `-38` 會成為新的備用版本。`linux-image-generic-hwe-24.04` 中繼套件要保留。dpkg 提示 `/lib/modules/7.0.0-31-generic` 不是空的，是 DKMS 等產生的殘留檔案，確認不是使用中的 kernel 後可手動刪除。
+
 全部合計：Critical 998 → **536**、High 7,132 → **3,587**，總筆數 9,192。Windows 主機與對外開放的 wireguard 已接近清零；剩下的 Critical 幾乎都在 ubclient 的 kernel 套件與 ai 的 ffmpeg。
 
 ## 風險與注意事項
