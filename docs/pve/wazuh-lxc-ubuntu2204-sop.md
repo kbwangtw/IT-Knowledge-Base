@@ -2278,7 +2278,16 @@ ffmpeg 的漏洞需要處理惡意影音檔才會觸發，對 Hermes 而言來�
 | `~/.hermes/pairing/telegram-approved.json` | 1 筆（配對核准的使用者） |
 | `~/.hermes/pairing/telegram-pending.json` | 1 筆，自 6 月起等待核准 |
 
-結論：Bot 以配對核准與 `allowed_chats` 限制存取，只有核准過的帳號能傳檔案進來，風險低。等待核准的那一筆若不是自己的帳號，應清除。Ubuntu 發布 ffmpeg 修補後隨一般更新套用。
+結論：Bot 以配對核准與 `allowed_chats` 限制存取，只有核准過的帳號能傳檔案進來，風險低。等待核准的那一筆若不是自己的帳號，應清除。
+
+本案等待核准的那一筆經確認**不是管理者認識的帳號**（代表有陌生人找到 Bot 並嘗試配對），已備份後清除：
+
+~~~bash
+pct exec 113 -- python3 -m json.tool /root/.hermes/pairing/telegram-pending.json      # 管理者自行查看，不外傳
+pct exec 113 -- bash -c "cp -a /root/.hermes/pairing/telegram-pending.json /root/.hermes/pairing/telegram-pending.json.bak && echo '{}' > /root/.hermes/pairing/telegram-pending.json"
+~~~
+
+後續建議：啟用 `TELEGRAM_ALLOWED_USERS` 白名單（只填自己的使用者 ID），讓陌生帳號連配對流程都進不來。Ubuntu 發布 ffmpeg 修補後隨一般更新套用。
 
 ## 風險與注意事項
 
