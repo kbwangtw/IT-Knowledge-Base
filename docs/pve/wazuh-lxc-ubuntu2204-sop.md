@@ -29,7 +29,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
 | 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
-| 12 | 弱點偵測與修補 | 大部分完成 | 2026-10-05：容器、Windows、ubclient 更新後 Critical 998 → 536、High 7,132 → 3,587；剩 ubclient kernel、ai ffmpeg、ipam pnpm 與上游未修補項目 |
+| 12 | 弱點偵測與修補 | 完成 | 2026-10-05：Critical 998 → 536、High 7,132 → 3,587；ubclient 舊 kernel 已移除；ai 的 ffmpeg 為 Hermes 必要元件，保留並確認 Bot 存取限制；其餘為上游未修補或 kernel 誤判 |
 
 ## 先認識四個名詞
 
@@ -2255,6 +2255,30 @@ sudo systemctl restart wazuh-agent                              # 立即重新�
 移除後只剩一個 kernel，下次 kernel 更新時 `-38` 會成為新的備用版本。`linux-image-generic-hwe-24.04` 中繼套件要保留。dpkg 提示 `/lib/modules/7.0.0-31-generic` 不是空的，是 DKMS 等產生的殘留檔案，確認不是使用中的 kernel 後可手動刪除。
 
 全部合計：Critical 998 → **536**、High 7,132 → **3,587**，總筆數 9,192。Windows 主機與對外開放的 wireguard 已接近清零；剩下的 Critical 幾乎都在 ubclient 的 kernel 套件與 ai 的 ffmpeg。
+
+### 12-5 ai 的 ffmpeg：保留並確認存取限制
+
+ffmpeg 系列（37 個 Critical）是 ai 容器剩下的主要弱點，Ubuntu universe 尚無修補。移除前先確認用途（ai 為 CT 113）：
+
+~~~bash
+pct exec 113 -- apt-cache rdepends --installed ffmpeg            # 沒有套件依賴它
+pct exec 113 -- bash -c "apt-mark showmanual | grep -x ffmpeg"    # 手動安裝
+pct exec 113 -- systemctl cat --no-pager hermes-gateway.service | grep -E 'ExecStart|WorkingDirectory'
+pct exec 113 -- bash -c "grep -rIl --exclude-dir={venv,node_modules,.git,__pycache__} -i ffmpeg /usr/local/lib/hermes-agent | head"
+~~~
+
+結果：Hermes 的 `Dockerfile`、`nix/hermes-agent.nix` 都把 ffmpeg 列為相依套件，venv 中的 `edge_tts`（文字轉語音）會呼叫它，設定中也有語音轉文字（Whisper）與 TTS。**套件管理看不到「程式直接呼叫指令」的依賴關係**，所以 `rdepends` 為空不代表沒人使用。移除會讓語音功能失效，因此**保留**。
+
+ffmpeg 的漏洞需要處理惡意影音檔才會觸發，對 Hermes 而言來源就是 Telegram 傳入的語音與檔案，所以改為確認誰能傳訊息給 Bot（只顯示設定名稱與筆數，不顯示內容）：
+
+| 項目 | 結果 |
+| --- | --- |
+| `.env` 的 `TELEGRAM_ALLOWED_USERS` | 已被註解，未啟用 |
+| `config.yaml` → `telegram.allowed_chats` | 有設定，限制可對話的聊天室 |
+| `~/.hermes/pairing/telegram-approved.json` | 1 筆（配對核准的使用者） |
+| `~/.hermes/pairing/telegram-pending.json` | 1 筆，自 6 月起等待核准 |
+
+結論：Bot 以配對核准與 `allowed_chats` 限制存取，只有核准過的帳號能傳檔案進來，風險低。等待核准的那一筆若不是自己的帳號，應清除。Ubuntu 發布 ffmpeg 修補後隨一般更新套用。
 
 ## 風險與注意事項
 
