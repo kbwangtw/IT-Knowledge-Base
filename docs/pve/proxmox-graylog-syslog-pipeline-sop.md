@@ -473,7 +473,25 @@ grep -rl bookworm /etc/apt/sources.list.d/ | xargs -r sed -i 's/\bbookworm\b/tri
 
 測試容器的 Graylog 只暫時啟動驗證，完成後停止，避免背景執行告警規則寄出重複告警信。
 
-**正式機升級計畫**：與測試相同的步驟，差異如下。
+**升級後發現的套件來源問題**（服務都正常，但會讓之後收不到更新）：
+
+| 套件來源 | 問題 | 處理 |
+| --- | --- | --- |
+| MongoDB | `trixie/mongodb-org/8.0` 的 Release 檔存在（HTTP 200），但**沒有任何套件**；`apt-cache policy` 只剩 `/var/lib/dpkg/status`，系統沿用原本 bookworm 版本的 8.0.32 | MongoDB 套件來源**維持 bookworm**（bookworm 版本在 Debian 13 上可正常執行），改回後版本表出現 8.0.14～8.0.32 |
+| OpenSearch（金鑰格式） | Debian 13 的 apt 改用 `sqv` 驗證簽章，無法讀取以 `gpg --keyring` 匯入的 GnuPG keybox 格式（`file` 顯示 `GPG keybox database`），錯誤為 `Failed to parse keyring ... EOF` | 匯出成標準格式：`gpg --no-default-keyring --keyring <檔案> --export > <新檔>`，`file` 顯示 `OpenPGP Public Key` |
+| OpenSearch（SHA1） | 2.x 套件庫仍以 2021 年的金鑰 `C5B7 4989 65EF D1C2 924B A9D5 39D3 1987 9310 D3FC` 簽署，該金鑰的綁定簽章使用 SHA1；sqv 自 2026-02-01 起拒絕（`SHA1 is not considered secure`）。重新下載 `opensearch.pgp` 仍是同一把未更新的金鑰；`opensearch-release.pgp` 是 2025 年的新金鑰（`A8B2 D9E0 4CD5 1FEF 6AA2 DB53 BA81 D999 8119 1457`），但 2.x 套件庫尚未改用它簽署（`Missing key C5B7…`） | **無法解決**，OpenSearch 在 Debian 13 上無法透過 apt 更新 |
+
+注意：升級過程中第 4 步的 `apt-get update` 仍是 Debian 12 的 apt（gpgv），所以不會報錯；要升級完成後以新的 apt 再執行一次 `apt-get update`，才會發現金鑰問題。
+
+**結論：正式機暫緩升級**。Debian 12 上三個套件來源都能正常更新；升級到 Debian 13 會讓 OpenSearch 收不到更新（除非放寬整台主機 apt 的 SHA1 規則）。**可以升級的條件**：OpenSearch 2.x 套件庫改用新金鑰簽署。確認方式（在任一台可連網的主機上，看 InRelease 由哪一把金鑰簽署）：
+
+~~~bash
+curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dists/stable/InRelease | gpg --verify 2>&1 | grep -iE 'key|using'
+~~~
+
+顯示的金鑰變成 `A8B2…1457`（或其他以 SHA256 簽署的金鑰）時，即可依本節步驟升級，並同時處理：MongoDB 套件來源維持 bookworm、OpenSearch 金鑰改為新金鑰的標準格式。
+
+**正式機升級計畫**（待上述條件成立後執行）：與測試相同的步驟，差異如下。
 
 | 項目 | 正式機做法 |
 | --- | --- |
