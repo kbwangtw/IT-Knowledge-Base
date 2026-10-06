@@ -4,7 +4,7 @@ title: "把三台 PVE 的日誌集中到 Graylog"
 date: 2026-09-17
 categories: [PVE, Graylog, Syslog]
 permalink: /docs/pve/proxmox-graylog-syslog-pipeline-sop/
-last_modified_at: 2026-10-04
+last_modified_at: 2026-10-06
 ---
 
 # 把三台 PVE 的日誌集中到 Graylog
@@ -417,6 +417,8 @@ curl -s http://<Graylog 位址>:9000/api/system/lbstatus  # ALIVE
 | Graylog、OpenSearch 套件 | 內建 Java、不分 Debian 版本，影響較小 |
 | 急迫性 | Debian 12 仍在長期支援期間，持續收到 `oldstable-security` 更新 |
 
+（2026-10-06 已以測試容器驗證可行，見第 10 節。）
+
 結論：維持 Debian 12，持續套用安全性更新。MongoDB 的條件已具備，**剩下的條件**：Graylog 官方相容性表列入 Debian 13（或 #23512 有官方回覆）；若 Debian 12 長期支援即將結束而 Graylog 仍未支援，改以新建容器重新安裝、再搬移資料的方式進行。升級時 MongoDB 套件來源要一併由 `bookworm` 改為 `trixie`。
 
 確認 MongoDB 套件庫（在 PVE 節點執行，200 代表已提供）：
@@ -426,6 +428,61 @@ for v in 8.0 8.2; do echo -n "mongodb $v trixie: "; pct exec 105 -- curl -s -o /
 ~~~
 
 參考：[Graylog Compatibility Matrix](https://go2docs.graylog.org/current/downloading_and_installing_graylog/compatibility_matrix.htm)、[Graylog2/graylog2-server#23512](https://github.com/Graylog2/graylog2-server/issues/23512)。
+
+## 10. Debian 13 升級測試（2026-10-06）
+
+Graylog 官方尚未列入 Debian 13，因此先以**複製出的測試容器**驗證，正式機不受影響。
+
+**建立隔離的測試容器**（CT 905，放在記憶體較充裕的節點）：
+
+~~~bash
+pct snapshot 105 pre-clone-trixie --description "Source for Debian 13 upgrade test clone"
+pct clone 105 905 --full --snapname pre-clone-trixie --hostname graylog-test --target node12
+pct delsnapshot 105 pre-clone-trixie
+# 在 node12：改用臨時 IP、不指定 MAC（自動產生新的）、先拔網路線
+pct set 905 --net0 name=eth0,bridge=vmbr0,firewall=1,ip=<臨時 IP>/24,gw=<閘道>,link_down=1
+pct set 905 --onboot 0
+pct start 905
+pct exec 905 -- systemctl disable --now wazuh-agent graylog-server   # 避免 Agent 身分衝突與重複告警
+# 確認後才接上網路（保留自動產生的 MAC）
+pct set 905 --net0 name=eth0,bridge=vmbr0,firewall=1,ip=<臨時 IP>/24,gw=<閘道>,hwaddr=<自動產生的 MAC>
+~~~
+
+注意：
+
+- 複製品的 IP、MAC、Wazuh Agent 身分與正式機相同，**必須先斷網**再改 IP、停用 Agent 與 graylog-server。
+- 臨時 IP 先以 ping 確認沒有回應（`Destination Host Unreachable` 代表 ARP 也無人回應）；本案曾誤用未確認的範例 IP，立即改回已確認的位址。
+- Graylog 的 `http_bind_address` 寫死正式機 IP，只在測試容器內改成臨時 IP（OpenSearch、MongoDB 綁 127.0.0.1，不受影響）。
+
+**升級步驟**（容器內執行）：停止 opensearch、mongod → 備份套件來源 → Debian 與 MongoDB 套件來源的 `bookworm` 改為 `trixie`（OpenSearch、Graylog 套件來源不分版本，不需改）→ `apt-get update` → `upgrade --without-new-pkgs` → `full-upgrade`（皆 `--force-confold`）→ `autoremove`。
+
+~~~bash
+sed -i 's/\bbookworm\b/trixie/g' /etc/apt/sources.list
+grep -rl bookworm /etc/apt/sources.list.d/ | xargs -r sed -i 's/\bbookworm\b/trixie/g'
+~~~
+
+**結果**：173 個套件升級後，`full-upgrade` 再升級 84、新增 55、移除 20；Debian 13.7；`apt-mark showhold` 仍為 graylog-server、opensearch。重開機後：
+
+| 項目 | 結果 |
+| --- | --- |
+| 系統 | Debian 13 (trixie)，`systemctl is-system-running` 為 running，無失敗服務 |
+| MongoDB | active，v8.0.32 |
+| OpenSearch | active，green，分片 100% |
+| Graylog | 7.1.9，`/api/system/lbstatus` 為 ALIVE，啟動後無新的 ERROR |
+| 網頁 | 以臨時 IP 登入正常，Search、Streams、Pipelines 等頁面皆可開啟 |
+
+測試容器的 Graylog 只暫時啟動驗證，完成後停止，避免背景執行告警規則寄出重複告警信。
+
+**正式機升級計畫**：與測試相同的步驟，差異如下。
+
+| 項目 | 正式機做法 |
+| --- | --- |
+| 時段 | 停機約 20～30 分鐘，期間 UDP syslog 會漏收，選離峰時段，避開 21:00 備份 |
+| 保護 | 確認前一晚 PBS 備份成功，升級前建立快照 |
+| 服務 | 升級前先停止 graylog-server；Wazuh Agent 維持啟用；`http_bind_address` 不需修改 |
+| 重開機 | CT105 為 HA 資源，從容器內執行 `reboot` |
+| 驗證 | 同測試項目，另確認 Wazuh Agent、LibreNMS 輪詢、Graylog 收到新日誌 |
+| 收尾 | 正式機確認正常後刪除測試容器（`pct destroy 905 --purge`），快照觀察數天後刪除 |
 
 ## 目前完成與待辦
 
