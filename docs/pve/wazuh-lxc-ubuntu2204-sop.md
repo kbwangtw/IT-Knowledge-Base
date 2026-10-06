@@ -29,7 +29,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
 | 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
-| 12 | 弱點偵測與修補 | 完成 | 2026-10-05：Critical 998 → 536、High 7,132 → 3,587；ubclient 舊 kernel 已移除；ai 的 ffmpeg 為 Hermes 必要元件，保留並確認 Bot 存取限制；其餘為上游未修補或 kernel 誤判 |
+| 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目 |
 
 ## 先認識四個名詞
 
@@ -2255,6 +2255,16 @@ sudo systemctl restart wazuh-agent                              # 立即重新�
 移除後只剩一個 kernel，下次 kernel 更新時 `-38` 會成為新的備用版本。`linux-image-generic-hwe-24.04` 中繼套件要保留。dpkg 提示 `/lib/modules/7.0.0-31-generic` 不是空的，是 DKMS 等產生的殘留檔案，確認不是使用中的 kernel 後可手動刪除。
 
 全部合計：Critical 998 → **536**、High 7,132 → **3,587**，總筆數 9,192。Windows 主機與對外開放的 wireguard 已接近清零；剩下的 Critical 幾乎都在 ubclient 的 kernel 套件與 ai 的 ffmpeg。
+
+**移除 ubclient 舊 kernel 後再查詢（2026-10-06）**：ubclient 由 486／2,766 降為 **243／1,389**，清單只剩使用中的 `linux-image-7.0.0-38-generic`（1,618 個 CVE，多為誤判）。
+
+| 項目 | 修補前（10-03） | 10-05 | 10-06 |
+| --- | --- | --- | --- |
+| Critical | 998 | 536 | **292** |
+| High | 7,132 | 3,587 | **2,216** |
+| 總筆數 | 約 16,000 | 9,192 | **5,367** |
+
+Critical 與 High 都減少約七成。剩下的 Critical 中，ubclient 使用中 kernel 的誤判占 243、ai 的 ffmpeg（已限制存取）占 37、Graylog 的 Debian 12 未修補項目占 12；Windows、wireguard、AdGuard、Pihole、節點、PBS 與 ProxCenter 皆為 0。
 
 ### 12-5 ai 的 ffmpeg：保留並確認存取限制
 
