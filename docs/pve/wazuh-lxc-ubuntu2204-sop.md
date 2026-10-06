@@ -2297,7 +2297,7 @@ pct exec 113 -- sed -i '289s/^#[[:space:]]*//' /root/.hermes/.env
 pct exec 113 -- systemctl restart hermes-gateway
 ~~~
 
-結果：`hermes-gateway` active，管理者帳號傳訊息 Bot 正常回應。之後不在白名單內的帳號傳訊息，Bot 不回應、也無法送出配對申請。還原方式：把最新的 `.env.bak-*` 複製回 `.env` 後重啟服務。Ubuntu 發布 ffmpeg 修補後隨一般更新套用。
+結果：`hermes-gateway` active，管理者帳號傳訊息 Bot 正常回應。之後不在白名單內的帳號傳訊息，Bot 不回應、也無法送出配對申請。還原方式：把最新的 `.env.bak-*` 複製回 `.env` 後重啟服務。確認運作正常後，已刪除 `.env.bak-*`（內含 Bot token 等機密）與 `telegram-pending.json.bak`（陌生帳號資料）（2026-10-06）；備份檔比現行 `.env` 多 2 bytes，正是移除的 `# `，證明只修改了該行。若擔心 token 外洩，最徹底的做法是在 @BotFather 重新產生 token（`rm` 不保證資料從 Ceph 磁碟上消失）。Ubuntu 發布 ffmpeg 修補後隨一般更新套用。
 
 ## 風險與注意事項
 
