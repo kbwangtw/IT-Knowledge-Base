@@ -30,6 +30,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
 | 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
 | 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目 |
+| 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
 
 ## 先認識四個名詞
 
@@ -610,6 +611,8 @@ tail -5 /var/ossec/logs/api.log
 | 外部測試（管理電腦 PowerShell） | `Test-NetConnection -Port 55000` → `TcpTestSucceeded : False`（Ping 仍 True）；`-Port 443` → `True` ✅ |
 
 升級 Wazuh 後要再檢查一次這行設定是否保留。
+
+> 2026-10-06 起為了 jt-ipam 整合，API 改為同時綁定 `127.0.0.1` 與 Wazuh 自身 IP，並以容器內 nftables 限制 55000 只允許本機與 jt-ipam 主機，見第 13 節。
 
 **回復方式**：
 
@@ -2308,6 +2311,93 @@ pct exec 113 -- systemctl restart hermes-gateway
 ~~~
 
 結果：`hermes-gateway` active，管理者帳號傳訊息 Bot 正常回應。之後不在白名單內的帳號傳訊息，Bot 不回應、也無法送出配對申請。還原方式：把最新的 `.env.bak-*` 複製回 `.env` 後重啟服務。確認運作正常後，已刪除 `.env.bak-*`（內含 Bot token 等機密）與 `telegram-pending.json.bak`（陌生帳號資料）（2026-10-06）；備份檔比現行 `.env` 多 2 bytes，正是移除的 `# `，證明只修改了該行。若擔心 token 外洩，最徹底的做法是在 @BotFather 重新產生 token（`rm` 不保證資料從 Ceph 磁碟上消失）。Ubuntu 發布 ffmpeg 修補後隨一般更新套用。
+
+## 13. jt-ipam 整合（2026-10-06）
+
+jt-ipam（ipam，CT 103）可同步 Wazuh Agent 清單（ID、IP、狀態、作業系統與版本、群組、最後連線時間），對應到 IPAM 的 IP，並在「缺少 Agent」頁面列出尚未安裝 Agent 的 IP。它使用 **Wazuh 伺服器 API（55000）**：先以 `/security/user/authenticate` 取得 token，再讀取 `/agents`（Wazuh 4.8 起 API 已無弱點端點，因此不讀弱點）。
+
+### 13-1 建立最小權限的 API 帳號
+
+官方建議的 `wazuh-wui` 具管理員權限，改為建立只能讀取 Agent 的專用帳號 `jtipam`：
+
+| 項目 | 內容 |
+| --- | --- |
+| 政策 | 沿用內建 `agents_read_agents`（id 4）：只有 `agent:read`，範圍 `agent:id:*`、`agent:group:*`。Wazuh 不允許建立內容相同的政策（錯誤 4009 `The specified name or policy already exists`） |
+| 角色 | 新建 `jtipam_agents_read`，只連結上述政策 |
+| 帳號 | `jtipam`，密碼以 `secrets` 隨機產生、只顯示一次並存入密碼管理器 |
+
+管理員帳號 `wazuh` 的密碼若遺失，可改用 Dashboard 設定檔 `/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml` 中的 `wazuh-wui`（administrator 角色）執行，腳本直接讀檔、不顯示密碼：
+
+~~~bash
+F=/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+AU=$(grep -m1 -E '^\s*username:' $F | sed -E 's/^\s*username:\s*//; s/^["'\'']//; s/["'\'']\s*$//')
+PW=$(grep -m1 -E '^\s*password:' $F | sed -E 's/^\s*password:\s*//; s/^["'\'']//; s/["'\'']\s*$//')
+T=$(curl -sk -u "$AU:$PW" -X POST "https://127.0.0.1:55000/security/user/authenticate?raw=true"); unset PW
+# 找出內建 agent:read 政策 id → POST /security/roles → POST /security/roles/<rid>/policies?policy_ids=<pid>
+# → POST /security/users {username, password} → POST /security/users/<uid>/roles?role_ids=<rid>
+~~~
+
+驗證（以 jtipam 登入）：`/agents` 回 `error 0`、18 筆（17 Agent + Manager）；`/manager/info` 回 **HTTP 403**，證明只有讀取 Agent 的權限。
+
+注意：**指派角色後同一秒內取得的 token 會被作廢**（Wazuh 在帳號角色變動時撤銷之前的 token，時間精度為秒），腳本中緊接著的登入測試因此回 401；稍後重新登入即正常。
+
+### 13-2 開放 API 給 jt-ipam（先防火牆、後綁定）
+
+資料中心防火牆未啟用，因此在 Wazuh 容器內以 nftables 限制。附加到 `/etc/nftables.conf`（nftables 服務已 enabled），獨立成一個表：
+
+~~~text
+table inet wazuh_api {
+    chain input {
+        type filter hook input priority filter - 1; policy accept;
+        tcp dport 55000 ip saddr { 127.0.0.1, <jt-ipam IP> } accept
+        tcp dport 55000 drop
+    }
+}
+~~~
+
+~~~bash
+nft -c -f /etc/nftables.conf && nft -f /etc/nftables.conf && nft list table inet wazuh_api
+# 防火牆生效後才改 API 綁定；務必保留 127.0.0.1（Dashboard 由本機連 API）
+sed -i "80s/host: \['127.0.0.1'\]/host: ['127.0.0.1', '<Wazuh IP>']/" /var/ossec/api/configuration/api.yaml
+systemctl restart wazuh-manager
+ss -tlnp | grep ':55000 '          # 127.0.0.1 與 Wazuh IP 各一行
+~~~
+
+驗證（在 PVE 節點執行）：
+
+~~~bash
+pct exec 103 -- curl -sk -o /dev/null -w '%{http_code}' --max-time 5 https://<Wazuh IP>:55000/   # 401：連得到
+curl -sk -o /dev/null -w '%{http_code}' --max-time 5 https://<Wazuh IP>:55000/                   # 000：被擋
+~~~
+
+本案第一次執行時漏做防火牆步驟，改綁定後從節點也拿到 401（API 對整個網段開放）；補上規則後節點變為 000。**一定要以「非允許來源」實際測試到被擋**，不能只測允許來源。
+
+還原：
+
+~~~bash
+cp -a $(ls -t /var/ossec/api/configuration/api.yaml.bak-* | head -1) /var/ossec/api/configuration/api.yaml && systemctl restart wazuh-manager
+cp -a $(ls -t /etc/nftables.conf.bak-* | head -1) /etc/nftables.conf && nft -f /etc/nftables.conf
+~~~
+
+### 13-3 jt-ipam 設定與結果
+
+jt-ipam → Wazuh → 新增：API URL `https://<Wazuh IP>:55000`、使用者 `jtipam`、`verify_tls` 關閉（Wazuh API 為自簽憑證；連線仍加密，只是不驗證對方身分，帳號僅能讀取 Agent，風險有限；之後可匯入 Wazuh CA 再開啟）。
+
+新增設定後若剛好錯過排程同步（每 5 分鐘），可手動執行 `pct exec 103 -- systemctl start jt-ipam-sync.service` 或按網頁上的同步。
+
+結果：`wazuh_instances` 為 `https://<Wazuh IP>:55000`／`jtipam`／`verify_tls = f`，`wazuh_agents` 同步 **17 筆**；網頁列出每台 Agent 的 IP、上線狀態、作業系統與 Wazuh 4.14.8 版本。
+
+「缺少 Agent」頁面首次同步後列出 4 筆，判讀如下（都不需要補裝）：
+
+| 主機 | 原因 | 處理 |
+| --- | --- | --- |
+| Wazuh 本身 | Manager 在 API 中是 agent `000`，IP 回報為 `127.0.0.1`，對不到 IPAM 的位址 | 正常，列為例外 |
+| Synology NAS ×2 | DSM 不支援安裝 Wazuh Agent | 列為例外；已由 LibreNMS（SNMPv3）監控；DSM 已確認啟用自動封鎖、2FA，並停用預設 `admin`（2026-10-06） |
+| Graylog 測試容器 | Debian 13 測試用的臨時 IP，容器刪除後 IPAM 紀錄未清除 | 已在 jt-ipam 刪除該筆紀錄 |
+
+之後此頁面若出現新的 IP，才是真正需要評估是否安裝 Agent 的主機。
+
+待改善：匯入 Wazuh CA 後開啟 TLS 驗證；Wazuh 升級後確認 `api.yaml` 的 `host` 設定與 nftables 規則仍在。
 
 ## 風險與注意事項
 
