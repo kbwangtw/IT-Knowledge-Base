@@ -491,6 +491,8 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 
 顯示的金鑰變成 `A8B2…1457`（或其他以 SHA256 簽署的金鑰）時，即可依本節步驟升級，並同時處理：MongoDB 套件來源維持 bookworm、OpenSearch 金鑰改為新金鑰的標準格式。
 
+測試完成後已刪除測試容器（`pct stop 905 && pct destroy 905 --purge`，連同 Ceph 上的磁碟），臨時 IP 一併釋出。之後要再測試，從 CT105 重新複製即可（6.7 GB，約 1 分鐘）。
+
 **正式機升級計畫**（待上述條件成立後執行）：與測試相同的步驟，差異如下。
 
 | 項目 | 正式機做法 |
