@@ -2392,8 +2392,8 @@ jt-ipam → Wazuh → 新增：API URL `https://<Wazuh IP>:55000`、使用者 `j
 | 主機 | 原因 | 處理 |
 | --- | --- | --- |
 | Wazuh 本身 | Manager 在 API 中是 agent `000`，IP 回報為 `127.0.0.1`，對不到 IPAM 的位址 | 正常，列為例外 |
-| Synology NAS ×2 | DSM 不支援安裝 Wazuh Agent | 列為例外；已由 LibreNMS（SNMPv3）監控；DSM 端應確認已啟用自動封鎖、2FA，並停用預設 `admin` |
-| Graylog 測試容器 | Debian 13 測試用的臨時 IP，容器刪除後 IPAM 紀錄未清除 | 在 jt-ipam 刪除該筆紀錄 |
+| Synology NAS ×2 | DSM 不支援安裝 Wazuh Agent | 列為例外；已由 LibreNMS（SNMPv3）監控；DSM 已確認啟用自動封鎖、2FA，並停用預設 `admin`（2026-10-06） |
+| Graylog 測試容器 | Debian 13 測試用的臨時 IP，容器刪除後 IPAM 紀錄未清除 | 已在 jt-ipam 刪除該筆紀錄 |
 
 之後此頁面若出現新的 IP，才是真正需要評估是否安裝 Agent 的主機。
 
