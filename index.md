@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 資訊黑手的 Knowledge Base
-last_modified_at: 2026-10-05
+last_modified_at: 2026-10-06
 ---
 
 # 資訊黑手的 IT 維運筆記
@@ -51,6 +51,12 @@ last_modified_at: 2026-10-05
 | 文章 | 適合什麼時候看 |
 | --- | --- |
 | [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05/) | 10/5 PHP 警告灌爆 log、Ops Agent 403、主機憑證過期、防火牆收斂；部分項目待確認 |
+
+## 超融合（Nutanix）
+
+| 文章 | 適合什麼時候看 |
+| --- | --- |
+| [Nutanix 收到高風險安全警示：要等歲修嗎？VM 要關機嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide/) | 10/6 規劃參考（未實測）：判斷急迫度、何時開 case、LCM rolling upgrade 不需關機的前提、各階段預估時間 |
 
 ## 硬體擴充與安裝
 
