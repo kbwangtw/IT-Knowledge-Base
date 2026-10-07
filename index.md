@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 資訊黑手的 Knowledge Base
-last_modified_at: 2026-10-06
+last_modified_at: 2026-10-07
 ---
 
 # 資訊黑手的 IT 維運筆記
@@ -57,6 +57,12 @@ last_modified_at: 2026-10-06
 | 文章 | 適合什麼時候看 |
 | --- | --- |
 | [Nutanix 收到高風險安全警示：要等歲修嗎？VM 要關機嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide/) | 10/6 規劃參考（未實測）：判斷急迫度、何時開 case、LCM rolling upgrade 不需關機的前提、各階段預估時間 |
+
+## 網路與 DNS
+
+| 文章 | 適合什麼時候看 |
+| --- | --- |
+| [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | 10/7 現場經驗：ping 得到 8.8.8.8 但網址解析失敗；DNS 要改用 210.69.1.1 |
 
 ## 硬體擴充與安裝
 

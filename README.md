@@ -6,6 +6,7 @@
 
 ## 全部文章
 
+- [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering.md)（現場經驗紀錄；過濾機制未向中華電信確認）
 - [Nutanix 收到高風險安全警示：要等歲修嗎？VM 要關機嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide.md)（規劃參考，未實測）
 - [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05.md)（磁碟、Ops Agent IAM、過期憑證、防火牆；部分項目待確認）
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy.md)
