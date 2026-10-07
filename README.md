@@ -6,6 +6,8 @@
 
 ## 全部文章
 
+- [jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理](docs/network/jt-ipam-adoption-itbh.md)（依官方 Adoption Roadmap 整理實際導入進度）
+
 - [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering.md)（已確認一般常用 DNS 無法解析，須指定 210.69.1.1；過濾機制未向中華電信確認）
 - [Nutanix 收到高風險安全警示：要等歲修嗎？VM 要關機嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide.md)（規劃參考，未實測）
 - [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05.md)（磁碟、Ops Agent IAM、過期憑證、防火牆；部分項目待確認）
