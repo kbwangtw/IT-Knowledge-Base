@@ -62,7 +62,7 @@ last_modified_at: 2026-10-07
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
-| [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | 10/7 已確認：ping 得到 8.8.8.8 但網址解析失敗；不能用一般常用 DNS，須指定 210.69.1.1 |
+| [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | 10/7 已確認：ping 得到 8.8.8.8 但網址解析失敗；不能用一般常用 DNS，須指定 210.69.1.1（目前已知只有這一組） |
 
 ## 硬體擴充與安裝
 
