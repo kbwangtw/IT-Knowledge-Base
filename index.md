@@ -64,6 +64,12 @@ last_modified_at: 2026-10-07
 | --- | --- |
 | [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | 10/7 已確認：ping 得到 8.8.8.8 但網址解析失敗；不能用一般常用 DNS，須指定 210.69.1.1（目前已知只有這一組） |
 
+## IPAM 與網路資產管理
+
+| 文章 | 適合什麼時候看 |
+| --- | --- |
+| [jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理](docs/network/jt-ipam-adoption-itbh/) | 10/7 依官方 Adoption Roadmap 整理：Subnet、Scan Agent、PVE、LibreNMS 已完成；Rack U 位待機櫃到貨後確認 |
+
 ## 硬體擴充與安裝
 
 [ML30 Gen11：光碟機、M.2、iLO 與 Windows Server 2025](docs/hardware/hpe/ml30-gen11/)記錄實機組裝和辨識結果，也列出官方相容性與長時間測試的限制。
