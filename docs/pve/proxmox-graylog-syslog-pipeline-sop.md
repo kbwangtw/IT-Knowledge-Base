@@ -4,7 +4,7 @@ title: "把三台 PVE 的日誌集中到 Graylog"
 date: 2026-09-17
 categories: [PVE, Graylog, Syslog]
 permalink: /docs/pve/proxmox-graylog-syslog-pipeline-sop/
-last_modified_at: 2026-10-06
+last_modified_at: 2026-10-08
 ---
 
 # 把三台 PVE 的日誌集中到 Graylog
@@ -504,13 +504,56 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | 驗證 | 同測試項目，另確認 Wazuh Agent、LibreNMS 輪詢、Graylog 收到新日誌 |
 | 收尾 | 正式機確認正常後刪除測試容器（`pct destroy 905 --purge`），快照觀察數天後刪除 |
 
+## 11. 加入 PBS 的日誌（2026-10-08）
+
+PBS31 是獨立主機（PBS 4，Debian 13），先前只有 Wazuh Agent 與 SNMP，日誌未送到 Graylog。沿用三台 PVE 的 UDP 1514 Input 與 Infrastructure Syslog stream，Graylog 不需新增 Input。
+
+**PBS 端**：Debian 13 預設只有 journald，PBS31 沒有安裝 rsyslog（`/etc/rsyslog.d/` 只有 postfix 套件放的 `postfix.conf`），先安裝再加轉送設定。避開 21:00 排程備份時段。
+
+~~~bash
+apt update                 # 企業版套件來源回報 401 可忽略
+apt install rsyslog        # 確認只有安裝、沒有移除任何套件
+cat > /etc/rsyslog.d/60-graylog.conf <<'EOF'
+# Forward PBS syslog messages to Graylog
+*.* @192.0.2.24:1514
+EOF
+rsyslogd -N1               # End of config validation run. Bye.
+systemctl restart rsyslog
+systemctl is-active rsyslog; systemctl is-enabled rsyslog   # active / enabled
+systemctl is-active proxmox-backup-proxy                    # active：備份服務未受影響
+logger -t GRAYLOG_TEST "PBS31 graylog forwarding test"
+~~~
+
+在 Graylog 以 `source:pbs31 AND GRAYLOG_TEST` 找到測試訊息，確認 Received by 為 Syslog UDP 1514、Routed into streams 為 Infrastructure Syslog、存入 infra_syslog 索引。
+
+**Pipeline**：原有的 PVE - Identify Cluster Nodes 只認得三台 PVE，新增規則並加入 Infrastructure Syslog 的 Stage 0：
+
+~~~text
+rule "PBS - Identify Backup Server"
+when
+    to_string($message.source) == "pbs31"
+then
+    set_field("device_type", "pbs");
+    set_field("pbs_server", "pbs31");
+end
+~~~
+
+儲存前先用規則編輯頁的 Rule Simulation（JSON：`{"source": "pbs31", "message": "test"}`）確認會加上 `device_type`、`pbs_server`。加入 Stage 0 後再以 `logger -t GRAYLOG_TEST "PBS31 pipeline test"` 實測，`source:pbs31 AND device_type:pbs` 找到訊息且兩個欄位都存在。
+
+Graylog 訊息的 timestamp 以 UTC 顯示（比台灣時間少 8 小時），可在個人設定的 Time zone 改為 Asia/Taipei，只影響自己的顯示。
+
+待辦：
+
+- PBS 任務（備份、GC、Verify、Sync）的日誌來自 proxmox-backup-proxy，與 PVE 的 pvedaemon 格式不同，現有「PVE 任務失敗警報」不適用。待排程備份產生真實日誌後，依實際格式建立 PBS 任務分類與失敗告警。
+- PVE - Authentication Events 的描述只涵蓋 PVE 節點，確認 PBS 的登入與 sudo 事件是否需要一併分類。
+
 ## 目前完成與待辦
 
 截至 2026-09-22，三項核心告警已完成所述測試範圍；其他監控項目與通知明細仍待完善。
 
 | 範圍 | 目前進度／驗證界線 |
 | --- | --- |
-| Syslog／Stream | 三台 PVE 接收與 Infrastructure Syslog 已驗證 |
+| Syslog／Stream | 三台 PVE 與 PBS31 接收與 Infrastructure Syslog 已驗證（PBS 於 2026-10-08 加入，見第 11 節） |
 | Pipeline | 主機、服務、任務、認證、系統錯誤分類已建立；既有五種服務事件測試與任務欄位紀錄保留 |
 | PVE 任務失敗警報 | 完整驗證成功：PVE 9.2.20 Rule 修正後，logger → Pipeline → Event → Gmail；未回填歷史索引 |
 | PVE 多次驗證失敗 | 完整驗證成功：Group by source，node10 三筆 → Last Matched → 正式 Gmail |
