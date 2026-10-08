@@ -297,7 +297,7 @@ VM 加入 HA 後的注意事項：
 | 節點剛重開機時 PG 顯示 96／97 active+clean | OSD 剛上線仍在 peering，1～2 分鐘內恢復 |
 | LibreNMS 短暫顯示剛重開機的節點或剛搬移的 LXC 為 down | 輪詢間隔 5 分鐘，狀態尚未更新；確認 snmpd 為 active 後等下一輪輪詢即恢復 |
 | node12 的服務（CA、DC01、Pihole、wazuh）維護後自動回到 node12 | 符合預期 |
-| node10 維護後 DC02、ai 一度留在 node11 | 服務不一定全部自動回到原節點，維護後要比對更新前的 Placement |
+| node10 維護後 DC02、ai 留在 node11，未自動搬回 | 服務不一定全部自動回到原節點；維護後比對更新前的 Placement，以 `ha-manager migrate` 手動搬回（本次手動搬回 node10） |
 | DC01／DC02、AdGuard／Pihole 全程在不同節點 | PVE HA 互斥規則有效 |
 
 **結果**：三台 kernel 皆為 `7.0.14-22-pve`；Ceph `HEALTH_OK`、97 PG active+clean、`noout` 已解除；HA 全部 started；配置恢復為更新前（node10：AdGuard、DC02、Graylog、IPAM、ai、librenms、wireguard；node11：ProxCenter、UBClient、WinClient；node12：CA、DC01、Pihole、wazuh）；Wazuh 18（17 Agent + Manager）；LibreNMS 無斷線設備。
@@ -310,7 +310,7 @@ VM 加入 HA 後的注意事項：
 | --- | --- |
 | 用 ProxCenter 完整逐台更新三台，每台確認 DNS／DC 位置 | **完成（2026-10-03）**，見第 5 節 |
 | ProxCenter 搬移非 HA VM 時是否遵守 Affinity rules | 已改為 DC 加入 HA、由 PVE 規則保證，不再依賴 |
-| 下次逐台更新時，確認 DC 規則全程有效、HA 資源維護後是否自動搬回原節點 | **完成（2026-10-08）**：DC 規則全程有效；服務不一定全部自動搬回，見第 6 節 |
+| 下次逐台更新時，確認 DC 規則全程有效、HA 資源維護後是否自動搬回原節點 | **完成（2026-10-08）**：DC 規則全程有效；服務不一定全部自動搬回，需手動搬回，見第 6 節 |
 | 單節點故障演練（實測 Ceph I/O latency 與 HA 恢復時間） | 未演練 |
 | node10 承載大部分服務，需分散 | 完成：更新後恢復為 6／4／4 |
 | Dynamic Load 與 Automatic Rebalance 的實際行為 | 未查證 |
