@@ -276,13 +276,41 @@ VM 加入 HA 後的注意事項：
 - 關機要用 HA 操作（`ha-manager set vm:106 --state stopped` 或網頁的 HA 選項），直接在客體內關機，HA 會把它重新開起來。
 - 遷移一律由 HA 執行；互斥規則會讓 HA 拒絕把兩台 DC 放在同一台節點。
 
+## 6. 第二次逐台更新（2026-10-08）
+
+更新內容：kernel 7.0.14-20 → 7.0.14-22、Ceph 20.2.4-pve4 → pve5（上游版本相同，僅 Proxmox 打包版次）、libpve-common-perl 9.2.3、libpve-storage-perl 9.1.12、proxmox-backup-client 4.2.8、xz-utils／liblzma5。pve-manager 維持 9.2.21。
+
+**順序依 ProxCenter 所在節點調整**：更新前 ProxCenter 在 node12（不是上次的 node11）。ProxCenter 是 LXC，搬移會重開機，若在 Rolling Update 途中被搬走，流程會中斷。因此：
+
+1. 先更新 node11（只有已關機的 WinClient、UBClient，不需遷移任何服務）
+2. 以 `ha-manager migrate ct:<ProxCenter ID> node11` 把 ProxCenter 搬到已更新的 node11（執行前先確認 CT 編號）
+3. 再以 ProxCenter 更新 node12 → node10
+
+**原則：每次更新前先看 ProxCenter 在哪一台，先更新沒有 ProxCenter 的節點，再把 ProxCenter 搬到已更新的節點。**
+
+更新前準備：WinClient（108）、UBClient（104）不在 HA、無法遷移，先在客體內關機，全部更新完再開機。Wazuh 在這段期間顯示這兩台 Disconnected，屬預期。
+
+每台更新後執行 `cluster-check.sh`，下一台在 Ceph `HEALTH_OK`、PG 全部 `active+clean` 後才開始。
+
+| 觀察 | 說明 |
+| --- | --- |
+| 節點剛重開機時 PG 顯示 96／97 active+clean | OSD 剛上線仍在 peering，1～2 分鐘內恢復 |
+| LibreNMS 短暫顯示剛重開機的節點或剛搬移的 LXC 為 down | 輪詢間隔 5 分鐘，狀態尚未更新；確認 snmpd 為 active 後等下一輪輪詢即恢復 |
+| node12 的服務（CA、DC01、Pihole、wazuh）維護後自動回到 node12 | 符合預期 |
+| node10 維護後 DC02、ai 一度留在 node11 | 服務不一定全部自動回到原節點，維護後要比對更新前的 Placement |
+| DC01／DC02、AdGuard／Pihole 全程在不同節點 | PVE HA 互斥規則有效 |
+
+**結果**：三台 kernel 皆為 `7.0.14-22-pve`；Ceph `HEALTH_OK`、97 PG active+clean、`noout` 已解除；HA 全部 started；配置恢復為更新前（node10：AdGuard、DC02、Graylog、IPAM、ai、librenms、wireguard；node11：ProxCenter、UBClient、WinClient；node12：CA、DC01、Pihole、wazuh）；Wazuh 18（17 Agent + Manager）；LibreNMS 無斷線設備。
+
+舊 kernel 7.0.14-20 保留作為開機退路，穩定運作一週以上再清除。
+
 ## 待驗證與後續
 
 | 項目 | 狀態 |
 | --- | --- |
 | 用 ProxCenter 完整逐台更新三台，每台確認 DNS／DC 位置 | **完成（2026-10-03）**，見第 5 節 |
 | ProxCenter 搬移非 HA VM 時是否遵守 Affinity rules | 已改為 DC 加入 HA、由 PVE 規則保證，不再依賴 |
-| 下次逐台更新時，確認 DC 規則全程有效、HA 資源維護後是否自動搬回原節點 | 待下次更新 |
+| 下次逐台更新時，確認 DC 規則全程有效、HA 資源維護後是否自動搬回原節點 | **完成（2026-10-08）**：DC 規則全程有效；服務不一定全部自動搬回，見第 6 節 |
 | 單節點故障演練（實測 Ceph I/O latency 與 HA 恢復時間） | 未演練 |
 | node10 承載大部分服務，需分散 | 完成：更新後恢復為 6／4／4 |
 | Dynamic Load 與 Automatic Rebalance 的實際行為 | 未查證 |
