@@ -130,7 +130,7 @@ sleep 30; ha-manager status | grep vm:107
 qm status 107
 ~~~
 
-本次 vm:107 也恢復成 running。
+本次 vm:107 也恢復成 running，之後確認 VM 內的應用程式運作正常。
 
 最後確認沒有遺漏的服務：
 
@@ -186,7 +186,7 @@ grep -i '^ha' /etc/pve/datacenter.cfg
 
 ## 本次結論
 
-ct:100 與 vm:107 已救回，全部 HA 服務正常。根本原因是手動重開前沒有先進入 HA 維護模式，不是 kernel 或儲存的問題。預防措施已完成：Shutdown Policy 改成 `migrate`。兩台 DNS 都已用 `nslookup` 確認能正確解析內部名稱。待辦：確認 vm:107 上應用程式的實際運作，以及下次重開時確認 `migrate` 有先把服務搬走。
+ct:100 與 vm:107 已救回，全部 HA 服務正常。根本原因是手動重開前沒有先進入 HA 維護模式，不是 kernel 或儲存的問題。預防措施已完成：Shutdown Policy 改成 `migrate`。兩台 DNS 都已用 `nslookup` 確認能正確解析內部名稱，vm:107 的應用程式也確認正常。待辦：下次重開時確認 `migrate` 有先把服務搬走。
 
 ## 相關紀錄
 
