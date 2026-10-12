@@ -3,7 +3,7 @@ layout: default
 title: "PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？"
 permalink: /docs/pve/pve9-subscription-nag-removal/
 date: 2026-10-12
-categories: [PVE, WebUI, APT]
+categories: [PVE, WebUI, APT, Ceph]
 last_modified_at: 2026-10-12
 ---
 
@@ -13,7 +13,7 @@ last_modified_at: 2026-10-12
 
 **網路上常見的 sed 指令，在 proxmox-widget-toolkit 5.2.10 比對不到任何內容；它不會報錯，但什麼也沒改。先 grep 確認目標存在，再修改。**
 
-> 紀錄日期：2026-10-12；pve-manager 9.2.21、proxmox-widget-toolkit 5.2.10、Ceph 20.2.4-pve5。node10、node11、node12 三台的檔案修改與 APT hook 已在終端機驗證；三台的瀏覽器登入驗證待補記。Repository 改成 no-subscription 不在本文範圍。
+> 紀錄日期：2026-10-12；pve-manager 9.2.21、proxmox-widget-toolkit 5.2.10、Ceph 20.2.4-pve5。node10、node11、node12 三台的檔案修改與 APT hook 已在終端機驗證；三台的 Repository 已確認為 no-subscription，`apt-get update` 無警告或錯誤；三台的瀏覽器登入驗證待補記。
 
 ## 這個提示從哪裡來？
 
@@ -184,6 +184,48 @@ done
 for n in node10 node11 node12; do echo "== $n =="; ssh root@$n 'cat /etc/apt/apt.conf.d/99-pve-nonag'; done
 ~~~
 
+## 6. 確認 Repository 是 no-subscription
+
+取消提示只處理 Web UI，不會改變 apt 來源。沒有訂閱時，如果 enterprise repo 還在，`apt update` 會回 401。PVE 9 使用 deb822 格式的 `.sources` 檔，先檢查三台：
+
+~~~bash
+for n in node10 node11 node12; do
+  echo "===== $n ====="
+  ssh root@$n 'ls /etc/apt/sources.list.d/; grep -v "^#" /etc/apt/sources.list.d/*.list 2>/dev/null; grep -H -E "^(URIs|Suites|Components|Enabled)" /etc/apt/sources.list.d/*.sources'
+done
+~~~
+
+本 Cluster 三台內容一致，已經是 no-subscription，不需要修改：
+
+| 檔案 | URIs | Suites | Components |
+| --- | --- | --- | --- |
+| `ceph.sources` | `http://download.proxmox.com/debian/ceph-tentacle` | trixie | no-subscription |
+| `debian.sources` | `http://deb.debian.org/debian/`、`http://security.debian.org/debian-security/` | trixie、trixie-updates、trixie-security | main contrib non-free-firmware |
+| `proxmox.sources` | `http://download.proxmox.com/debian/pve` | trixie | pve-no-subscription |
+
+- 沒有 `pve-enterprise.sources`，也沒有任何 `Enabled: no`。
+- Ceph 來源是 `ceph-tentacle`，對應 Ceph 20.2.4。網路上很多 PVE 9 範例寫的是 `ceph-squid`（Ceph 19），不能照抄。
+- 目錄裡還有一個舊格式的 `pve-no-subscription.list`，但有效內容是 0 行，只剩註解和空行，不會和 `proxmox.sources` 重複。
+
+最後確認有效內容和 `apt-get update` 的結果：
+
+~~~bash
+for n in node10 node11 node12; do
+  echo "===== $n ====="
+  ssh root@$n 'grep -v "^#" /etc/apt/sources.list.d/pve-no-subscription.list | grep -c .; grep -h -E "^(URIs|Components)" /etc/apt/sources.list.d/*.sources; apt-get update 2>&1 | grep -E "^(W|E):" || echo "apt update: 無警告/錯誤"'
+done
+~~~
+
+三台都回 `0` 和 `apt update: 無警告/錯誤`。`apt-get update` 只更新套件清單，不會安裝或升級任何東西。實際升級仍照 [ProxCenter 逐台更新](../proxcenter-ceph-rolling-update/) 的流程逐台進行。
+
+舊 `.list` 檔可以保留。想整理目錄時，改名停用即可，不要直接刪除；apt 只讀 `.list` 和 `.sources` 副檔名：
+
+~~~bash
+mv /etc/apt/sources.list.d/pve-no-subscription.list /etc/apt/sources.list.d/pve-no-subscription.list.disabled
+~~~
+
+本次沒有執行這一步。
+
 ## 怎麼還原？
 
 | 項目 | 位置 | 還原方式 |
@@ -204,11 +246,11 @@ systemctl restart pveproxy.service
 - 這不是官方支援的做法。PVE 採 AGPLv3，自行修改前端在授權上沒有問題，但正式環境仍可評估購買訂閱，以取得官方支援與 enterprise repo。
 - 下一個大版本如果又改了寫法，script 會安全跳過，提示會再出現。屆時用第 1 節的 grep 重新檢查。
 - 請不要直接套用網路上沒寫明適用版本的 sed。改錯 JS 可能讓 Web UI 變成白畫面；發生時用 `.orig` 或 reinstall 還原。
-- 取消提示不會改變 Repository 設定。沒有訂閱時，enterprise repo 仍會在 `apt update` 時回 401，需要另外改成 no-subscription repo。本 Cluster 已在 Ceph 20（Tentacle），Ceph repo 不能照抄網路上 `ceph-squid` 的範例。
+- 取消提示不會改變 Repository 設定，兩件事要分開確認（見第 6 節）。no-subscription repo 的套件比 enterprise 新、測試較少，Ceph 節點升級前要照既有流程逐台處理。
 
 ## 本次結論
 
-三台的 `proxmoxlib.js` 已經 patch，APT hook 已就位，之後升級會自動重新套用。待補：三台瀏覽器登入驗證的紀錄、第 21546 行判斷的用途，以及 Repository 改成 no-subscription 的設定與驗證。
+三台的 `proxmoxlib.js` 已經 patch，APT hook 已就位，之後升級會自動重新套用。三台 Repository 已確認為 no-subscription（含 Ceph Tentacle），`apt-get update` 無警告或錯誤。待補：三台瀏覽器登入驗證的紀錄，以及第 21546 行判斷的用途。
 
 - [Proxmox VE Package Repositories](https://pve.proxmox.com/wiki/Package_Repositories)
 - [Proxmox VE 訂閱方案](https://www.proxmox.com/en/proxmox-virtual-environment/pricing)

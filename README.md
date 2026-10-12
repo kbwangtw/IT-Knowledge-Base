@@ -11,7 +11,7 @@
 - [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering.md)（已確認一般常用 DNS 無法解析，須指定 210.69.1.1；過濾機制未向中華電信確認）
 - [Nutanix 收到高風險安全警示：要等歲修嗎？VM 要關機嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide.md)（規劃參考，未實測）
 - [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05.md)（磁碟、Ops Agent IAM、過期憑證、防火牆；部分項目待確認）
-- [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal.md)（三台已 patch 並加 APT hook；Repository 待補）
+- [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal.md)（三台已 patch 並加 APT hook，Repository 已確認 no-subscription）
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy.md)
 - [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop.md)（主要流程已實測，17 台 Agent 上線）
 - [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22.md)
