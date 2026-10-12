@@ -26,7 +26,7 @@ last_modified_at: 2026-10-12
 | [ProxCenter 逐台更新：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 來源檢查、SSH 網段和 sudo 問題；完整三台驗收待補 |
 | [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新、重開、網路掛載，以及備份與還原的不同判準 |
 | [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification/) | 安裝、移除與模板驗證；PVE 已測，PBS 完整流程待測 |
-| [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal/) | 10/12 三台已 patch 並加 APT hook；widget-toolkit 5.2.10 多一個空格的踩雷；三台 Repository 已確認 no-subscription；瀏覽器驗證待補 |
+| [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal/) | 10/12 三台已 patch 並加 APT hook；widget-toolkit 5.2.10 多一個空格的踩雷；三台 Repository 已確認 no-subscription；三台登入驗證完成 |
 
 ## 備份做完，真的還原得回來嗎？
 

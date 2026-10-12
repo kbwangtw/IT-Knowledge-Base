@@ -13,7 +13,7 @@ last_modified_at: 2026-10-12
 
 **網路上常見的 sed 指令，在 proxmox-widget-toolkit 5.2.10 比對不到任何內容；它不會報錯，但什麼也沒改。先 grep 確認目標存在，再修改。**
 
-> 紀錄日期：2026-10-12；pve-manager 9.2.21、proxmox-widget-toolkit 5.2.10、Ceph 20.2.4-pve5。node10、node11、node12 三台的檔案修改與 APT hook 已在終端機驗證；三台的 Repository 已確認為 no-subscription，`apt-get update` 無警告或錯誤；三台的瀏覽器登入驗證待補記。
+> 紀錄日期：2026-10-12；pve-manager 9.2.21、proxmox-widget-toolkit 5.2.10、Ceph 20.2.4-pve5。node10、node11、node12 三台的檔案修改與 APT hook 已在終端機驗證；三台的 Repository 已確認為 no-subscription，`apt-get update` 無警告或錯誤；三台分別用 IP 以無痕視窗登入 Web UI，都不再跳出提示。
 
 ## 這個提示從哪裡來？
 
@@ -105,6 +105,8 @@ node10 實際輸出：
 重啟 pveproxy 只影響 Web UI 和 API 連線，大約中斷幾秒，不影響 VM、CT 和 Ceph；正在使用的 noVNC console 可能會斷線，重新連線即可。
 
 瀏覽器按 **Ctrl+Shift+R** 或使用無痕視窗，確認登入後不再跳出提示，點「Node → Updates → Refresh」也會直接執行。
+
+本次三台都用各自的 IP 以無痕視窗登入，確認不再跳出提示。
 
 ## 4. 套件升級後自動重新套用
 
@@ -250,7 +252,7 @@ systemctl restart pveproxy.service
 
 ## 本次結論
 
-三台的 `proxmoxlib.js` 已經 patch，APT hook 已就位，之後升級會自動重新套用。三台 Repository 已確認為 no-subscription（含 Ceph Tentacle），`apt-get update` 無警告或錯誤。待補：三台瀏覽器登入驗證的紀錄，以及第 21546 行判斷的用途。
+三台的 `proxmoxlib.js` 已經 patch，APT hook 已就位，之後升級會自動重新套用。三台 Repository 已確認為 no-subscription（含 Ceph Tentacle），`apt-get update` 無警告或錯誤。三台用無痕視窗登入，都不再跳出提示。待補：第 21546 行判斷的用途。
 
 - [Proxmox VE Package Repositories](https://pve.proxmox.com/wiki/Package_Repositories)
 - [Proxmox VE 訂閱方案](https://www.proxmox.com/en/proxmox-virtual-environment/pricing)
