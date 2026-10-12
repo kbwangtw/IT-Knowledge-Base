@@ -150,7 +150,44 @@ node10 的 HA error 不是 ProxCenter 造成的：手動 `reboot` 前沒有先�
 
 同一段時間的 node10 工作紀錄裡，有一筆 proxcenter@pve token 發出的 `hamigrate 107` 為 ERROR（15:42:06）。當時 node10 正在手動更新與重開，本次沒有另外追查這筆搬移請求的來源與失敗原因。
 
-ProxCenter 仍沒有「三台都由它完成」的紀錄。下次可以讓 ProxCenter 處理全部三台，補齊這個驗證。
+ProxCenter 仍沒有「三台都由它完成」的紀錄。要補齊這個驗證，得先處理下一節「ProxCenter 在自己管理的 cluster 裡」的問題。
+
+## ProxCenter 在自己管理的 cluster 裡
+
+本案的 ProxCenter 是 ct:110，平常在 node11 上，受 PVE HA 管理。輪到 ct:110 所在的 node 時，ProxCenter 會讓這台進入維護模式，HA 再把 ct:110 搬走；容器搬移會先停止再啟動，等於 ProxCenter 在流程途中被自己停掉。ProxCenter 是否特別處理這種情況，本次沒有查證。
+
+因此這個環境採用以下做法（下文稱「方案 A」）：
+
+1. ProxCenter 所在的 node11 先手動更新：`node-maintenance enable` → `apt full-upgrade` → `reboot` → 驗收 → `node-maintenance disable`。維護模式解除時，HA 會把原本在 node11 的服務（包含 ct:110）搬回來。
+2. 確認 ct:110 回到 node11，再用 ProxCenter 只更新 node10、node12。
+3. 每台之間的人工批准前，確認服務都回到 `started`。
+
+如果要讓 ProxCenter 自己跑完全部三台，比較可靠的做法是把 ProxCenter 移到 cluster 外面，例如另一台主機。本案尚未這樣部署。
+
+## 2026-10-12：沒有可用更新時，ProxCenter 不會啟動
+
+10/12 的 kernel 更新完成後，想用方案 A 實驗一次 rolling update。事前檢查結果：
+
+| 檢查 | 結果 |
+| --- | --- |
+| `apt list --upgradable`（三台） | 都沒有可更新的套件 |
+| node11 上非 HA 的 VM | VM104、VM108，都已關機 |
+| HA 規則 | 只有兩條互斥規則（ct:100／ct:101、vm:106／vm:107），沒有把 ct:110 固定在某台 node |
+| Cluster／Ceph | Quorate Yes、HEALTH_OK、OSD 3 up／3 in、97 PG active+clean，沒有 `noout` |
+
+ProxCenter 的 Rolling Update 頁面顯示三台版本都是 9.2.21，Available Updates 都是 0，下方訊息為 `0 update(s) available on 0 node(s)` 與 `Up to date`。畫面上只有 `Check for updates` 按鈕，**沒有可以啟動 rolling update 的選項**。
+
+結論：ProxCenter 會先檢查每台的可用更新，全部為 0 時不提供執行，也就不會進入維護模式、搬移服務或重開。它不能拿來單純測試維護模式與重開流程，要等有實際更新時再實驗。ProxCenter 的 Available Updates 與 `apt list --upgradable` 的結果一致。
+
+本次沒有查看 ProxCenter Settings 裡是否有強制執行之類的選項。
+
+執行時可以在 ProxCenter 不會維護的 node 上開一個監看視窗，即時看到維護模式、服務搬移、`noout` 與 OSD 狀態：
+
+~~~bash
+watch -n 5 'ha-manager status | grep -E "lrm|service"; echo; ceph osd dump | grep "^flags"; ceph -s | grep -E "health|osd:"'
+~~~
+
+這裡用 `grep "^flags"`，只抓 cluster 層級的旗標那一行；只寫 `grep flags` 也會抓到每個 pool 的資料，畫面會被洗掉。
 
 ## 下次可直接沿用的檢查順序
 
@@ -161,3 +198,5 @@ ProxCenter 仍沒有「三台都由它完成」的紀錄。下次可以讓 ProxC
 5. 先安排本機儲存 VM，再批准維護。
 6. 每台完成後驗證健康狀態；失敗就停下來查，別直接處理下一台。
 7. 某一台改用手動更新時，`reboot` 前一定要先 `node-maintenance enable`，重開並驗收後再 `disable`。
+8. 先在 ProxCenter 按 `Check for updates` 或用 `apt list --upgradable` 確認真的有更新，並檢查有沒有 `ceph-*` 套件；沒有更新時 ProxCenter 不會執行。
+9. ProxCenter 所在的 node 不交給 ProxCenter 更新，改用方案 A 手動處理。
