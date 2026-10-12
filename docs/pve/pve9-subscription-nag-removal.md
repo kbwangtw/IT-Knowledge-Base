@@ -216,7 +216,7 @@ for n in node10 node11 node12; do
 done
 ~~~
 
-三台都回 `0` 和 `apt update: 無警告/錯誤`。`apt-get update` 只更新套件清單，不會安裝或升級任何東西。實際升級仍照 [ProxCenter 逐台更新](../proxcenter-ceph-rolling-update/) 的流程逐台進行。
+三台都回 `0` 和 `apt update: 無警告/錯誤`。`apt-get update` 只更新套件清單，不會安裝或升級任何東西。實際升級仍照 [ProxCenter 逐台更新](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/) 的流程逐台進行。
 
 舊 `.list` 檔可以保留。想整理目錄時，改名停用即可，不要直接刪除；apt 只讀 `.list` 和 `.sources` 副檔名：
 
