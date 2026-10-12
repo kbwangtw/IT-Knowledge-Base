@@ -13,7 +13,7 @@ Fail2Ban 一直擋到外部 IP 嘗試登入 PVE，追查後發現原因很單純
 
 **Fail2Ban 只能在攻擊者猜錯幾次後封鎖；PVE 管理介面本身就不應該對網際網路開放。**
 
-> 紀錄日期：2026-10-12；PVE 9.2.21，ct:109 為 Debian 13 + WireGuard + WGDashboard。iPhone 與筆電都已從外部連上 VPN，iPhone 經 4G/5G 透過 VPN 打開 PVE。**路由器的 8006 轉送尚未刪除**，刪除與外部確認列為待辦。文中內網位址為示範值（198.51.100.0/24），不是實際環境位址；不公開對外 IP 與任何金鑰。
+> 紀錄日期：2026-10-12；PVE 9.2.21，ct:109 為 Debian 13 + WireGuard + WGDashboard。iPhone 與筆電都已從外部連上 VPN，iPhone 經 4G/5G 透過 VPN 打開 PVE。之後刪除路由器的 8006 轉送，並從外部確認 8006 已無法連線、VPN 仍可用。文中內網位址為示範值（198.51.100.0/24），不是實際環境位址；不公開對外 IP 與任何金鑰。
 
 ## 為什麼要改？
 
@@ -174,25 +174,34 @@ transfer: 244 B received, 92 B sent
 
 連不上時最常見的原因：轉送規則選成 TCP（要 UDP）、內部 IP 沒有指到 ct:109，或測試時其實還連著家裡 Wi-Fi。
 
-## 8. 待辦：刪除 8006 轉送
+## 8. 刪除 8006 轉送，從外部確認
 
-VPN 已可用，但**數據機的 TCP 8006 轉送還沒刪**，PVE 管理介面目前仍對外開放。預計步驟：
+VPN 確認可用後，刪除數據機的 TCP 8006 轉送，保留 UDP 51820。接著用兩個方向驗證：
 
-1. 刪除數據機的 8006 轉送；同時檢查是否還有 22、8007、3128、10086 等不需要的轉送，保留 UDP 51820。
-2. iPhone 關掉 WireGuard、使用 4G/5G，打開 `https://<對外 IP>:8006`，應該打不開或逾時。
-3. 打開 WireGuard，再用內網 IP 連 PVE，確認 VPN 仍然可用。
-4. 隔天比較 Fail2Ban 的封鎖數量：
+| 測試 | 做法 | 結果 |
+| --- | --- | --- |
+| 8006 已不對外 | iPhone **關掉 WireGuard**、使用 4G/5G，打開 `https://<對外 IP>:8006` | ✅ 打不開 |
+| VPN 仍可用 | iPhone **打開 WireGuard**，打開 `https://<node 的內網 IP>:8006` | ✅ 出現 PVE 登入頁 |
+
+兩個方向都要測：只測第一個，可能其實是整條網路不通；只測第二個，不能證明 8006 已經關閉。
+
+從現在開始，在外面管理 PVE 一定要先連 VPN。
+
+尚未記錄的後續：
+
+1. 數據機上是否還有其他不需要的轉送（例如 22、8007、3128、10086）。
+2. 隔天比較 Fail2Ban 的封鎖數量，預期明顯減少：
 
 ~~~bash
 fail2ban-client status proxmox
 grep "Ban " /var/log/fail2ban.log | awk '{print $1}' | sort | uniq -c | tail -7
 ~~~
 
-刪除後，從外面管理 PVE 一定要先連 VPN。建議把 ct:109 的 WireGuard 狀態加入既有監控（Wazuh、LibreNMS 或 Graylog 告警），VPN 出問題時能先知道。
+3. 把 ct:109 的 WireGuard 狀態加入既有監控（Wazuh、LibreNMS 或 Graylog 告警），VPN 出問題時能先知道。
 
 ## 本次結論
 
-外部連線已從「直接轉送 PVE 8006」準備改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上。待辦：刪除 8006 轉送並從外部確認關閉、觀察 Fail2Ban 封鎖數量變化、把 VPN 加入監控。
+外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上；8006 轉送已刪除，從外部確認無法連線，VPN 仍可用。待辦：檢查數據機其他轉送規則、觀察 Fail2Ban 封鎖數量變化、把 VPN 加入監控。
 
 ## 相關紀錄
 
