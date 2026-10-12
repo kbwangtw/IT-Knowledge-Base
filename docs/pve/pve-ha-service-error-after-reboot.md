@@ -140,6 +140,15 @@ ha-manager status | grep -E "error|starting|disabled|stopped" || echo "全部 HA
 
 本次輸出 `全部 HA 服務正常`。
 
+狀態是 running 不代表服務真的可用。DNS 要實際查詢一次，兩台 DNS 都要測：
+
+~~~bash
+nslookup <內部主機名稱> <DNS 1 的 IP>
+nslookup <內部主機名稱> <DNS 2 的 IP>
+~~~
+
+本次用 ProxCenter 的內部名稱測試，兩台 DNS 都回傳相同且正確的內部 IP。其中一台回答是 `Non-authoritative answer`，代表它不是這個網域的權威伺服器，而是轉送或快取來的答案；另一台則直接回答。兩台角色不同，但都能正確解析。
+
 ## 5. 以後怎麼避免？
 
 **手動重開 HA node 的正確順序：**
@@ -177,7 +186,7 @@ grep -i '^ha' /etc/pve/datacenter.cfg
 
 ## 本次結論
 
-ct:100 與 vm:107 已救回，全部 HA 服務正常。根本原因是手動重開前沒有先進入 HA 維護模式，不是 kernel 或儲存的問題。預防措施已完成：Shutdown Policy 改成 `migrate`。待辦：用 `nslookup` 確認 ct:100 的 DNS 解析、確認 vm:107 上應用程式的實際運作，以及下次重開時確認 `migrate` 有先把服務搬走。
+ct:100 與 vm:107 已救回，全部 HA 服務正常。根本原因是手動重開前沒有先進入 HA 維護模式，不是 kernel 或儲存的問題。預防措施已完成：Shutdown Policy 改成 `migrate`。兩台 DNS 都已用 `nslookup` 確認能正確解析內部名稱。待辦：確認 vm:107 上應用程式的實際運作，以及下次重開時確認 `migrate` 有先把服務搬走。
 
 ## 相關紀錄
 
