@@ -2,7 +2,7 @@
 layout: default
 title: "PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰"
 date: 2026-09-22
-last_modified_at: 2026-09-22
+last_modified_at: 2026-10-12
 categories: [PVE, Ceph, Troubleshooting]
 permalink: /docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/
 ---
@@ -12,6 +12,8 @@ permalink: /docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/
 **9/22 已完成三顆 OSD 的 BlueStore 金鑰修復與稽核，解除 noout 後回到 HEALTH_OK。** 這次查明：9/14 金鑰遷移時把 keyring「檔案路徑」傳給 `set-label-key -v`，使 osd.0／osd.2 的 BlueStore `osd_key` 存成路徑字串；osd.1 則保存了與 MON／local 不一致的金鑰。
 
 重開機讓潛藏的認證資料問題再次浮現。9/21 更新本身沒有更新 Ceph 套件，不能把本案簡化成「PVE 更新弄壞 Ceph」。
+
+**10/12 補記：修復後第一次三台整機滾動重開（kernel 更新），三顆 OSD 都正常加入，叢集回到 HEALTH_OK。**
 
 > 依 2026-09-21～22「PVE 更新後排查 Web介面」對話的已確認結果整理，日期採 UTC+8。保留節點及 OSD 編號，不公開 CephX secret、完整 label 或原始截圖。本文的操作範例依當時成功流程整理並加入失敗即停止的檢查；不是本次文件發布時重新操作正式叢集的紀錄。
 
@@ -213,6 +215,24 @@ PG: 95 active+clean
 
 已確認範圍是 label 修復、OSD 重新啟動後入叢集、三層一致及最終叢集健康。這不等於已另外完成修復後的三台整機重開驗證、所有 PVE storage／應用讀寫、新備份與還原測試；這些不在本次最終證據中。
 
+### 10/12 補記：修復後的整機滾動重開
+
+10/12 更新 kernel（7.0.14-22-pve → 7.0.14-23-pve），三台逐台重開，這是 9/22 修復後第一次整機重開。Ceph 套件未升級，仍為 20.2.4-pve5。三台重開後的結果：
+
+| 項目 | 結果 |
+| --- | --- |
+| MON | 3 daemons，quorum node10、node11、node12 |
+| OSD | 3 up／3 in，osd.0、osd.1、osd.2 都是 up |
+| PG | 97 active+clean |
+| CephFS | 1/1 healthy |
+| 叢集健康 | HEALTH_OK，`noout` 已解除 |
+
+9/21 重開後 OSD.1／OSD.2 無法加入叢集；這次三顆都正常啟動並加入。這支持 BlueStore 金鑰修復在重開後仍然有效。
+
+這次沒有重新跑 MON／LOCAL／BLUESTORE 三層 hash 比對，判斷依據是 OSD 啟動並加入叢集，以及最終 HEALTH_OK。另外，HA 服務 ct:100 與 vm:107 使用 Ceph 上的磁碟，重新啟動後都恢復 running，但這次沒有做完整的 PVE storage／應用讀寫和新的備份還原測試。
+
+同次重開中，node10 有兩個 HA 服務進入 error，原因是手動重開前沒有進入 HA 維護模式，與 Ceph 無關，詳見 [PVE 更新重開後 HA 服務卡在 error](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)。
+
 ## Sep20 I/O 訊息與安全收尾
 
 Sep20 的 `aio_submit retries` 保留為觀察項目。當次 SMART 檢查沒有看到 media／data integrity error；這不足以保證所有硬體狀態都正常，也沒有證據把本次主要故障歸因於 SSD 損壞。後續可對照 retries 發生時間、負載、OSD 延遲、核心 I/O／reset 訊息及 SMART 計數變化，再判斷是否需獨立追查。
@@ -243,7 +263,8 @@ Sep20 的 `aio_submit retries` 保留為觀察項目。當次 SMART 檢查沒有
 - [ ] 確認 HEALTH_OK，正常 deep scrub 不當成故障；記錄其他警告的實際原因。
 - [ ] 各節點核對 CephFS 真正掛載來源／FSTYPE、PVE storage 狀態與必要應用讀寫。`pvesm status` 可能嘗試啟用 storage，須留意操作脈絡。
 - [ ] 新備份查看最終 TASK OK，再依維護計畫做還原驗證；不得沿用舊日期結果宣稱本次通過。
-- [ ] 另排修復後整機滾動重開驗證及已曝光 key 的安全輪替，各自記錄日期與結果。
+- [x] 修復後整機滾動重開驗證：10/12 kernel 更新時完成，三顆 OSD 正常加入、HEALTH_OK（未重跑三層 hash）。
+- [ ] 已曝光 key 的安全輪替，另排維護並記錄日期與結果。
 
 ## 相關紀錄
 
