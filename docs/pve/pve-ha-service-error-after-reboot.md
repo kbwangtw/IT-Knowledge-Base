@@ -13,7 +13,7 @@ last_modified_at: 2026-10-12
 
 **原因是 node10 在 `reboot` 前沒有先執行 `node-maintenance enable`。HA 在關機過程中不斷嘗試在 node10 啟動服務，重試用完後就進入 error。磁碟、設定和新 kernel 都沒有問題。**
 
-> 紀錄日期：2026-10-12；pve-manager 9.2.21，kernel 從 7.0.14-22-pve 升到 7.0.14-23-pve，Ceph 20.2.4-pve5。node10 手動更新，node11、node12 由 ProxCenter 更新。ct:100 與 vm:107 都已恢復成 running。
+> 紀錄日期：2026-10-12；pve-manager 9.2.21，kernel 從 7.0.14-22-pve 升到 7.0.14-23-pve，Ceph 20.2.4-pve5。node10 手動更新，node11、node12 由 ProxCenter 更新。ct:100 與 vm:107 都已恢復成 running，全部 HA 服務正常；HA Shutdown Policy 已改成 `migrate`。
 
 ## 怎麼發現的？
 
@@ -138,6 +138,8 @@ qm status 107
 ha-manager status | grep -E "error|starting|disabled|stopped" || echo "全部 HA 服務正常"
 ~~~
 
+本次輸出 `全部 HA 服務正常`。
+
 ## 5. 以後怎麼避免？
 
 **手動重開 HA node 的正確順序：**
@@ -151,7 +153,15 @@ reboot
 ha-manager crm-command node-maintenance disable node10
 ~~~
 
-**再加一層保護（可選）：** **Datacenter → Options → HA Settings → Shutdown Policy** 改成 `migrate`。node 關機或重開時，HA 會一律先把服務搬到其他 node，就算忘了先進入維護模式也不會出錯。代價是重開要等服務搬完，速度比較慢。改設定前請先讀 [PVE HA 文件的 Shutdown Policy 章節](https://pve.proxmox.com/pve-docs/chapter-ha-manager.html#ha_manager_shutdown_policy)。本次尚未修改這個設定。
+**再加一層保護（可選）：** **Datacenter → Options → HA Settings → Shutdown Policy** 改成 `migrate`。node 關機或重開時，HA 會一律先把服務搬到其他 node，就算忘了先進入維護模式也不會出錯。代價是重開要等服務搬完，速度比較慢。改設定前請先讀 [PVE HA 文件的 Shutdown Policy 章節](https://pve.proxmox.com/pve-docs/chapter-ha-manager.html#ha_manager_shutdown_policy)。
+
+本次修復後，已把 Shutdown Policy 改成 `migrate`。這個設定存在 cluster 共用的 `/etc/pve/datacenter.cfg`，三台會一起生效。可用下面的指令確認：
+
+~~~bash
+grep -i '^ha' /etc/pve/datacenter.cfg
+~~~
+
+預期看到 `ha: shutdown_policy=migrate`。改成 `migrate` 後，下次重開時服務會先搬走，這個行為還沒有實際重開驗證過；維護模式仍是建議的標準流程，Shutdown Policy 只是忘記時的保險。
 
 ## 本次更新的其他驗收結果
 
@@ -167,7 +177,7 @@ ha-manager crm-command node-maintenance disable node10
 
 ## 本次結論
 
-ct:100 與 vm:107 已救回。根本原因是手動重開前沒有先進入 HA 維護模式，不是 kernel 或儲存的問題。待辦：決定是否把 Shutdown Policy 改成 `migrate`；用 `nslookup` 確認 ct:100 的 DNS 解析，以及 vm:107 上應用程式的實際運作。
+ct:100 與 vm:107 已救回，全部 HA 服務正常。根本原因是手動重開前沒有先進入 HA 維護模式，不是 kernel 或儲存的問題。預防措施已完成：Shutdown Policy 改成 `migrate`。待辦：用 `nslookup` 確認 ct:100 的 DNS 解析、確認 vm:107 上應用程式的實際運作，以及下次重開時確認 `migrate` 有先把服務搬走。
 
 ## 相關紀錄
 
