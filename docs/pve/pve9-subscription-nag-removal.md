@@ -64,7 +64,33 @@ grep -n -B3 -A15 "No valid subscription" $JS
 grep -n "status.toLowerCase" $JS
 ~~~
 
-> 本次另外看到第 21546 行也有一處 `status !== 'active'` 判斷，它不在 `checked_command` 裡。只 patch 第 614 行後，登入彈窗的處理已完成；該處用途尚未確認。
+本次另外看到第 21546 行也有一處 `status !== 'active'` 判斷，它不在 `checked_command` 裡。用下面的指令查看前後程式碼：
+
+~~~bash
+sed -n '21500,21580p' $JS
+~~~
+
+它在 Repositories 頁面元件（`proxmoxNodeAPTRepositoriesGrid` 附近）的 `check_subscription` function 裡：
+
+~~~
+check_subscription: function () {
+    ...
+    Proxmox.Utils.API2Request({
+        url: `/nodes/${me.nodename}/subscription`,
+        ...
+        success: function (response, opts) {
+            const res = response.result;
+            const subscription = !(
+                !res ||
+                !res.data ||
+                res.data.status.toLowerCase() !== 'active'
+            );
+            vm.set('subscriptionActive', subscription);
+            me.getController().updateState();
+        },
+~~~
+
+它只把訂閱狀態存進 `subscriptionActive`，再由 `updateState()` 更新「Node → Updates → Repositories」頁面上的狀態文字，例如提醒 no-subscription repo 不建議用在正式環境。這裡沒有 `Ext.Msg.show`，不會跳出視窗；只有 API 呼叫失敗時才會出現 `Ext.Msg.alert` 錯誤訊息，跟訂閱無關。所以這一處**不需要修改**，Repositories 頁面上的那段提醒文字是正常的。
 
 ## 1. 修改前先確認版本與目標
 
@@ -252,7 +278,7 @@ systemctl restart pveproxy.service
 
 ## 本次結論
 
-三台的 `proxmoxlib.js` 已經 patch，APT hook 已就位，之後升級會自動重新套用。三台 Repository 已確認為 no-subscription（含 Ceph Tentacle），`apt-get update` 無警告或錯誤。三台用無痕視窗登入，都不再跳出提示。待補：第 21546 行判斷的用途。
+三台的 `proxmoxlib.js` 已經 patch，APT hook 已就位，之後升級會自動重新套用。三台 Repository 已確認為 no-subscription（含 Ceph Tentacle），`apt-get update` 無警告或錯誤。三台用無痕視窗登入，都不再跳出提示。第 21546 行的另一處判斷，已確認只是 Repositories 頁面的狀態顯示，不需要修改。
 
 - [Proxmox VE Package Repositories](https://pve.proxmox.com/wiki/Package_Repositories)
 - [Proxmox VE 訂閱方案](https://www.proxmox.com/en/proxmox-virtual-environment/pricing)
