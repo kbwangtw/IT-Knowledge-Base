@@ -14,7 +14,7 @@ last_modified_at: 2026-10-12
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
-| [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/) | 9/22 根因與修復結案：三顆 MON／local／BlueStore 一致、HEALTH_OK；附更新與重開 SOP |
+| [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/) | 9/22 根因與修復結案：三顆 MON／local／BlueStore 一致、HEALTH_OK；10/12 補記修復後整機重開正常；附更新與重開 SOP |
 | [Ceph OSD 和 CephFS 金鑰故障，怎麼恢復？](docs/pve/ceph-osd-cephfs-keyring-recovery/) | 9/17～18 服務復原紀錄；BlueStore 根因與修復已於 9/22 補記 |
 | [Ceph 換金鑰，為什麼 HEALTH_OK 還不夠？](docs/pve/ceph-20-2-4-cephx-aes256k-migration/) | 想了解遷移漏項、storage 金鑰副本與舊範例更正 |
 
@@ -23,7 +23,8 @@ last_modified_at: 2026-10-12
 | 文章 | 適合什麼時候看 |
 | --- | --- |
 | [PVE HA 放置策略：PVE 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy/) | 10/2 補 DNS 互斥 HA 規則、CRS 改 Static；說明為何不能只靠 ProxCenter |
-| [ProxCenter 逐台更新：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 來源檢查、SSH 網段和 sudo 問題；完整三台驗收待補 |
+| [ProxCenter 逐台更新：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 來源檢查、SSH 網段和 sudo 問題；10/12 ProxCenter 完成兩台、三台驗收通過 |
+| [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](docs/pve/pve-ha-service-error-after-reboot/) | 10/12 手動重開前沒進維護模式，ct:100、vm:107 進入 error；查因、清除與重新啟動步驟；Shutdown Policy 改 migrate |
 | [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新、重開、網路掛載，以及備份與還原的不同判準 |
 | [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification/) | 安裝、移除與模板驗證；PVE 已測，PBS 完整流程待測 |
 | [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal/) | 10/12 三台已 patch 並加 APT hook；widget-toolkit 5.2.10 多一個空格的踩雷；三台 Repository 已確認 no-subscription；三台登入驗證完成 |
