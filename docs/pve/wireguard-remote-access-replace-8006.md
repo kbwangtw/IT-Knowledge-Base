@@ -274,7 +274,23 @@ chmod 755 /usr/local/bin/wg-health.sh
 
 ### 9-3 Manager 從外部檢查：wg-reach
 
-100151 最初寫成接內建規則 504（`Agent disconnected`），想在 Agent 010 斷線時告警。**實測不成立**：停掉 ct:109 後，`agent_control` 確實顯示 Disconnected（本環境 `agents_disconnection_time` 為 15m、`agents_disconnection_alert_time` 為 0），但 `alerts.json` 沒有 504 也沒有 100151，`ossec.log` 也沒有斷線紀錄。Wazuh 4.14 的斷線事件為什麼沒有產生，本次沒有查證。
+100151 最初寫成接內建規則 504（`Agent disconnected`），想在 Agent 010 斷線時告警。**實測沒有觸發**：用 `ha-manager` 停掉 ct:109 後，`agent_control` 顯示 Disconnected，但 `alerts.json` 沒有 504 也沒有 100151。
+
+**原因是接錯了規則，不是 Wazuh 沒有產生事件。** `ha-manager ... --state stopped` 是正常關機，Agent 停止前會先通知 Manager，產生的是 **506（Wazuh agent stopped，level 3）**；Manager 已經知道它是主動停止，就不會再產生 504。實測證據：
+
+| 測試 | 關機方式 | Wazuh 產生的告警 |
+| --- | --- | --- |
+| ct:109（10:14） | `ha-manager set ct:109 --state stopped` | 506，agent wireguard |
+| UBClient（10:32） | VM 內 `sudo poweroff` | 506，agent ubclient；超過 17 分鐘仍沒有 504 |
+
+| 規則 | 意思 | 何時出現 |
+| --- | --- | --- |
+| 506 Wazuh agent stopped | Agent 主動通知「要停了」 | 正常關機、服務停止 |
+| 504 Agent disconnected | Manager 等不到 Agent 回報 | 斷電、當機、網路中斷等來不及通知的情況（本次**未實測**） |
+
+排查過程中先後排除了：`log_alert_level` 為 3（504 是 level 3，會寫入）、`local_rules.xml` 沒有任何規則動到 504。一度懷疑 `agents_disconnection_alert_time` 為 0 會停用斷線告警（Wazuh 5.0-beta 文件這樣寫），但改成 1m 後正常關機仍只有 506，這個推測與本次現象無關；它在 4.14 對 504 的實際作用仍未驗證。
+
+只接 506 也不夠：它抓不到斷電與網路中斷。
 
 改成由 Manager（ct:112）主動檢查 ct:109 的 WGDashboard port。WireGuard 本身是 UDP，而且不回應沒有金鑰的封包，沒辦法這樣檢查；10086 連得上，代表容器活著、網路通、WGDashboard 也正常。
 
