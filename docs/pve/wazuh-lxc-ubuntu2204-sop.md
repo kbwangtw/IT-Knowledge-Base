@@ -2415,7 +2415,26 @@ ct:109（wireguard，Agent 010）加上指令監控，每 5 分鐘回報 wg0 與
 
 實驗期間把 `agents_disconnection_alert_time` 由 0 改為 1m（排查「0 是否停用斷線告警」），正常關機的結果不受影響；目前設定為 1m，它對 504 的實際作用仍未驗證。
 
-本次也發現 UBClient（vm:104）在 PVE 啟用了 QEMU Guest Agent，但 VM 內沒有執行，`qm shutdown` 因 `guest-ping` 逾時而失敗，改由 Console 關機。待 VM 內安裝 `qemu-guest-agent`。
+目前 `agents_disconnection_alert_time` 決定保留 1m：如果 0 在 4.14 代表停用，1m 才會在異常中斷時產生 504；如果 0 代表立刻告警，1m 也只是晚 1 分鐘。504 為 level 3，只顯示在 Wazuh Dashboard，不會寄信。異常中斷（`qm stop` 直接斷電）的 504 測試決定不做。
+
+**順帶修正：UBClient 的 QEMU Guest Agent。** 測試時發現 UBClient（vm:104）在 PVE 設定了 `agent: 1`，但 VM 內沒有執行 Guest Agent，`qm shutdown` 因 `guest-ping` 逾時而失敗，只好從 Console 關機。在 node11 一次檢查兩台：
+
+~~~bash
+for id in 104 108; do
+  echo "== vm:$id =="
+  qm config $id | awk '/^agent:/ {print "agent:", $2}'
+  qm agent $id ping 2>/dev/null && echo "Guest Agent 有回應" || echo "Guest Agent 沒有回應"
+done
+~~~
+
+Guest Agent 沒回應時，從 PVE 主機分不出是「沒安裝」還是「沒執行」，要進 VM 確認。
+
+| VM | 結果 | 處理 |
+| --- | --- | --- |
+| UBClient（Ubuntu 26.04.1 LTS） | 沒有回應；`apt` 顯示 `Selecting previously unselected package`，代表從來沒裝過 | VM 內 `sudo apt install -y qemu-guest-agent` 後 `sudo systemctl start qemu-guest-agent` |
+| WinClient（Windows 10 Pro） | 原本就有回應 | 不需處理 |
+
+Ubuntu 的 `qemu-guest-agent` 是 static unit，安裝時會顯示 `not starting it`，所以第一次要手動 start；之後開機偵測到 `/dev/virtio-ports/org.qemu.guest_agent.0` 會自動啟動，不必 `enable`。安裝後 `qm agent 104 ping` 有回應、`get-osinfo` 回傳 Ubuntu 26.04.1 LTS，`qm shutdown 104`、`qm shutdown 108` 都順利完成並回到 stopped。
 
 Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警以 JSON 送到 Graylog 的 Syslog UDP 1514，再由 Graylog Event Definition 寄 Gmail。這是 Wazuh 第一次把告警轉到 Graylog；其他告警仍只在 Wazuh Dashboard。
 
