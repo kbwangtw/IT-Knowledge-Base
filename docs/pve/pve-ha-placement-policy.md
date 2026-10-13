@@ -4,12 +4,12 @@ title: "PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？"
 date: 2026-10-02
 categories: [PVE, HA, ProxCenter]
 permalink: /docs/pve/pve-ha-placement-policy/
-last_modified_at: 2026-10-03
+last_modified_at: 2026-10-13
 ---
 
 # PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？
 
-為了避免更新節點時 DNS、網域控制站一起消失，我在 ProxCenter 設了互斥規則。後來才發現：**節點維護、故障轉移時真正在搬 HA 服務的是 PVE，不是 ProxCenter**。本文整理兩者的分工，以及實際補上的 PVE HA 規則與 CRS 設定。
+為了避免更新節點時 DNS、網域控制站一起消失，我在 ProxCenter 設了互斥規則。後來才發現：**節點維護、故障轉移時真正在搬 HA 服務的是 PVE，不是 ProxCenter**。本文整理兩者的分工，以及實際補上的 PVE HA 規則與 CRS 設定。2026-10-13 起決定**只留 PVE 原生機制**，ProxCenter DRS 停用、規則刪除，也不另裝 ProxLB（見第 7 節）。
 
 > 紀錄日期：2026-10-02；Proxmox VE 9.2.20，三節點（node10、node11、node12），Ceph 共用儲存。本文的設定都已在叢集上完成並驗證；單節點故障與 ProxCenter 完整逐台更新尚未實際演練，見最後的「待驗證」。
 
@@ -19,7 +19,8 @@ last_modified_at: 2026-10-03
 | --- | --- |
 | 以 ProxCenter 為主要管理介面，可以關掉 PVE HA 嗎？ | **不行。** 故障轉移和 fencing 只有 PVE HA 做得到 |
 | ProxCenter 的 Affinity rules 在維護或故障時會生效嗎？ | **HA 資源不一定會**，因為那時是 PVE 在搬 |
-| 那規則要設在哪裡？ | **HA 資源的規則放 PVE；非 HA 的 VM 放 ProxCenter** |
+| 那規則要設在哪裡？ | **全部放 PVE HA rules**（2026-10-13 起 ProxCenter 不再放規則，見第 7 節） |
+| 平常的自動平衡交給誰？ | **只留 PVE 一套**；ProxCenter DRS 停用，不另裝 ProxLB |
 | PVE 的自動平衡要開嗎？ | **目前不開。** HA 資源都是容器，搬一次就中斷一次 |
 
 ## 用 VMware 來理解
@@ -154,6 +155,8 @@ ProxCenter 的 Load Overview 會在叢集名稱旁顯示模式標籤（例如 AU
 原則：**平常負責搬移的只能有一個。** ProxCenter DRS 與 PVE 的 Automatic Rebalance 同時開啟，會互相把服務搬來搬去（乒乓效應）。
 
 ## 規則的正本放哪裡
+
+> 2026-10-13 更新：ProxCenter 的三條規則已全部刪除，DNS、DC 只保留 PVE HA rules；VGA 規則不再設定。以下表格為 10/02～10/12 的狀態，保留作為紀錄，現況見第 7 節。
 
 | 規則 | 正本 | 副本 | 說明 |
 | --- | --- | --- | --- |
@@ -304,6 +307,48 @@ VM 加入 HA 後的注意事項：
 
 舊 kernel 7.0.14-20 保留作為開機退路，穩定運作一週以上再清除。
 
+## 7. 決定只留 PVE 一套機制（2026-10-13）
+
+ProxCenter DRS 和 PVE HA／CRS **沒有整合**，各自獨立運作。兩套同時存在時，規則要兩邊維護，自動平衡也可能互相打架。因此決定只留一套，並一併評估了第三方的 [ProxLB](https://github.com/credativ/ProxLB)（v2.3.0）。
+
+### 為什麼留 PVE
+
+| 比較 | PVE（HA＋CRS） | ProxCenter DRS | ProxLB |
+| --- | --- | --- | --- |
+| 故障轉移、fencing | **只有它做得到** | 否 | 否 |
+| 維護、故障時搬 HA 服務 | **一定是 PVE** | 規則不會生效 | 否 |
+| 執行位置 | 每台節點，不依賴外部服務 | CT 110，所在節點掛了就停 | 另一個 daemon，要自己維護 |
+| 平衡非 HA guest | 否 | 可 | 可 |
+
+PVE HA 本來就必須留，故障和維護時也一定照 PVE 的規則搬。只留 ProxCenter 或 ProxLB 都還是得同時維護兩套規則，所以只留 PVE 是唯一不會打架的選擇。
+
+ProxLB 的 README 也提到，PVE 9.2 起內建 Dynamic Load Balancing，可以平衡 HA 資源；ProxLB 的優勢在於平衡非 HA guest，以及更複雜的排程邏輯。本叢集重要服務已全部加入 HA，用不到這些功能，所以**不安裝**。
+
+### 實際處理
+
+| 項目 | 結果 |
+| --- | --- |
+| ProxCenter → DRS → Affinity | DNS、DC、VGA 三條規則已刪除，畫面顯示 `No affinity rules configured` |
+| ProxCenter → DRS → General settings | `DRS enabled` 維持關閉 |
+| PVE HA 狀態 | quorum OK、fencing armed、三台 lrm active；master 顯示 `static load CRS` |
+| PVE HA Resource Affinity Rules | DNS（ct:100、ct:101）、DC（vm:106、vm:107）皆為 negative、enabled |
+| PVE HA Node Affinity Rules | 無 |
+| `grep crs /etc/pve/datacenter.cfg` | `crs: ha=static,ha-rebalance-on-start=1`，與 10/02 相同，沒有自動平衡 |
+
+ProxCenter 的 Operation mode 仍顯示 Automatic。DRS 開關關閉時不會執行，但建議改成 **Manual** 當作保險，避免日後有人誤開 DRS 就直接開始搬移。
+
+ProxCenter 的 Rolling Update 不屬於 DRS，可以繼續使用；它會呼叫 PVE 維護模式，HA 服務仍由 PVE 搬移。
+
+### PVE HA Resources 的 Auto-Rebalance 欄位
+
+HA Resources 清單中 12 台的 `Auto-Rebalance` 都顯示 `true`，但 `datacenter.cfg` 沒有開啟自動平衡的參數。推測這一欄代表「允許被自動平衡」，要等全域開關打開才會生效（未查證官方文件）。目前沒有觀察到任何服務被自動搬移。
+
+### 只留 PVE 的代價
+
+- **非 HA 的 guest 沒有人自動平衡，也沒有規則保護。** WinClient（108）、UBClient（104）有顯示卡直通，本來就無法遷移；更新前照第 6 節先關機即可。
+- **新增重要服務時，要記得加入 HA resources**，必要時一併建立 HA rules，否則 PVE 不會管它。
+- **服務集中只能人工分散。** 2026-10-13 的 HA 資源分布為 node10 7 台（AdGuard、librenms、IPAM、Graylog、wireguard、ai、DC02）、node11 1 台（ProxCenter）、node12 4 台（Pihole、wazuh、DC01、CA）。`static` CRS 只影響啟動和故障轉移時的放置位置，不會搬動正在運作的服務。
+
 ## 待驗證與後續
 
 | 項目 | 狀態 |
@@ -313,7 +358,10 @@ VM 加入 HA 後的注意事項：
 | 下次逐台更新時，確認 DC 規則全程有效、HA 資源維護後是否自動搬回原節點 | **完成（2026-10-08）**：DC 規則全程有效；服務不一定全部自動搬回，需手動搬回，見第 6 節 |
 | 單節點故障演練（實測 Ceph I/O latency 與 HA 恢復時間） | 未演練 |
 | node10 承載大部分服務，需分散 | 完成：更新後恢復為 6／4／4 |
-| Dynamic Load 與 Automatic Rebalance 的實際行為 | 未查證 |
+| Dynamic Load 與 Automatic Rebalance 的實際行為 | 未查證；目前全域未開啟（2026-10-13 確認） |
+| ProxCenter DRS 停用、規則改由 PVE 統一管理 | **完成（2026-10-13）**，見第 7 節 |
+| ProxCenter Operation mode 改為 Manual（保險） | 建議，未執行 |
+| HA 資源集中在 node10（7／1／4），是否再分散 | 待規劃 |
 
 單節點故障的預期行為（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，且在節點回來前沒有再壞一顆硬碟的餘裕。
 
@@ -322,3 +370,4 @@ VM 加入 HA 後的注意事項：
 - [Proxmox VE：High Availability（含 CRS、HA rules）](https://pve.proxmox.com/pve-docs/chapter-ha-manager.html)
 - [Ceph：Monitor／OSD 心跳與 down／out 設定](https://docs.ceph.com/en/latest/rados/configuration/mon-osd-interaction/)
 - [ProxCenter 文件：DRS](https://docs.proxcenter.io/automation/drs/)
+- [ProxLB（含與 PVE Dynamic Load Balancing 的比較）](https://github.com/credativ/ProxLB)
