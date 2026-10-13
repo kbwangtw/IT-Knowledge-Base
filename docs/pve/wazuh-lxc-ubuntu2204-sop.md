@@ -4,7 +4,7 @@ title: "在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）"
 date: 2026-09-29
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-sop/
-last_modified_at: 2026-09-30
+last_modified_at: 2026-10-13
 ---
 
 # 在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）
@@ -31,6 +31,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
 | 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目 |
 | 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
+| 14 | WireGuard VPN 健康監控 | 完成 | 2026-10-13：ct:109 指令監控 + 規則 100150／100151；`syslog_output` 只把 wireguard 群組送 Graylog；Gmail 告警實測收到 |
 
 ## 先認識四個名詞
 
@@ -2398,6 +2399,14 @@ jt-ipam → Wazuh → 新增：API URL `https://<Wazuh IP>:55000`、使用者 `j
 之後此頁面若出現新的 IP，才是真正需要評估是否安裝 Agent 的主機。
 
 待改善：匯入 Wazuh CA 後開啟 TLS 驗證；Wazuh 升級後確認 `api.yaml` 的 `host` 設定與 nftables 規則仍在。
+
+## 14. WireGuard VPN 健康監控（2026-10-13）
+
+ct:109（wireguard，Agent 010）加上指令監控，每 5 分鐘回報 wg0 與 WGDashboard 狀態。Manager 新增自訂規則 100150（wg0 停止或 WGDashboard 不是 active）與 100151（Agent 010 斷線），兩條都屬 `wireguard` 群組、level 10。
+
+Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警以 JSON 送到 Graylog 的 Syslog UDP 1514，再由 Graylog Event Definition 寄 Gmail。這是 Wazuh 第一次把告警轉到 Graylog；其他告警仍只在 Wazuh Dashboard。
+
+完整設定、踩雷與實測見 [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/) 第 9 節。
 
 ## 風險與注意事項
 

@@ -4,7 +4,7 @@ title: "不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家"
 permalink: /docs/pve/wireguard-remote-access-replace-8006/
 date: 2026-10-12
 categories: [PVE, WireGuard, VPN, Security, Network]
-last_modified_at: 2026-10-12
+last_modified_at: 2026-10-13
 ---
 
 # 不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家
@@ -197,11 +197,147 @@ fail2ban-client status proxmox
 grep "Ban " /var/log/fail2ban.log | awk '{print $1}' | sort | uniq -c | tail -7
 ~~~
 
-3. 把 ct:109 的 WireGuard 狀態加入既有監控（Wazuh、LibreNMS 或 Graylog 告警），VPN 出問題時能先知道。
+3. 把 VPN 加入監控：已於 10/13 完成，見第 9 節。
+
+## 9. VPN 監控：Wazuh 偵測、Graylog 寄信
+
+8006 不對外之後，VPN 是唯一的遠端管理入口，它出問題要能先知道。ct:109 早在 9/30 就裝了 Wazuh Agent（ID 010），但 Agent 是 Active 只代表主機活著：**wg0 停掉或 WGDashboard 掛掉時，Wazuh 預設不會告警**。WGDashboard 停掉也要注意，因為 wg0 是靠它開機時帶起來的。
+
+本次補上的告警路徑：
+
+~~~text
+ct:109 wg-health.sh（每 5 分鐘）
+  → Wazuh Agent 010（指令監控）
+  → Wazuh Manager 規則 100150／100151（level 10）
+  → syslog_output → Graylog Syslog UDP 1514 → Infrastructure Syslog
+  → Event Definition「WireGuard VPN 異常」→ Gmail
+~~~
+
+### 9-1 ct:109：健康檢查 script 與指令監控
+
+在 ct:109 內：
+
+~~~bash
+cat > /usr/local/bin/wg-health.sh <<'EOF2'
+#!/bin/sh
+# 給 Wazuh 指令監控用：輸出一行 wg0 與 WGDashboard 的狀態
+if ip link show wg0 >/dev/null 2>&1; then W=up; else W=down; fi
+D=$(systemctl is-active wg-dashboard 2>/dev/null)
+echo "wg-health: wg0=$W dashboard=$D"
+EOF2
+chmod 755 /usr/local/bin/wg-health.sh
+/usr/local/bin/wg-health.sh          # wg-health: wg0=up dashboard=active
+~~~
+
+在 Agent 的 `ossec.conf` 最後加一個 `<ossec_config>` 區塊（檔案可以有多個區塊，不必動原本內容），先備份：
+
+~~~xml
+<ossec_config>
+  <localfile>
+    <log_format>full_command</log_format>
+    <command>/usr/local/bin/wg-health.sh</command>
+    <alias>wg-health</alias>
+    <frequency>300</frequency>
+  </localfile>
+</ossec_config>
+~~~
+
+重啟 `wazuh-agent` 後，`/var/ossec/logs/ossec.log` 出現 `Monitoring full output of command(300): /usr/local/bin/wg-health.sh`，代表已載入。把檢查寫成獨立 script，比直接在 XML 裡寫 `&&` 好維護。
+
+### 9-2 Wazuh Manager：告警規則
+
+先列出 `local_rules.xml` 已使用的規則 ID，避免衝突（本案已用到 100140），再加入：
+
+~~~xml
+<group name="wireguard,vpn,">
+  <rule id="100150" level="10">
+    <if_sid>530</if_sid>
+    <match>wg-health</match>
+    <regex type="pcre2">wg0=down|dashboard=(?!active)</regex>
+    <description>WireGuard ct:109: wg0 down or WGDashboard not active</description>
+  </rule>
+
+  <rule id="100151" level="10">
+    <if_sid>504</if_sid>
+    <match>wireguard</match>
+    <description>WireGuard ct:109: Wazuh agent disconnected</description>
+  </rule>
+</group>
+~~~
+
+- 530 是 Wazuh 內建「指令輸出」事件的基礎規則；`<match>` 與 `<regex>` 都要符合才觸發。
+- `dashboard=(?!active)` 表示 dashboard 後面不是 active，`inactive`、`failed` 都算。
+- 504 是內建的 Agent 斷線事件，預設等級低，100151 把 wireguard 這台提高到 10。
+
+`/var/ossec/bin/wazuh-analysisd -t` 通過後再重啟 `wazuh-manager`。
+
+### 9-3 Wazuh → Graylog
+
+在 Manager 的 `ossec.conf` 加入，只轉送 `wireguard` 群組，不把全部告警灌進 Graylog：
+
+~~~xml
+<ossec_config>
+  <syslog_output>
+    <server><Graylog IP></server>
+    <port>1514</port>
+    <group>wireguard</group>
+    <format>json</format>
+  </syslog_output>
+</ossec_config>
+~~~
+
+Wazuh 4.14 執行 `wazuh-control enable client-syslog` 會提示此選項已過時，csyslogd 預設就會啟動；重啟後用 `wazuh-control status` 確認 `wazuh-csyslogd is running`。
+
+**踩雷：`<server>` 第一次填成 ct:109 自己的 IP**，告警被送到 WireGuard 容器、直接丟掉，Graylog 搜不到。填之前先用 `pct exec <Graylog CTID> -- ip -br addr show eth0` 確認 Graylog 的 IP。用 `sed` 修正時也要注意 `s#舊#新#` 的順序，寫反了不會報錯，只是什麼都沒改。
+
+Graylog 收到的訊息：
+
+| 欄位 | 結果 |
+| --- | --- |
+| Received by | Syslog UDP 1514（與 PVE、PBS 同一個 Input） |
+| Routed into streams | Infrastructure Syslog |
+| source | wazuh |
+| message | JSON，含 `"id":"100150"`、描述，以及 `full_log` 裡的 `wg0=up dashboard=inactive` |
+
+**另一個踩雷：** Graylog 搜尋列左邊的 stream 欄位如果選了「All events」，只會搜尋 Graylog 自己產生的告警事件，搜不到日誌訊息。測試時保持空白，搜尋所有 stream。
+
+### 9-4 Graylog：Event Definition 與通知
+
+| 欄位 | 值 |
+| --- | --- |
+| Title／Priority | WireGuard VPN 異常／High |
+| Search Query | `source:wazuh AND "WireGuard ct:109"`（兩條規則的描述都以此開頭） |
+| Streams | Infrastructure Syslog |
+| Search within／Execute every | 5 分鐘／1 分鐘 |
+| Notification | VPN 異常通知（Email），主旨 `【VPN 告警】：${event_definition_title}` |
+| Grace Period | 30 分鐘 |
+| Message Backlog | 5 |
+
+Wazuh 每 5 分鐘產生一次告警，沒有 Grace Period 就會每 5 分鐘寄一封。Grace Period 期間內再測試不會寄信，屬正常。
+
+### 9-5 實測（2026-10-13）
+
+停止 WGDashboard 不會讓 wg0 斷線，所以拿它來做安全測試：
+
+~~~bash
+pct exec 109 -- systemctl stop wg-dashboard
+# 等 6～7 分鐘，確認後立刻啟動回來
+pct exec 109 -- systemctl start wg-dashboard
+~~~
+
+| 環節 | 結果 |
+| --- | --- |
+| script | 停止後輸出 `dashboard=inactive`，啟動後回到 `active` |
+| Wazuh | `alerts.json` 有 100150（level 10，agent 010 wireguard），停止期間每 5 分鐘一筆 |
+| Graylog | 收到訊息，進入 Infrastructure Syslog |
+| Event Definition | Last Matched「a minute ago」 |
+| Gmail | 09:42 收到正式告警「WireGuard VPN 異常」，事件時間 09:41:27 |
+
+規則 100151（Agent 斷線）沒有實際停掉 ct:109 測試。
 
 ## 本次結論
 
-外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上；8006 轉送已刪除，從外部確認無法連線，VPN 仍可用。待辦：檢查數據機其他轉送規則、觀察 Fail2Ban 封鎖數量變化、把 VPN 加入監控。
+外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上；8006 轉送已刪除，從外部確認無法連線，VPN 仍可用。VPN 監控已完成：wg0 或 WGDashboard 異常時，Wazuh 告警經 Graylog 寄到 Gmail，10/13 實測收到。待辦：檢查數據機其他轉送規則、觀察 Fail2Ban 封鎖數量變化、實測 Agent 斷線告警（100151）。
 
 ## 相關紀錄
 
