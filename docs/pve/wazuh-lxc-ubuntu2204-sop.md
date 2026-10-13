@@ -31,7 +31,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
 | 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目 |
 | 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
-| 14 | WireGuard VPN 健康監控 | 完成 | 2026-10-13：ct:109 指令監控 + 規則 100150／100151；`syslog_output` 只把 wireguard 群組送 Graylog；Gmail 告警實測收到 |
+| 14 | WireGuard VPN 健康監控 | 完成 | 2026-10-13：ct:109 內部檢查（100150）＋ Manager 外部檢查 ct:109（100151）；`syslog_output` 只把 wireguard 群組送 Graylog；兩種情況的 Gmail 告警都實測收到 |
 
 ## 先認識四個名詞
 
@@ -2402,7 +2402,9 @@ jt-ipam → Wazuh → 新增：API URL `https://<Wazuh IP>:55000`、使用者 `j
 
 ## 14. WireGuard VPN 健康監控（2026-10-13）
 
-ct:109（wireguard，Agent 010）加上指令監控，每 5 分鐘回報 wg0 與 WGDashboard 狀態。Manager 新增自訂規則 100150（wg0 停止或 WGDashboard 不是 active）與 100151（Agent 010 斷線），兩條都屬 `wireguard` 群組、level 10。
+ct:109（wireguard，Agent 010）加上指令監控，每 5 分鐘回報 wg0 與 WGDashboard 狀態（規則 100150）。Manager 本身也加上指令監控，每 5 分鐘從外部連 ct:109 的 10086（規則 100151），兩條都屬 `wireguard` 群組、level 10。
+
+**Agent 斷線告警實測沒有作用：** 100151 最初接內建規則 504（`Agent disconnected`）。停掉 ct:109 後，`agent_control` 顯示 Disconnected，但 `alerts.json` 沒有 504，`ossec.log` 也沒有斷線紀錄（`agents_disconnection_time` 15m、`agents_disconnection_alert_time` 0），所以改成 Manager 主動檢查。其他 Agent 若也想在斷線時告警，不能假設 504 會觸發，要先實測。
 
 Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警以 JSON 送到 Graylog 的 Syslog UDP 1514，再由 Graylog Event Definition 寄 Gmail。這是 Wazuh 第一次把告警轉到 Graylog；其他告警仍只在 Wazuh Dashboard。
 
