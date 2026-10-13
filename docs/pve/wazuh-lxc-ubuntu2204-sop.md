@@ -4,7 +4,7 @@ title: "在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）"
 date: 2026-09-29
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-sop/
-last_modified_at: 2026-09-30
+last_modified_at: 2026-10-13
 ---
 
 # 在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）
@@ -31,6 +31,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
 | 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目 |
 | 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
+| 14 | WireGuard VPN 健康監控 | 完成 | 2026-10-13：ct:109 內部檢查（100150）＋ Manager 外部檢查 ct:109（100151）；`syslog_output` 只把 wireguard 群組送 Graylog；兩種情況的 Gmail 告警都實測收到 |
 
 ## 先認識四個名詞
 
@@ -2398,6 +2399,46 @@ jt-ipam → Wazuh → 新增：API URL `https://<Wazuh IP>:55000`、使用者 `j
 之後此頁面若出現新的 IP，才是真正需要評估是否安裝 Agent 的主機。
 
 待改善：匯入 Wazuh CA 後開啟 TLS 驗證；Wazuh 升級後確認 `api.yaml` 的 `host` 設定與 nftables 規則仍在。
+
+## 14. WireGuard VPN 健康監控（2026-10-13）
+
+ct:109（wireguard，Agent 010）加上指令監控，每 5 分鐘回報 wg0 與 WGDashboard 狀態（規則 100150）。Manager 本身也加上指令監控，每 5 分鐘從外部連 ct:109 的 10086（規則 100151），兩條都屬 `wireguard` 群組、level 10。
+
+**Agent 停止與斷線：正常關機產生 506，不是 504。** 100151 最初接內建規則 504（`Agent disconnected`），停掉 ct:109 後沒有觸發。後續實測確認：正常關機時 Agent 會先通知 Manager，產生 **506（Wazuh agent stopped，level 3）**，不會再有 504。
+
+| 實測（2026-10-13） | 關機方式 | 結果 |
+| --- | --- | --- |
+| ct:109（Agent 010） | `ha-manager set ct:109 --state stopped` | 506 |
+| UBClient（Agent 011） | VM 內 `sudo poweroff` | 506；超過 17 分鐘仍無 504 |
+
+504 應該只在 Agent 來不及通知時出現（斷電、當機、網路中斷），本次未實測。其他 Agent 若要做停止／斷線告警：正常停止接 506，異常中斷要另外實測 504；對重要服務，像 VPN 這樣從外部主動檢查較可靠。
+
+實驗期間把 `agents_disconnection_alert_time` 由 0 改為 1m（排查「0 是否停用斷線告警」），正常關機的結果不受影響；目前設定為 1m，它對 504 的實際作用仍未驗證。
+
+目前 `agents_disconnection_alert_time` 決定保留 1m：如果 0 在 4.14 代表停用，1m 才會在異常中斷時產生 504；如果 0 代表立刻告警，1m 也只是晚 1 分鐘。504 為 level 3，只顯示在 Wazuh Dashboard，不會寄信。異常中斷（`qm stop` 直接斷電）的 504 測試決定不做。
+
+**順帶修正：UBClient 的 QEMU Guest Agent。** 測試時發現 UBClient（vm:104）在 PVE 設定了 `agent: 1`，但 VM 內沒有執行 Guest Agent，`qm shutdown` 因 `guest-ping` 逾時而失敗，只好從 Console 關機。在 node11 一次檢查兩台：
+
+~~~bash
+for id in 104 108; do
+  echo "== vm:$id =="
+  qm config $id | awk '/^agent:/ {print "agent:", $2}'
+  qm agent $id ping 2>/dev/null && echo "Guest Agent 有回應" || echo "Guest Agent 沒有回應"
+done
+~~~
+
+Guest Agent 沒回應時，從 PVE 主機分不出是「沒安裝」還是「沒執行」，要進 VM 確認。
+
+| VM | 結果 | 處理 |
+| --- | --- | --- |
+| UBClient（Ubuntu 26.04.1 LTS） | 沒有回應；`apt` 顯示 `Selecting previously unselected package`，代表從來沒裝過 | VM 內 `sudo apt install -y qemu-guest-agent` 後 `sudo systemctl start qemu-guest-agent` |
+| WinClient（Windows 10 Pro） | 原本就有回應 | 不需處理 |
+
+Ubuntu 的 `qemu-guest-agent` 是 static unit，安裝時會顯示 `not starting it`，所以第一次要手動 start；之後開機偵測到 `/dev/virtio-ports/org.qemu.guest_agent.0` 會自動啟動，不必 `enable`。安裝後 `qm agent 104 ping` 有回應、`get-osinfo` 回傳 Ubuntu 26.04.1 LTS，`qm shutdown 104`、`qm shutdown 108` 都順利完成並回到 stopped。
+
+Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警以 JSON 送到 Graylog 的 Syslog UDP 1514，再由 Graylog Event Definition 寄 Gmail。這是 Wazuh 第一次把告警轉到 Graylog；其他告警仍只在 Wazuh Dashboard。
+
+完整設定、踩雷與實測見 [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/) 第 9 節。
 
 ## 風險與注意事項
 

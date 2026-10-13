@@ -3,7 +3,7 @@ layout: default
 title: "ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？"
 date: 2026-08-26
 categories: [PVE, ProxCenter, Ceph]
-last_modified_at: 2026-10-02
+last_modified_at: 2026-10-12
 ---
 
 # ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？
@@ -12,7 +12,7 @@ last_modified_at: 2026-10-02
 
 > 文中 IP 皆為文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24），並非實際環境位址；照做前請換成自己的位址。
 
-**本文的成功證據到 node12 為止，沒有完整三台更新、重開與驗收紀錄。**
+**8/26 的成功證據到 node12 為止。10/12 的 kernel 更新由 ProxCenter 完成 node11、node12 的更新與重開，node10 改為手動；三台的驗收紀錄見文末。**
 
 > 實測日期：2026-08-26。這是當時版本的排查紀錄；設定中的 IP、帳號與 VMID 是案例值。
 
@@ -132,6 +132,63 @@ Verifying node health
 
 這支持「原來的三個阻礙已排除，node12 更新流程能往下走」。要宣告整個叢集更新完成，仍需每台的版本、重開後狀態、VM／HA、Ceph 和維護旗標紀錄。
 
+## 2026-10-12：ProxCenter 完成兩台更新與重開
+
+這次更新 kernel（7.0.14-22-pve → 7.0.14-23-pve，pve-manager 維持 9.2.21）。node11、node12 由 ProxCenter 更新並重開，node10 以手動更新。
+
+驗收時三台的 running kernel 都是 7.0.14-23-pve，uptime 分別是 node11 14 分鐘、node12 10 分鐘、node10 8 分鐘。從 uptime 看，ProxCenter 這次先處理 node11，再處理 node12，和 8/26 設定的 node12 → node11 順序不同；記錄時以實際順序為準。
+
+| 項目 | 結果 |
+| --- | --- |
+| Cluster | Quorate Yes，3 nodes |
+| Ceph | HEALTH_OK；3 MON quorum；OSD 3 up／3 in；97 PG active+clean；CephFS healthy |
+| `noout` | 已解除 |
+| node11、node12 | 沒有 HA 服務異常 |
+| node10（手動） | ct:100、vm:107 進入 HA error，已修復 |
+
+node10 的 HA error 不是 ProxCenter 造成的：手動 `reboot` 前沒有先執行 `ha-manager crm-command node-maintenance enable node10`，HA 在關機過程中反覆嘗試啟動服務而失敗。ProxCenter 流程會自動進入維護模式，所以由它處理的兩台沒有這個問題。原因與救回步驟見 [PVE 更新重開後 HA 服務卡在 error](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)。
+
+同一段時間的 node10 工作紀錄裡，有一筆 proxcenter@pve token 發出的 `hamigrate 107` 為 ERROR（15:42:06）。當時 node10 正在手動更新與重開，本次沒有另外追查這筆搬移請求的來源與失敗原因。
+
+ProxCenter 仍沒有「三台都由它完成」的紀錄。要補齊這個驗證，得先處理下一節「ProxCenter 在自己管理的 cluster 裡」的問題。
+
+## ProxCenter 在自己管理的 cluster 裡
+
+本案的 ProxCenter 是 ct:110，平常在 node11 上，受 PVE HA 管理。輪到 ct:110 所在的 node 時，ProxCenter 會讓這台進入維護模式，HA 再把 ct:110 搬走；容器搬移會先停止再啟動，等於 ProxCenter 在流程途中被自己停掉。ProxCenter 是否特別處理這種情況，本次沒有查證。
+
+因此這個環境採用以下做法（下文稱「方案 A」）：
+
+1. ProxCenter 所在的 node11 先手動更新：`node-maintenance enable` → `apt full-upgrade` → `reboot` → 驗收 → `node-maintenance disable`。維護模式解除時，HA 會把原本在 node11 的服務（包含 ct:110）搬回來。
+2. 確認 ct:110 回到 node11，再用 ProxCenter 只更新 node10、node12。
+3. 每台之間的人工批准前，確認服務都回到 `started`。
+
+如果要讓 ProxCenter 自己跑完全部三台，比較可靠的做法是把 ProxCenter 移到 cluster 外面，例如另一台主機。本案尚未這樣部署。
+
+## 2026-10-12：沒有可用更新時，ProxCenter 不會啟動
+
+10/12 的 kernel 更新完成後，想用方案 A 實驗一次 rolling update。事前檢查結果：
+
+| 檢查 | 結果 |
+| --- | --- |
+| `apt list --upgradable`（三台） | 都沒有可更新的套件 |
+| node11 上非 HA 的 VM | VM104、VM108，都已關機 |
+| HA 規則 | 只有兩條互斥規則（ct:100／ct:101、vm:106／vm:107），沒有把 ct:110 固定在某台 node |
+| Cluster／Ceph | Quorate Yes、HEALTH_OK、OSD 3 up／3 in、97 PG active+clean，沒有 `noout` |
+
+ProxCenter 的 Rolling Update 頁面顯示三台版本都是 9.2.21，Available Updates 都是 0，下方訊息為 `0 update(s) available on 0 node(s)` 與 `Up to date`。畫面上只有 `Check for updates` 按鈕，**沒有可以啟動 rolling update 的選項**。
+
+結論：ProxCenter 會先檢查每台的可用更新，全部為 0 時不提供執行，也就不會進入維護模式、搬移服務或重開。它不能拿來單純測試維護模式與重開流程，要等有實際更新時再實驗。ProxCenter 的 Available Updates 與 `apt list --upgradable` 的結果一致。
+
+本次沒有查看 ProxCenter Settings 裡是否有強制執行之類的選項。
+
+執行時可以在 ProxCenter 不會維護的 node 上開一個監看視窗，即時看到維護模式、服務搬移、`noout` 與 OSD 狀態：
+
+~~~bash
+watch -n 5 'ha-manager status | grep -E "lrm|service"; echo; ceph osd dump | grep "^flags"; ceph -s | grep -E "health|osd:"'
+~~~
+
+這裡用 `grep "^flags"`，只抓 cluster 層級的旗標那一行；只寫 `grep flags` 也會抓到每個 pool 的資料，畫面會被洗掉。
+
 ## 下次可直接沿用的檢查順序
 
 1. 先確認 quorum、Ceph、HA 與工作負載容量。
@@ -140,3 +197,6 @@ Verifying node health
 4. 以同一帳號測試非互動 sudo。
 5. 先安排本機儲存 VM，再批准維護。
 6. 每台完成後驗證健康狀態；失敗就停下來查，別直接處理下一台。
+7. 某一台改用手動更新時，`reboot` 前一定要先 `node-maintenance enable`，重開並驗收後再 `disable`。
+8. 先在 ProxCenter 按 `Check for updates` 或用 `apt list --upgradable` 確認真的有更新，並檢查有沒有 `ceph-*` 套件；沒有更新時 ProxCenter 不會執行。
+9. ProxCenter 所在的 node 不交給 ProxCenter 更新，改用方案 A 手動處理。
