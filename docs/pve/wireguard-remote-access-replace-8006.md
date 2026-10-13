@@ -206,12 +206,13 @@ grep "Ban " /var/log/fail2ban.log | awk '{print $1}' | sort | uniq -c | tail -7
 本次補上的告警路徑：
 
 ~~~text
-ct:109 wg-health.sh（每 5 分鐘）
-  → Wazuh Agent 010（指令監控）
-  → Wazuh Manager 規則 100150／100151（level 10）
+ct:109 內部：wg-health.sh（每 5 分鐘）→ Wazuh Agent 010 → 規則 100150
+ct:109 外部：Wazuh Manager 的 wg-reach.sh（每 5 分鐘）→ 規則 100151
   → syslog_output → Graylog Syslog UDP 1514 → Infrastructure Syslog
   → Event Definition「WireGuard VPN 異常」→ Gmail
 ~~~
+
+兩個角度互補：內部檢查抓得到 wg0、WGDashboard 停掉；但 ct:109 整台停機時，它自己也無法回報，要靠 Manager 從外面檢查。
 
 ### 9-1 ct:109：健康檢查 script 與指令監控
 
@@ -258,20 +259,46 @@ chmod 755 /usr/local/bin/wg-health.sh
   </rule>
 
   <rule id="100151" level="10">
-    <if_sid>504</if_sid>
-    <match>wireguard</match>
-    <description>WireGuard ct:109: Wazuh agent disconnected</description>
+    <if_sid>530</if_sid>
+    <match>wg-reach: unreachable</match>
+    <description>WireGuard ct:109: unreachable from Wazuh manager (container down or network)</description>
   </rule>
 </group>
 ~~~
 
 - 530 是 Wazuh 內建「指令輸出」事件的基礎規則；`<match>` 與 `<regex>` 都要符合才觸發。
 - `dashboard=(?!active)` 表示 dashboard 後面不是 active，`inactive`、`failed` 都算。
-- 504 是內建的 Agent 斷線事件，預設等級低，100151 把 wireguard 這台提高到 10。
+- 100151 比對 Manager 自己執行的 wg-reach 輸出，見 9-3。
 
 `/var/ossec/bin/wazuh-analysisd -t` 通過後再重啟 `wazuh-manager`。
 
-### 9-3 Wazuh → Graylog
+### 9-3 Manager 從外部檢查：wg-reach
+
+100151 最初寫成接內建規則 504（`Agent disconnected`），想在 Agent 010 斷線時告警。**實測不成立**：停掉 ct:109 後，`agent_control` 確實顯示 Disconnected（本環境 `agents_disconnection_time` 為 15m、`agents_disconnection_alert_time` 為 0），但 `alerts.json` 沒有 504 也沒有 100151，`ossec.log` 也沒有斷線紀錄。Wazuh 4.14 的斷線事件為什麼沒有產生，本次沒有查證。
+
+改成由 Manager（ct:112）主動檢查 ct:109 的 WGDashboard port。WireGuard 本身是 UDP，而且不回應沒有金鑰的封包，沒辦法這樣檢查；10086 連得上，代表容器活著、網路通、WGDashboard 也正常。
+
+在 ct:112 內：
+
+~~~bash
+cat > /usr/local/bin/wg-reach.sh <<'EOF2'
+#!/bin/bash
+# 給 Wazuh 指令監控用：從 Manager 檢查 ct:109 的 WGDashboard port 能不能連
+H=<ct:109 IP>
+if timeout 3 bash -c "</dev/tcp/$H/10086" 2>/dev/null; then
+  echo "wg-reach: reachable"
+else
+  echo "wg-reach: unreachable"
+fi
+EOF2
+chmod 755 /usr/local/bin/wg-reach.sh
+~~~
+
+Manager 的 `ossec.conf` 一樣用 `<localfile>` 加上 `full_command`，`<command>` 指向 `/usr/local/bin/wg-reach.sh`，`<alias>wg-reach</alias>`，`<frequency>300</frequency>`。Manager 自己產生的告警，agent 會顯示 `000`。
+
+偵測時間從原本預期的約 16 分鐘（15 分鐘斷線判定再加告警），縮短為最多 5 分鐘。
+
+### 9-4 Wazuh → Graylog
 
 在 Manager 的 `ossec.conf` 加入，只轉送 `wireguard` 群組，不把全部告警灌進 Graylog：
 
@@ -301,12 +328,12 @@ Graylog 收到的訊息：
 
 **另一個踩雷：** Graylog 搜尋列左邊的 stream 欄位如果選了「All events」，只會搜尋 Graylog 自己產生的告警事件，搜不到日誌訊息。測試時保持空白，搜尋所有 stream。
 
-### 9-4 Graylog：Event Definition 與通知
+### 9-5 Graylog：Event Definition 與通知
 
 | 欄位 | 值 |
 | --- | --- |
 | Title／Priority | WireGuard VPN 異常／High |
-| Search Query | `source:wazuh AND "WireGuard ct:109"`（兩條規則的描述都以此開頭） |
+| Search Query | `source:wazuh AND "WireGuard ct:109"`（兩條規則的描述都以此開頭，不必為 100151 另外設定） |
 | Streams | Infrastructure Syslog |
 | Search within／Execute every | 5 分鐘／1 分鐘 |
 | Notification | VPN 異常通知（Email），主旨 `【VPN 告警】：${event_definition_title}` |
@@ -315,7 +342,7 @@ Graylog 收到的訊息：
 
 Wazuh 每 5 分鐘產生一次告警，沒有 Grace Period 就會每 5 分鐘寄一封。Grace Period 期間內再測試不會寄信，屬正常。
 
-### 9-5 實測（2026-10-13）
+### 9-6 實測（2026-10-13）
 
 停止 WGDashboard 不會讓 wg0 斷線，所以拿它來做安全測試：
 
@@ -333,11 +360,26 @@ pct exec 109 -- systemctl start wg-dashboard
 | Event Definition | Last Matched「a minute ago」 |
 | Gmail | 09:42 收到正式告警「WireGuard VPN 異常」，事件時間 09:41:27 |
 
-規則 100151（Agent 斷線）沒有實際停掉 ct:109 測試。
+ct:109 整台停機測試。ct:109 受 HA 管理，用 `pct shutdown` 會被 HA 立刻拉起來，要改用 `ha-manager`；測試期間 VPN 會斷線，要在內網操作：
+
+~~~bash
+ha-manager set ct:109 --state stopped
+# 等 6 分鐘，確認後立刻開回來
+ha-manager set ct:109 --state started
+~~~
+
+| 環節 | 結果 |
+| --- | --- |
+| wg-reach | 停機後輸出 `wg-reach: unreachable` |
+| Wazuh | 10:18:33 產生 100151（level 10，agent 000 wazuh） |
+| Gmail | 10:19 收到正式告警「WireGuard VPN 異常」 |
+| 恢復 | `ha-manager set ct:109 --state started` 後，HA 依負載把 ct:109 放到 node11；IP 與設定不變，`wg0=up dashboard=active` |
+
+**Grace Period 會影響測試**：上一封信 09:42 寄出，第一次停機測試的事件落在 30 分鐘內，就算觸發也不會寄信。連續測試時，要等前一封信超過 30 分鐘。
 
 ## 本次結論
 
-外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上；8006 轉送已刪除，從外部確認無法連線，VPN 仍可用。VPN 監控已完成：wg0 或 WGDashboard 異常時，Wazuh 告警經 Graylog 寄到 Gmail，10/13 實測收到。待辦：檢查數據機其他轉送規則、觀察 Fail2Ban 封鎖數量變化、實測 Agent 斷線告警（100151）。
+外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上；8006 轉送已刪除，從外部確認無法連線，VPN 仍可用。VPN 監控已完成：wg0 或 WGDashboard 異常（100150），以及 ct:109 整台停機（100151），都會經 Graylog 寄到 Gmail，10/13 兩種情況都實測收到。待辦：檢查數據機其他轉送規則、觀察 Fail2Ban 封鎖數量變化。
 
 ## 相關紀錄
 
