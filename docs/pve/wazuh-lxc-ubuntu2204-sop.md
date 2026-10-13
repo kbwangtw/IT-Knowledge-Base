@@ -2404,7 +2404,18 @@ jt-ipam → Wazuh → 新增：API URL `https://<Wazuh IP>:55000`、使用者 `j
 
 ct:109（wireguard，Agent 010）加上指令監控，每 5 分鐘回報 wg0 與 WGDashboard 狀態（規則 100150）。Manager 本身也加上指令監控，每 5 分鐘從外部連 ct:109 的 10086（規則 100151），兩條都屬 `wireguard` 群組、level 10。
 
-**Agent 斷線告警實測沒有作用：** 100151 最初接內建規則 504（`Agent disconnected`）。停掉 ct:109 後，`agent_control` 顯示 Disconnected，但 `alerts.json` 沒有 504，`ossec.log` 也沒有斷線紀錄（`agents_disconnection_time` 15m、`agents_disconnection_alert_time` 0），所以改成 Manager 主動檢查。其他 Agent 若也想在斷線時告警，不能假設 504 會觸發，要先實測。
+**Agent 停止與斷線：正常關機產生 506，不是 504。** 100151 最初接內建規則 504（`Agent disconnected`），停掉 ct:109 後沒有觸發。後續實測確認：正常關機時 Agent 會先通知 Manager，產生 **506（Wazuh agent stopped，level 3）**，不會再有 504。
+
+| 實測（2026-10-13） | 關機方式 | 結果 |
+| --- | --- | --- |
+| ct:109（Agent 010） | `ha-manager set ct:109 --state stopped` | 506 |
+| UBClient（Agent 011） | VM 內 `sudo poweroff` | 506；超過 17 分鐘仍無 504 |
+
+504 應該只在 Agent 來不及通知時出現（斷電、當機、網路中斷），本次未實測。其他 Agent 若要做停止／斷線告警：正常停止接 506，異常中斷要另外實測 504；對重要服務，像 VPN 這樣從外部主動檢查較可靠。
+
+實驗期間把 `agents_disconnection_alert_time` 由 0 改為 1m（排查「0 是否停用斷線告警」），正常關機的結果不受影響；目前設定為 1m，它對 504 的實際作用仍未驗證。
+
+本次也發現 UBClient（vm:104）在 PVE 啟用了 QEMU Guest Agent，但 VM 內沒有執行，`qm shutdown` 因 `guest-ping` 逾時而失敗，改由 Console 關機。待 VM 內安裝 `qemu-guest-agent`。
 
 Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警以 JSON 送到 Graylog 的 Syslog UDP 1514，再由 Graylog Event Definition 寄 Gmail。這是 Wazuh 第一次把告警轉到 Graylog；其他告警仍只在 Wazuh Dashboard。
 
