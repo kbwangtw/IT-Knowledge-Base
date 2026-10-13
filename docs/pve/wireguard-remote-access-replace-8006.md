@@ -13,7 +13,7 @@ Fail2Ban 一直擋到外部 IP 嘗試登入 PVE，追查後發現原因很單純
 
 **Fail2Ban 只能在攻擊者猜錯幾次後封鎖；PVE 管理介面本身就不應該對網際網路開放。**
 
-> 紀錄日期：2026-10-12；PVE 9.2.21，ct:109 為 Debian 13 + WireGuard + WGDashboard。iPhone 與筆電都已從外部連上 VPN，iPhone 經 4G/5G 透過 VPN 打開 PVE。**數據機的 8006 轉送尚未刪除**（10/13 更正，見第 8 節）。文中內網位址為示範值（198.51.100.0/24），不是實際環境位址；不公開對外 IP 與任何金鑰。
+> 紀錄日期：2026-10-12；PVE 9.2.21，ct:109 為 Debian 13 + WireGuard + WGDashboard。iPhone 與筆電都已從外部連上 VPN，iPhone 經 4G/5G 透過 VPN 打開 PVE。10/13 在數據機停用 8006 轉送，並在關掉 Wi-Fi 的情況下從外部確認 8006 已無法連線、VPN 仍可用（10/12 曾誤記為已刪除，見第 8 節）。文中內網位址為示範值（198.51.100.0/24），不是實際環境位址；不公開對外 IP 與任何金鑰。
 
 ## 為什麼要改？
 
@@ -174,11 +174,9 @@ transfer: 244 B received, 92 B sent
 
 連不上時最常見的原因：轉送規則選成 TCP（要 UDP）、內部 IP 沒有指到 ct:109，或測試時其實還連著家裡 Wi-Fi。
 
-## 8. 待辦：刪除 8006 轉送（尚未完成）
+## 8. 停用 8006 轉送，從外部確認（10/13）
 
-**更正（10/13）：** 本節原本記錄「8006 轉送已刪除，從外部確認打不開」，這個結論是錯的。數據機上的 TCP 8006 轉送**尚未刪除**，PVE 管理介面目前仍對網際網路開放。
-
-證據是 node10 的 pvedaemon 日誌，10/12 下午與晚上仍有外部 IP 登入失敗：
+**更正紀錄：** 本節在 10/12 曾記錄「8006 轉送已刪除，從外部確認打不開」，這個結論是錯的。當時轉送仍然開著，證據是 node10 的 pvedaemon 日誌在 10/12 下午與晚上仍有外部 IP 登入失敗：
 
 ~~~bash
 journalctl -u pvedaemon --since "2026-10-12 15:00" --no-pager | grep "authentication failure" | sed -E 's/^.{7}([0-9:]{8}).*(rhost=[^ ]+).*/\1 \2/'
@@ -190,18 +188,24 @@ journalctl -u pvedaemon --since "2026-10-12 15:00" --no-pager | grep "authentica
 | 20:36:26 | 外部 IP |
 | 20:36:28 | 同一個外部 IP |
 
-`rhost=::ffff:` 後面是 IPv4 位址的 IPv6 寫法。這些都不是內網或 VPN（10.0.0.x）的位址。
+`rhost=::ffff:` 後面是 IPv4 位址的 IPv6 寫法，這些都不是內網或 VPN（10.0.0.x）的位址。三台中只有 node10 有外部登入失敗與封鎖，代表轉送只指向 node10。
 
-**當時「打不開」的測試很可能誤判。** 最可能的原因是 iPhone 測試時仍連著家裡的 Wi-Fi：家用數據機常不支援從內網連自己的對外 IP（hairpin NAT），結果看起來就像 8006 已經關閉。測試前要確認 iPhone 右上角只有 4G／5G 圖示，沒有 Wi-Fi 圖示。
+**10/12 那次「打不開」很可能是誤判。** 最可能的原因是 iPhone 測試時仍連著家裡的 Wi-Fi：家用數據機常不支援從內網連自己的對外 IP（hairpin NAT），看起來就像 8006 已經關閉。
 
-8006 轉送只指向 node10：三台的 Fail2Ban 與 pvedaemon 紀錄中，只有 node10 有外部登入失敗與封鎖。
+**10/13 實際處理：** 在數據機把 TCP 8006 → node10 的轉送規則改為 **Disabled**（規則保留，未刪除），UDP 51820 → ct:109 維持 Enabled。數據機上另一條指向 ProxCenter 的 TCP 3000 轉送也是 Disabled。
 
-預計步驟：
+接著用兩個方向驗證，這次測試前先確認 iPhone 右上角只有 4G／5G 圖示、沒有 Wi-Fi 圖示：
 
-1. 刪除數據機的 TCP 8006 轉送，保留 UDP 51820；同時檢查是否還有 22、8007、3128、10086 等不需要的轉送。
-2. iPhone **關掉 Wi-Fi、關掉 WireGuard**，只用 4G／5G 打開 `https://<對外 IP>:8006`，應該打不開或逾時。
-3. iPhone 保持 4G／5G，**打開 WireGuard**，用內網 IP 開 PVE，確認 VPN 仍然可用。
-4. 幾天後確認沒有新的外部 IP 登入失敗：
+| 測試 | 做法 | 結果 |
+| --- | --- | --- |
+| 8006 已不對外 | iPhone **關掉 Wi-Fi、關掉 WireGuard**，用 4G／5G 打開 `https://<對外 IP>:8006` | ✅ 打不開 |
+| VPN 仍可用 | iPhone 保持 4G／5G，**打開 WireGuard**，打開 `https://<node 的內網 IP>:8006` | ✅ 出現 PVE 登入頁 |
+
+兩個方向都要測：只測第一個，可能其實是整條網路不通；只測第二個，不能證明 8006 已經關閉。
+
+從現在開始，在外面管理 PVE 一定要先連 VPN。規則只是停用而沒有刪除，日後整理數據機設定時要留意不要誤啟用。
+
+幾天後再用實際紀錄做最後確認，預期不再出現外部 IP 的登入失敗：
 
 ~~~bash
 for n in node10 node11 node12; do
@@ -210,11 +214,9 @@ for n in node10 node11 node12; do
 done
 ~~~
 
-兩個方向都要測：只測第一個，可能其實是整條網路不通；只測第二個，不能證明 8006 已經關閉。
-
 ## 9. VPN 監控：Wazuh 偵測、Graylog 寄信
 
-8006 轉送刪除後，VPN 會是唯一的遠端管理入口，它出問題要能先知道。ct:109 早在 9/30 就裝了 Wazuh Agent（ID 010），但 Agent 是 Active 只代表主機活著：**wg0 停掉或 WGDashboard 掛掉時，Wazuh 預設不會告警**。WGDashboard 停掉也要注意，因為 wg0 是靠它開機時帶起來的。
+8006 轉送停用後，VPN 是唯一的遠端管理入口，它出問題要能先知道。ct:109 早在 9/30 就裝了 Wazuh Agent（ID 010），但 Agent 是 Active 只代表主機活著：**wg0 停掉或 WGDashboard 掛掉時，Wazuh 預設不會告警**。WGDashboard 停掉也要注意，因為 wg0 是靠它開機時帶起來的。
 
 本次補上的告警路徑：
 
@@ -408,7 +410,7 @@ ha-manager set ct:109 --state started
 
 ## 本次結論
 
-外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上。**8006 轉送尚未刪除**：原本記錄的外部確認是誤判，10/12 晚上仍有外部 IP 嘗試登入。VPN 監控已完成：wg0 或 WGDashboard 異常（100150），以及 ct:109 整台停機（100151），都會經 Graylog 寄到 Gmail，10/13 兩種情況都實測收到。待辦：刪除 8006 轉送並在關掉 Wi-Fi 的情況下從外部確認、檢查數據機其他轉送規則、觀察 Fail2Ban 封鎖數量變化。
+外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上。8006 轉送於 10/13 停用，關掉 Wi-Fi 從外部確認打不開、VPN 仍可用；10/12 曾誤記為已刪除，當時仍有外部 IP 嘗試登入。VPN 監控已完成：wg0 或 WGDashboard 異常（100150），以及 ct:109 整台停機（100151），都會經 Graylog 寄到 Gmail，10/13 兩種情況都實測收到。待辦：幾天後用 pvedaemon 與 Fail2Ban 紀錄確認不再有外部登入嘗試。
 
 ## 相關紀錄
 
