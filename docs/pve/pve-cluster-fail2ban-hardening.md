@@ -136,7 +136,7 @@ ss -lntp | grep ':8006'
 
 上游入口已查清：是路由器上的 **TCP 8006 轉送**，當初為了從外面管理 PVE 而設定。也就是說，PVE 管理介面直接對網際網路開放，Fail2Ban 只能在猜錯幾次後才封鎖，擋不了不需要密碼的漏洞攻擊。
 
-改善方式是改用 cluster 裡的 WireGuard 容器：數據機只轉送 UDP 51820，iPhone 與筆電先連 VPN，再用內網 IP 開 PVE。10/12 已完成 VPN 設定與外部連線測試，但**8006 轉送尚未刪除**：原本記錄的「從外部確認打不開」是誤判，10/12 16:19 與 20:36 仍有外部 IP 登入失敗。過程與待辦見 [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)。
+改善方式是改用 cluster 裡的 WireGuard 容器：數據機只轉送 UDP 51820，iPhone 與筆電先連 VPN，再用內網 IP 開 PVE。10/12 完成 VPN 設定與外部連線測試；10/13 在數據機停用 8006 轉送，並在關掉 Wi-Fi 的情況下從外部確認 8006 已無法連線。10/12 曾誤記為已刪除，當天 16:19 與 20:36 仍有外部 IP 登入失敗。過程見 [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)。
 
 ## 接下來該補哪些事？
 
@@ -146,7 +146,7 @@ ignoreip 只放必要且確認可信的管理來源。遇到誤封，先核對�
 
 ## 本次結論
 
-已確認 node10 的遞增封鎖與 iptables 命中，三台配置已處理。上游入口已於 10/12 查清（路由器轉送 8006），WireGuard 已可使用，但 8006 轉送尚未刪除。尚未完成的是刪除轉送並從外部確認、觀察刪除後的封鎖數量變化、三台逐一封包驗證，以及 PVE Firewall 的完整啟用計畫。
+已確認 node10 的遞增封鎖與 iptables 命中，三台配置已處理。上游入口已於 10/12 查清（路由器轉送 8006），已改用 WireGuard，8006 轉送已於 10/13 停用並從外部確認。尚未完成的是觀察停用後的封鎖數量變化、三台逐一封包驗證，以及 PVE Firewall 的完整啟用計畫。
 
 - [Fail2Ban 1.1.0 設定參考](https://github.com/fail2ban/fail2ban/blob/1.1.0/config/jail.conf)
 - [Proxmox Firewall 文件](https://pve.proxmox.com/pve-docs/chapter-pve-firewall.html)
