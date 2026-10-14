@@ -10,7 +10,7 @@
 
 - [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering.md)（已確認一般常用 DNS 無法解析，須指定 210.69.1.1；過濾機制未向中華電信確認）
 - [Nutanix 收到高風險安全警示：要等歲修嗎？VM 要關機嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide.md)（規劃參考，未實測）
-- [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05.md)（磁碟、Ops Agent IAM、過期憑證、防火牆；部分項目待確認）
+- [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05.md)（磁碟、Ops Agent IAM、過期憑證、防火牆；10/14 補記備份、爬蟲陷阱、KindEditor 封鎖，剩 2 項待確認）
 - [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](docs/pve/wireguard-remote-access-replace-8006.md)（10/13 停用 8006 轉送並從外部確認；VPN 異常會寄 Gmail）
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](docs/pve/pve-ha-service-error-after-reboot.md)（手動重開前沒進維護模式；兩個服務已救回，Shutdown Policy 改成 migrate）
 - [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal.md)（三台已 patch 並加 APT hook，Repository 已確認 no-subscription，三台登入驗證完成；PBS 也已套用）

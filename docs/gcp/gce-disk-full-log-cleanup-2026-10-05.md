@@ -610,7 +610,9 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 
 ## 本次結論
 
-磁碟滿的主因是一行 PHP deprecated 警告，7 個月寫了 4.5G。止血後加上 logrotate 與 journald 上限，使用率從 100% 降到 43%。過程中另外修好 Ops Agent 的 IAM 權限、換掉過期的主機憑證，並把防火牆收斂到必要來源。上面標示「待確認」的項目，還要補上證據才能結案。
+磁碟滿的主因是一行 PHP deprecated 警告，7 個月寫了 4.5G。止血後加上 logrotate 與 journald 上限，使用率從 100% 降到 43%。過程中另外修好 Ops Agent 的 IAM 權限、換掉過期的主機憑證，並把防火牆收斂到必要來源。
+
+10/14 回頭確認時，又處理了三件事：資料庫原本完全沒有備份，已改為每天備份並和磁碟快照接上；網站連結裡的 `time()` 做出爬蟲陷阱，access log 每天翻倍，拆掉陷阱並用 Cloudflare 規則擋下後，主機請求從每分鐘約 3,500 筆降到 7 筆；KindEditor 上傳 API 不用登入就能用，已在 Cloudflare 封鎖，沒有發現入侵跡象。網站只能跑 PHP 7.4，所以外圍防護與備份比升級更重要。剩下的「待確認」只有 Ops Agent 測試訊息與「一律使用 HTTPS」。
 
 - [Ops Agent 疑難排解](https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent/troubleshoot-run-ingestion)
 - [Compute Engine 存取範圍與 IAM](https://cloud.google.com/compute/docs/access/service-accounts#accesscopesiam)
