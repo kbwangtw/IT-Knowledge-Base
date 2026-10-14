@@ -261,6 +261,23 @@ curl "${A[@]}" https://127.0.0.1:9200/_plugins/_security/api/roles/grafana_wazuh
 
 nftables 備份檔要選建立 `wazuh_indexer` 之前的那一份；之後若又改過 nftables，改為手動刪除 `table inet wazuh_indexer` 區塊。
 
+## 9. CT 114 納管（2026-10-14）
+
+新主機比照其他容器納入既有管理。CT 114、LibreNMS（CT 102）與 SNMP 腳本都在 node10，`pct exec` 只能操作所在節點上的容器，執行前先看提示字元。
+
+| 項目 | 做法 | 結果 |
+| --- | --- | --- |
+| DNS | AdGuard 與 Pi-hole 兩台都加 `grafana` | 兩台皆解析到 .33；LibreNMS 容器 `getent hosts` 解析得到 |
+| Wazuh Agent | Wazuh SOP §9-6：節點下載 .deb → `pct push` → `env WAZUH_MANAGER=... dpkg -i` → 確認 `<address>` 後才啟動 | Manager 顯示 `grafana`、Active |
+| LibreNMS | `/root/snmp-v3-add.sh 114 Node10`（`snmpd=active usmUser=1 createUser=0 udp161=1`）→ `/root/snmp-v3-lnms.sh grafana.<網域>` → `lnms device:poll` | v3／authPriv／SHA／AES |
+| PBS 備份 | `pvesh get /cluster/backup`：三台節點各有 `all: 1`、無排除的備份工作（21:00／21:30／22:00） | 不需調整，HA 搬到哪台都會被備份 |
+| HA | `ha-manager add ct:114` | started |
+| jt-ipam | LibreNMS 的「Auto-create discovered IPs」預設開啟，同步時以設備主要 IP 建立紀錄；Wazuh 只比對不建立 | 待確認 .33 出現、「缺少 Agent」不再列出 |
+
+`lnms` 指令要以 `su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms ..."` 執行；沒有 `-` 與 `cd` 時工作目錄停在 `/root`，fping 會因權限不足失敗（`posix_spawn() failed: Permission denied`）。
+
+**cluster-check.sh 計數修正**：Wazuh 那一行以 `grep -c Active` 計算，Manager 自己的 `Active/Local` 也會算進去，原說明 `expect 17` 少算了 Manager。加入 grafana 後改為 `expect 19 = 18 agents + manager`（先備份再以 `sed` 只改說明文字）。實測：`active=19`；同次檢查 Ceph HEALTH_OK、97 PG active+clean、三台 kernel `7.0.14-23-pve`、HA 全部 started、DNS／DC 分處不同節點、LibreNMS 無斷線設備。
+
 ## 注意事項
 
 - **Wazuh 升級後**檢查：`indexer-proxy` 為 active、9201 仍只允許 Grafana、`grafana` 帳號能登入，以及原有的 `api.yaml` host 與 55000 規則（見 Wazuh SOP §13）。
@@ -272,7 +289,7 @@ nftables 備份檔要選建立 `wazuh_indexer` 之前的那一份；之後若又
 
 | 項目 | 狀態 |
 | --- | --- |
-| CT 114 納管：DNS、jt-ipam、Wazuh Agent、LibreNMS（SNMPv3）、PBS 備份 | 未做 |
+| CT 114 納管：DNS、jt-ipam、Wazuh Agent、LibreNMS（SNMPv3）、PBS 備份 | 完成（第 9 節）；jt-ipam 紀錄待確認 |
 | 階段 2：LibreNMS（MySQL 唯讀帳號） | 未做 |
 | 階段 3：Prometheus、Ceph prometheus 模組、PVE exporter | 未做 |
 | 階段 4：Graylog／PBS（Graylog 的 OpenSearch 可能沒有帳號保護，需另行評估） | 未做 |
