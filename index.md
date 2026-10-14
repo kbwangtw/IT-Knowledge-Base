@@ -14,7 +14,7 @@ last_modified_at: 2026-10-14
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
-| [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/) | 9/22 根因與修復結案：三顆 MON／local／BlueStore 一致、HEALTH_OK；10/12 補記修復後整機重開正常；附更新與重開 SOP |
+| [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/) | 9/22 根因與修復結案：三顆 MON／local／BlueStore 一致、HEALTH_OK；10/12 補記修復後整機重開正常；10/14 完成已曝光 OSD.1 金鑰輪換；附更新與重開 SOP |
 | [Ceph OSD 和 CephFS 金鑰故障，怎麼恢復？](docs/pve/ceph-osd-cephfs-keyring-recovery/) | 9/17～18 服務復原紀錄；BlueStore 根因與修復已於 9/22 補記 |
 | [Ceph 換金鑰，為什麼 HEALTH_OK 還不夠？](docs/pve/ceph-20-2-4-cephx-aes256k-migration/) | 想了解遷移漏項、storage 金鑰副本與舊範例更正 |
 
