@@ -27,6 +27,7 @@ last_modified_at: 2026-10-14
 | 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | 已確認；Cloudflare「完整（嚴格）」模式待確認 |
 | 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | 已確認 14 份快照都是 READY |
 | 資料庫備份 | 從來沒有 | 寶塔計畫任務：每天 14:00 UTC、保留 7 份 | 已確認備份檔完整（9 個 table、Dump completed） |
+| access log 暴增 | 每分鐘約 3,500 筆，爬蟲陷阱 | Cloudflare 自訂規則質詢 `/product.php` | 已確認降到每分鐘個位數；程式修正待做 |
 | GCP 防火牆 | RDP、SSH、面板、80/443 全部對全世界開放 | RDP 刪除；SSH、面板限定來源；80/443 只允許 Cloudflare | 直連逾時、經 Cloudflare 回 200；面板與新 SSH 連線待確認 |
 
 ## 1. 先看空間被誰吃掉
@@ -414,6 +415,69 @@ sudo sh -c 'ls /www/server/data/<DB>/*.frm | wc -l'
 
 `/www/server/data` 有 219 MB，但網站資料庫本身只有 724 KB，其餘是 MariaDB 自己的檔案，所以 18 KB 的備份是完整的。
 
+## 8. access log 每天翻倍：網站自己做出的爬蟲陷阱（2026-10-14 補記）
+
+清完 log 後，磁碟使用率 9 天內從 43% 升到 48%。logrotate 正常，問題出在 access log 本身：
+
+| 日期 | 檔案 | 大小 |
+| --- | --- | --- |
+| 10/6 | `.8.gz` | 350K |
+| 10/10 | `.4.gz` | 3.2M |
+| 10/12 | `.2.gz` | 13M |
+| 10/13 | `.1`（未壓縮） | 571M |
+| 10/14 | 目前的 log | 1.5 小時就 67M |
+
+`maxsize 200M` 只在 logrotate 每天執行時檢查，擋不住一天之內暴增的流量。
+
+### 誰在打
+
+~~~bash
+L=/www/wwwlogs/example.com-access_log
+sudo awk -F'"' '{print $6}' $L | sort | uniq -c | sort -rn | head -10
+sudo awk '{print $7}' $L | cut -c1-80 | sort | uniq -c | sort -rn | head -10
+~~~
+
+1.5 小時內有 31 萬筆（每秒約 59 筆），User-Agent 幾乎全是「Mac OS X 10_15_7 + Chrome 116 到 146」，網址都是 `/product.php?<10 位數字>&pid=<1-9>`，而且每個網址只出現約 2 次。來源 IP 全是 Cloudflare，因為 Apache 沒有設定 `mod_remoteip`。Cloudflare 的分析顯示，24 小時內有 292 萬個請求，幾乎全部 Served by Origin，快取完全沒有命中。
+
+### 那串數字是網站自己產生的
+
+~~~bash
+sudo grep -rn "product.php?" /www/wwwroot/example.com --include=*.php | head
+~~~
+
+~~~php
+href="product.php?' . time() . '&pid=' . $main_sn[$i] . '"
+~~~
+
+選單（每一頁都有）和產品列表在產生連結時，都在網址裡放了 `time()`，也就是當下的 Unix 時間戳記。每抓一頁就會冒出 9 個從沒出現過的網址，爬蟲跟著抓，網址就無限增加，形成**爬蟲陷阱（crawler trap）**。這也解釋了為什麼流量是一階一階翻倍，以及為什麼快取永遠不會命中。
+
+一開始以為正常的網址是 `product.php?pid=4`，差點寫出「不是 `pid=` 開頭就擋」的規則；查了正常日期（10/6）的 log，才發現正常連結本來就帶著數字，那條規則會擋到真人。
+
+### 先止血：Cloudflare 自訂規則
+
+網路安全 → 安全性規則 → 自訂規則：
+
+~~~text
+(http.request.uri.path eq "/product.php" and not cf.client.bot)
+~~~
+
+動作：受控的質詢（Managed Challenge）。`not cf.client.bot` 會放行 Google 這類 Cloudflare 驗證過的搜尋引擎機器人。真人通過一次質詢後，30 分鐘內不會再被質詢。
+
+驗證（`<` 重新導向要寫成 `sudo wc -l $L`，原因見最後的「坑」表格）：
+
+~~~bash
+a=$(sudo wc -l $L | cut -d' ' -f1); sleep 60; b=$(sudo wc -l $L | cut -d' ' -f1); echo "每分鐘 $((b-a)) 筆"
+sudo tail -n 3000 $L | grep "product.php" | awk '{print substr($4,14,5)}' | uniq -c | tail -15
+~~~
+
+| 時間（UTC） | `product.php` 每分鐘 |
+| --- | --- |
+| 部署前 | 約 3,500 |
+| 01:46（規則傳播中） | 2,019 |
+| 01:50 之後 | 4 到 12 |
+
+無痕視窗開產品頁正常。Cloudflare 圖表上，Served by Origin 降到接近 0，Mitigated 每分鐘 4,000 到 5,000 筆：爬蟲沒有停，只是被擋在 Cloudflare 那一層。**這條規則在拆掉陷阱、而且爬蟲確定不再來之前，都不能停用。**
+
 ## 排查時踩到的坑
 
 這幾個是指令本身的陷阱，結果看起來合理，其實是錯的：
@@ -424,6 +488,7 @@ sudo sh -c 'ls /www/server/data/<DB>/*.frm | wc -l'
 | `curl ... \| head; echo $?` 永遠是 0 | `$?` 是管線最後一個指令（head）的結束碼 | 不接管線，改用 `curl -sS -o /dev/null -w "%{http_code}"` |
 | grep 多行 JSON 只抓到 `"reason"` 那行，看不到時間 | 只有第一行有時間戳記 | grep 有時間戳記的那行，例如 `error sending to Cloud Logging` |
 | awk 比對 `$2 >= "05:29"` 找重啟後的錯誤 | 只比時間沒比日期，前幾天的訊息也會算進去 | 先清空 log 再觀察，或同時比對日期 |
+| `sudo wc -l < $L` 顯示 Permission denied | `<` 由自己的 shell 先開檔，sudo 還沒執行 | `sudo wc -l $L`；`*`、`<`、`>`、`\|` 都是 sudo 之前處理的 |
 | 以為 Apache 假死而重啟 | 被上面兩個錯誤結果誤導 | 先用不會騙人的指令確認，再動服務 |
 
 ## 還沒做完的事
@@ -433,8 +498,9 @@ sudo sh -c 'ls /www/server/data/<DB>/*.frm | wc -l'
 | 優先 | 項目 |
 | --- | --- |
 | 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
-| 高 | 補完上面標示「待確認」的項目，尤其是新開的瀏覽器 SSH 能登入、Cloudflare 已是「完整（嚴格）」（面板登入已於 10/14 確認） |
-| 高 | 磁碟使用率從 43% 升到 48%，確認 logrotate 有在輪替 |
+| 高 | 補完上面標示「待確認」的項目，尤其是新開的瀏覽器 SSH 能登入、Cloudflare 已是「完整（嚴格）」（面板登入、停用寶塔續簽任務已於 10/14 確認） |
+| 高 | 拆掉爬蟲陷阱：`menu_list.php`、`small_main_img.php` 的連結拿掉 `time()`，改成 `product.php?pid=N` |
+| 高 | 程式修正後，把 Cloudflare 規則收緊為只質詢查詢字串不是 `pid=` 開頭的請求 |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
 | 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它）。7.4 可以正常執行，改完就不必再關掉 `E_DEPRECATED` |
 | 中 | 寶塔資料庫備份設定「失敗時通知」（要先設定通知管道） |
@@ -444,6 +510,8 @@ sudo sh -c 'ls /www/server/data/<DB>/*.frm | wc -l'
 | 中 | 更新寶塔面板（續簽腳本還在用 Python 3.7）；不要因為 PHP 卡住而一起延後 |
 | 中 | 作業系統與 PHP 分開處理：寶塔的 PHP 自行編譯在 `/www/server/php/74`，不依賴 Debian 套件。Debian 11 升級前先拍 snapshot，並確認寶塔支援新版本 |
 | 低 | 評估長期方案：PHP 7.4 改放 container、主機升級作業系統；或購買 PHP 7.4 付費延長支援；或改寫網站 |
+| 低 | 設定 Cloudflare Authenticated Origin Pulls：防火牆只認 Cloudflare IP，別人透過自己的 Cloudflare 帳號或 Workers 仍可連到主機 |
+| 低 | Apache 設定 `mod_remoteip`，log 才看得到訪客真實 IP |
 | 低 | 找時間演練一次「從快照建磁碟並換上 VM」的還原流程 |
 | 低 | Shielded VM 的安全啟動目前停用；開啟要關機，並確認 kernel module 相容 |
 | 低 | 7/7 有一次沒有 shutdown 紀錄的開機，原因未查明 |
