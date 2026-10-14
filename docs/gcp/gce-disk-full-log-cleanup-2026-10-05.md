@@ -23,7 +23,7 @@ last_modified_at: 2026-10-14
 | 網站 error log | 4.5G，同一行 PHP 警告 | 不再寫入 deprecated 訊息 | 已確認 2 分鐘內維持 0 bytes |
 | 網站 log 輪替 | 無 | logrotate：每天、保留 14 份、200M 提早輪替 | 模擬執行無錯誤；首次實際輪替待隔天確認 |
 | systemd journal | 873M | 上限 200M、保留 1 個月 | 已確認 96M |
-| Ops Agent | 403，log 送不出去 | 補上 IAM 角色 | 重啟後 log 只有 info；Logs Explorer 測試訊息待確認 |
+| Ops Agent | 403，log 送不出去 | 補上 IAM 角色 | 重啟後 log 只有 info；10/14 確認 Logs Explorer 搜得到測試訊息 |
 | 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | 已確認；10/14 確認 Cloudflare 為「完整（嚴格）」 |
 | 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | 已確認 14 份快照都是 READY |
 | 資料庫備份 | 從來沒有 | 寶塔計畫任務：每天 14:00 UTC、保留 7 份 | 已確認備份檔完整（9 個 table、Dump completed） |
@@ -144,6 +144,8 @@ sudo systemctl start google-cloud-ops-agent
 ~~~
 
 **待確認**：用 `logger "ops-agent-test-$(date +%s)"` 送一筆測試訊息，到 Logs Explorer 搜得到，才算端到端完成。
+
+> 10/14：送出 `logger "ops-agent-test-$(date +%s)"` 後，Logs Explorer 用 `ops-agent-test` 搜得到，端到端確認完成。同一筆訊息出現兩次，推測是 Debian 的 rsyslog 同時寫進 `/var/log/syslog` 和 `/var/log/messages`，Ops Agent 預設兩個檔案都收；未確認，影響只有 log 量多一倍。
 
 ## 3. 真正的主因：4.5G 的 PHP 警告
 
@@ -593,7 +595,7 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 | 優先 | 項目 |
 | --- | --- |
 | 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
-| 中 | 最後一個待確認：Logs Explorer 搜得到 Ops Agent 測試訊息 |
+| 低 | 同一筆 syslog 在 Cloud Logging 出現兩次，確認是否為 `/var/log/syslog` 與 `/var/log/messages` 重複收集 |
 | 中 | 通知會用 CMS 後台的人：編輯器上傳已關閉，需要時聯絡管理者暫時開啟 |
 | 中 | 檢查 `$_GET['pid']`、`$_GET['news']`、`$_GET['n']` 是否直接放進 SQL（SQL injection） |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
@@ -620,7 +622,7 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 
 磁碟滿的主因是一行 PHP deprecated 警告，7 個月寫了 4.5G。止血後加上 logrotate 與 journald 上限，使用率從 100% 降到 43%。過程中另外修好 Ops Agent 的 IAM 權限、換掉過期的主機憑證，並把防火牆收斂到必要來源。
 
-10/14 回頭確認時，又處理了三件事：資料庫原本完全沒有備份，已改為每天備份並和磁碟快照接上；網站連結裡的 `time()` 做出爬蟲陷阱，access log 每天翻倍，拆掉陷阱並用 Cloudflare 規則擋下後，主機請求從每分鐘約 3,500 筆降到 7 筆；KindEditor 上傳 API 不用登入就能用，已在 Cloudflare 封鎖，沒有發現入侵跡象。網站只能跑 PHP 7.4，所以外圍防護與備份比升級更重要。剩下的「待確認」只有 Ops Agent 測試訊息。
+10/14 回頭確認時，又處理了三件事：資料庫原本完全沒有備份，已改為每天備份並和磁碟快照接上；網站連結裡的 `time()` 做出爬蟲陷阱，access log 每天翻倍，拆掉陷阱並用 Cloudflare 規則擋下後，主機請求從每分鐘約 3,500 筆降到 7 筆；KindEditor 上傳 API 不用登入就能用，已在 Cloudflare 封鎖，沒有發現入侵跡象。網站只能跑 PHP 7.4，所以外圍防護與備份比升級更重要。文中所有「待確認」項目都已在 10/14 補上證據。
 
 - [Ops Agent 疑難排解](https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent/troubleshoot-run-ingestion)
 - [Compute Engine 存取範圍與 IAM](https://cloud.google.com/compute/docs/access/service-accounts#accesscopesiam)
