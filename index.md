@@ -25,7 +25,7 @@ last_modified_at: 2026-10-14
 | [PVE HA 放置策略：PVE 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy/) | 10/2 補 DNS 互斥 HA 規則、CRS 改 Static；說明為何不能只靠 ProxCenter；10/13 決定只留 PVE，ProxCenter DRS 停用、不裝 ProxLB |
 | [ProxCenter 逐台更新：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 來源檢查、SSH 網段和 sudo 問題；10/12 ProxCenter 完成兩台、三台驗收通過；沒有更新時不會啟動，ProxCenter 所在 node 改手動 |
 | [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](docs/pve/pve-ha-service-error-after-reboot/) | 10/12 手動重開前沒進維護模式，ct:100、vm:107 進入 error；查因、清除與重新啟動步驟；Shutdown Policy 改 migrate |
-| [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新、重開、網路掛載，以及備份與還原的不同判準；10/13 kernel 升到 7.0.14-23 |
+| [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新、重開、網路掛載，以及備份與還原的不同判準；10/13 kernel 升到 7.0.14-23；10/14 清理舊 kernel，`proxmox-kernel-7.0` 不能刪 |
 | [Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？](docs/pve/ceph-bluestore-slow-op-backup-schedule/) | 10/14 硬碟正常、retries 集中在備份時段；三台備份錯開、PBS 刪除空 Prune、Verify 改 02:00 後 GC 由 77 分降到 7 分 |
 | [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification/) | 安裝、移除與模板驗證；PVE 已測，PBS 完整流程待測 |
 | [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal/) | 10/12 三台已 patch 並加 APT hook；widget-toolkit 5.2.10 多一個空格的踩雷；三台 Repository 已確認 no-subscription；三台登入驗證完成；10/13 PBS 也已套用 |

@@ -248,6 +248,59 @@ PBS Web UI 的 Updates 顯示 `proxmox-kernel-7.0` 可從 7.0.14-22 升到 7.0.1
 
 **維護時段：** 本環境每晚 21:00～22:30 接收備份、00:00 起 GC、02:00 起 Verify，更新與重開要避開。
 
+### 2026-10-14：清理舊 kernel
+
+四台都在 -23 開機正常後，清掉舊 kernel。**每一步都先用 `-s` 模擬，看清楚會移除什麼再執行。**
+
+~~~bash
+uname -r
+apt autoremove -s 2>/dev/null | grep -E "^Remv"
+~~~
+
+三台 PVE 與 PBS31 的模擬結果都只有 `proxmox-kernel-7.0.14-20-pve-signed`，沒有 ceph、pve、qemu、corosync、proxmox-backup 等套件，執行中的 -23 也不在清單中。執行 `apt autoremove -y` 後，三台 PVE 剩下：
+
+~~~text
+proxmox-kernel-7.0
+proxmox-kernel-7.0.14-22-pve-signed
+proxmox-kernel-7.0.14-23-pve-signed
+~~~
+
+PBS31 另外還留著 `proxmox-kernel-7.0.0-3-pve-signed` 與 `proxmox-kernel-7.0.14-19-pve-signed`。`autoremove` 只移除「因相依關係自動裝進來、現在沒人需要」的套件；7.0.0-3 很可能是安裝光碟附的原始 kernel，被標記為手動安裝，所以不會被自動清掉。已有 -23（使用中）與 -22（備用），這兩個用 `apt remove` 指定名稱移除：
+
+~~~bash
+apt remove -s proxmox-kernel-7.0.0-3-pve-signed proxmox-kernel-7.0.14-19-pve-signed | grep -E "^(Remv|Inst)"
+apt remove -y proxmox-kernel-7.0.0-3-pve-signed proxmox-kernel-7.0.14-19-pve-signed
+dpkg -l "proxmox-kernel-7*" | awk '/^ii/ {print $2}'
+grep -oE "vmlinuz-[0-9.]+-[0-9]+-pve" /boot/grub/grub.cfg | sort -u
+~~~
+
+模擬只列出這兩個 `Remv`、沒有 `Inst`；移除後 PBS31 也只剩 `proxmox-kernel-7.0`、-22、-23，GRUB 開機選單只剩 `vmlinuz-7.0.14-22-pve` 與 `vmlinuz-7.0.14-23-pve`。不需要重開，也不會重啟服務。
+
+**`proxmox-kernel-7.0` 不能刪。** 它是指標套件，本身幾乎沒有內容，作用是永遠指向最新的 7.0 版 kernel，讓 `apt upgrade` 自動裝上新 kernel。在 node10 模擬刪除：
+
+~~~bash
+apt-cache rdepends --installed proxmox-kernel-7.0
+apt remove -s proxmox-kernel-7.0 | grep -E "^Remv"
+~~~
+
+~~~text
+Reverse Depends:
+  proxmox-default-kernel
+
+Remv proxmox-ve [9.2.0]
+Remv proxmox-default-kernel [2.1.0]
+Remv proxmox-kernel-7.0 [7.0.14-23]
+~~~
+
+依賴鏈是 `proxmox-ve` → `proxmox-default-kernel` → `proxmox-kernel-7.0` → 實際 kernel。刪掉指標套件會一路往上把 `proxmox-ve` 一起移除，之後收不到 kernel 更新，升級時也可能缺元件。模擬清單出現 `proxmox-ve` 就要停下來。
+
+清理 kernel 的原則：
+
+1. 先 `-s` 模擬，確認 `uname -r` 的版本不在移除清單。
+2. 至少保留使用中與上一版，新 kernel 有問題時可以從開機選單選回上一版。
+3. 只清有版本號的 `proxmox-kernel-7.0.14-xx-pve-signed`；`proxmox-ve`、`proxmox-default-kernel`、`proxmox-kernel-7.0` 永遠保留。
+4. 移除後確認開機選單只剩預期的版本。
+
 ## 每次維護要留下的結案資料
 
 記錄更新前後版本、重開時間、掛載來源、PBS 服務、PVE storage 狀態與工作日誌。還原演練另外記錄快照時間、還原開始與完成時間、開機時間、應用程式驗收結果。
