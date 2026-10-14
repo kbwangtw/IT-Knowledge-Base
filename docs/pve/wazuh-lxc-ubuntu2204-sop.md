@@ -4,7 +4,7 @@ title: "在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）"
 date: 2026-09-29
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-sop/
-last_modified_at: 2026-10-13
+last_modified_at: 2026-10-14
 ---
 
 # 在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）
@@ -1418,6 +1418,34 @@ find /var/ossec/logs/alerts/20* -type f -mtime +30 | head    # 先預覽：目�
 
 - 30 天後的告警無法再查詢。PBS 排程的保留策略（keep-daily 7、keep-last 3）也只涵蓋約一週，**沒有更長期的告警副本**；若日後有稽核或事件調查需求，需重新評估保留天數或另行封存。
 - `/var/ossec/queue` 內的檔案由 Manager 管理，不要手動刪除。持續觀察 `du -sh /var/ossec/queue/*`，特別是 `indexer` 是否不斷成長。
+
+### 10-5 定期檢查佇列與保留（2026-10-14）
+
+在 CT 112 內執行，全部唯讀；Indexer 查詢以管理員憑證進行，不需輸入 admin 密碼：
+
+~~~bash
+du -sh /var/ossec/queue/* 2>/dev/null | sort -h | tail -6
+df -h / | tail -1
+grep -E 'queue_usage|dropped' /var/ossec/var/run/wazuh-analysisd.state
+grep -E 'queue_size|total_queue_size|discarded' /var/ossec/var/run/wazuh-remoted.state
+C=/etc/wazuh-indexer/certs
+curl -sk --cert $C/admin.pem --key $C/admin-key.pem "https://127.0.0.1:9200/_cat/indices/wazuh-alerts-*?v&s=index&h=index,docs.count,store.size"
+curl -sk --cert $C/admin.pem --key $C/admin-key.pem "https://127.0.0.1:9200/_plugins/_ism/explain/wazuh-alerts-*" | grep -o '"policy_id":"[^"]*"' | sort | uniq -c
+ls -l /etc/cron.d/wazuh-alerts-cleanup; du -sh /var/ossec/logs/alerts
+~~~
+
+| 項目 | 10/02 | 10/14 | 判讀 |
+| --- | --- | --- | --- |
+| `queue/indexer` | 1.7 GB | 1.7 GB | 沒有成長，送往 Indexer 正常 |
+| `queue/vd` | 9.9 GB | 12 GB | 弱點情資資料庫隨內容更新成長，持續觀察 |
+| 磁碟 | — | 79 GB 用 19 GB（26%） | 充足 |
+| analysisd | — | 各 `*_queue_usage` 皆 0.00，`events_dropped` 0 | 沒有積壓或丟棄 |
+| remoted | — | `queue_size` 0，`discarded_count` 0 | Agent 訊息沒有被丟棄 |
+| 告警索引 | 9/30 48 MB、10/01 55.6 MB（10.7 萬筆） | 調校後每天約 1,300～5,300 筆、2～6 MB | 30 天約 150 MB |
+| ISM | 3 個索引套用 | 15／15 由 `wazuh-alerts-30d` 管理，最舊為 hot | 9/30 索引預計 10/30 左右刪除 |
+| 告警文字檔 | 95 MB | 43 MB；清理排程權限 `-rw-r--r-- root` | 正常 |
+
+10/08 為 18,528 筆，是當天 PVE 逐台更新（套件異動、重開機）產生，屬預期。
 
 ## 11. 告警調校
 
