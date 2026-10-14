@@ -28,6 +28,7 @@ last_modified_at: 2026-10-14
 | 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | 已確認 14 份快照都是 READY |
 | 資料庫備份 | 從來沒有 | 寶塔計畫任務：每天 14:00 UTC、保留 7 份 | 已確認備份檔完整（9 個 table、Dump completed） |
 | access log 暴增 | 每分鐘約 3,500 筆，爬蟲陷阱 | 連結拿掉 `time()`；Cloudflare 只質詢舊格式網址 | 已確認每分鐘 7 筆，真人不被質詢 |
+| KindEditor 上傳 API | 未登入可瀏覽、上傳 | Cloudflare 封鎖 `/cms/plugin/kindeditor/php/` | 已確認回 403；未發現入侵跡象 |
 | GCP 防火牆 | RDP、SSH、面板、80/443 全部對全世界開放 | RDP 刪除；SSH、面板限定來源；80/443 只允許 Cloudflare | 直連逾時、經 Cloudflare 回 200；10/14 確認面板與新 SSH 連線可登入 |
 
 ## 1. 先看空間被誰吃掉
@@ -520,6 +521,50 @@ ls -l $F
 
 規則上線後約擋下 8.4 萬次請求，通過質詢的比例（CSR）為 0%，代表被擋下的都是機器人。
 
+## 9. KindEditor：上傳 API 不用登入就能用（2026-10-14 補記）
+
+查爬蟲時順便搜尋了讀取 `$_GET` 的程式，看到 CMS 裡附帶的 KindEditor 編輯器：`cms/plugin/kindeditor/php/upload_json.php` 和 `file_manager_json.php`。KindEditor 官方範例的 PHP 不檢查登入，舊版也有公開的上傳繞過手法。
+
+先查有沒有被用過、有沒有被植入東西（全部唯讀）：
+
+~~~bash
+S=/www/wwwroot/example.com
+K=$S/cms/plugin/kindeditor/php
+sudo sh -c 'zgrep -h "kindeditor" /www/wwwlogs/example.com-access_log*'
+sudo zgrep -c "kindeditor" /root/access_log-recent-2026-10-05.gz
+sudo grep -n "session\|login" $K/upload_json.php $K/file_manager_json.php
+curl -s https://example.com/cms/plugin/kindeditor/php/file_manager_json.php | head -c 300
+sudo find $S -type f \( -name "*.php" -o -name "*.phtml" -o -name "*.php5" \) -mtime -90 -ls
+sudo find $S -type d -name attached -exec sh -c 'find "$1" -name "*.php*" -ls' _ {} \;
+~~~
+
+| 檢查 | 結果 |
+| --- | --- |
+| log（10/5 以後與 10/5 的樣本） | 沒有存取紀錄 |
+| 程式是否檢查登入 | 沒有 |
+| 未登入打開檔案管理 | HTTP 200，回傳上傳目錄的 JSON 清單 |
+| 90 天內新增或修改的 PHP | 只有第 8 節改的兩個檔案 |
+| 上傳目錄裡的 PHP | 沒有 |
+
+結論：沒有被入侵的跡象，但任何人都能瀏覽和上傳。
+
+### 用 Cloudflare 封鎖
+
+Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放在 `/cms/main_category/images/`，也不能擋整個 `/cms/`。後台很少上傳圖片、管理者 IP 也不固定，所以直接封鎖整個目錄：
+
+~~~text
+(starts_with(http.request.uri.path, "/cms/plugin/kindeditor/php/"))
+~~~
+
+動作選「封鎖」，不是質詢：一般訪客用不到這個目錄，而人工攻擊可以通過質詢。
+
+| 驗證 | 結果 |
+| --- | --- |
+| `file_manager_json.php`、`upload_json.php` | 都是 HTTP 403 |
+| 主機 log 裡的 kindeditor | 維持部署前的 2 筆，部署後的請求沒有到達主機 |
+
+需要上傳圖片時，到 Cloudflare 把 `kindeditor-block` 改成「已停用」，用完立刻改回「使用中」。
+
 ## 排查時踩到的坑
 
 這幾個是指令本身的陷阱，結果看起來合理，其實是錯的：
@@ -541,7 +586,7 @@ ls -l $F
 | --- | --- |
 | 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
 | 中 | 剩下兩個待確認：Logs Explorer 搜得到 Ops Agent 測試訊息；Cloudflare 開啟「一律使用 HTTPS」 |
-| 高 | 確認 `cms/plugin/kindeditor/php/` 的 `upload_json.php`、`file_manager_json.php` 未登入時無法存取；KindEditor 有公開的任意上傳與目錄瀏覽漏洞 |
+| 中 | 通知會用 CMS 後台的人：編輯器上傳已關閉，需要時聯絡管理者暫時開啟 |
 | 中 | 檢查 `$_GET['pid']`、`$_GET['news']`、`$_GET['n']` 是否直接放進 SQL（SQL injection） |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
 | 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它）。7.4 可以正常執行，改完就不必再關掉 `E_DEPRECATED` |
@@ -554,6 +599,7 @@ ls -l $F
 | 低 | 評估長期方案：PHP 7.4 改放 container、主機升級作業系統；或購買 PHP 7.4 付費延長支援；或改寫網站 |
 | 低 | 設定 Cloudflare Authenticated Origin Pulls：防火牆只認 Cloudflare IP，別人透過自己的 Cloudflare 帳號或 Workers 仍可連到主機 |
 | 低 | `product.php` 遇到舊格式網址時 301 導回 `?pid=N`，讓搜尋引擎更快換成新網址 |
+| 低 | 評估用 Cloudflare Access（email 驗證碼）保護 KindEditor，取代「需要時手動停用規則」 |
 | 低 | 爬蟲停止後，再評估 Cloudflare 規則是否保留 |
 | 低 | Apache 設定 `mod_remoteip`，log 才看得到訪客真實 IP |
 | 低 | 找時間演練一次「從快照建磁碟並換上 VM」的還原流程 |
