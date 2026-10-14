@@ -26,6 +26,7 @@ last_modified_at: 2026-10-14
 | Ops Agent | 403，log 送不出去 | 補上 IAM 角色 | 重啟後 log 只有 info；Logs Explorer 測試訊息待確認 |
 | 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | 已確認；Cloudflare「完整（嚴格）」模式待確認 |
 | 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | 已確認 14 份快照都是 READY |
+| 資料庫備份 | 從來沒有 | 寶塔計畫任務：每天 14:00 UTC、保留 7 份 | 已確認備份檔完整（9 個 table、Dump completed） |
 | GCP 防火牆 | RDP、SSH、面板、80/443 全部對全世界開放 | RDP 刪除；SSH、面板限定來源；80/443 只允許 Cloudflare | 直連逾時、經 Cloudflare 回 200；面板與新 SSH 連線待確認 |
 
 ## 1. 先看空間被誰吃掉
@@ -375,6 +376,44 @@ gcloud compute snapshots list --filter="sourceDisk~<DISK>" \
 
 一顆磁碟同時只能套一個快照排程，所以不要再另外建立排程。
 
+### 10/12 的 0.9 GB：每週一的 fstrim
+
+查快照區間（10/11 14:20 到 10/12 14:20 UTC）內修改過的檔案，加總只有約 20 MB，網站目錄沒有變動，也沒有套件更新。`systemctl list-timers` 顯示 `fstrim.timer` 在 10/12 00:47 UTC 執行過；它每週一執行，10/5 也是週一。推測是 fstrim 讓快照多算了區塊，待 10/19 的快照驗證。
+
+### 資料庫備份：目錄是空的
+
+快照是 crash-consistent，對資料庫不保證一致，所以另外查了寶塔的資料庫備份。`/www/backup/database/mysql/all_backup` 從 3/2 建立後就是空的：**資料庫從來沒有備份過**。
+
+在寶塔「計畫任務」新增一個任務：
+
+| 欄位 | 設定 | 原因 |
+| --- | --- | --- |
+| 任務類型 | 備份資料庫，MySQL，所有 | |
+| 執行週期 | 每天 14:00 | 伺服器是 UTC。比快照早 20 分鐘，每份快照裡都會有一份一致的資料庫備份 |
+| 備份到 | 伺服器磁碟，`/www/backup` | 不傳到第三方雲端 |
+| 保留最新 | 7 份 | |
+| 進程鎖 | 開啟 | 上一次還沒跑完時不會重複執行 |
+
+手動執行一次後，寶塔日誌只有「開始備份」，沒有結束訊息，所以要直接驗證檔案：
+
+~~~bash
+sudo find /www/backup/database -type f -mmin -30 -ls
+F=<備份檔路徑>
+sudo gzip -t $F && echo "gzip OK"
+sudo zcat $F | grep -c "CREATE TABLE"
+sudo zcat $F | tail -3
+sudo sh -c 'ls /www/server/data/<DB>/*.frm | wc -l'
+~~~
+
+| 檢查 | 結果 |
+| --- | --- |
+| 壓縮檔 | 18 KB，`gzip OK` |
+| 解壓後 | 約 100 KB |
+| `CREATE TABLE` 數量 | 9，與 `.frm` 檔數量相同 |
+| 結尾 | `-- Dump completed` |
+
+`/www/server/data` 有 219 MB，但網站資料庫本身只有 724 KB，其餘是 MariaDB 自己的檔案，所以 18 KB 的備份是完整的。
+
 ## 排查時踩到的坑
 
 這幾個是指令本身的陷阱，結果看起來合理，其實是錯的：
@@ -394,11 +433,13 @@ gcloud compute snapshots list --filter="sourceDisk~<DISK>" \
 | 優先 | 項目 |
 | --- | --- |
 | 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
-| 高 | 補完上面標示「待確認」的項目，尤其是新開的瀏覽器 SSH 能登入、Cloudflare 已是「完整（嚴格）」 |
+| 高 | 補完上面標示「待確認」的項目，尤其是新開的瀏覽器 SSH 能登入、Cloudflare 已是「完整（嚴格）」（面板登入已於 10/14 確認） |
+| 高 | 磁碟使用率從 43% 升到 48%，確認 logrotate 有在輪替 |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
 | 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它）。7.4 可以正常執行，改完就不必再關掉 `E_DEPRECATED` |
-| 中 | 寶塔計畫任務加每日資料庫備份（mysqldump）；快照是 crash-consistent，MariaDB 不保證能完整還原 |
-| 中 | 查 10/12 快照約 0.9 GB 的變動來源 |
+| 中 | 寶塔資料庫備份設定「失敗時通知」（要先設定通知管道） |
+| 中 | 寶塔面板顯示 Python 3.7 的 deprecation 警告，與更新寶塔面板一起處理 |
+| 低 | 10/19 的快照若也接近 0.9 GB，確認是 fstrim 造成 |
 | 中 | 外圍防護：Cloudflare WAF managed rules；`php.ini` 的 `disable_functions` 停用 `exec`、`system` 等（先確認網站沒用到）；寶塔開啟 `open_basedir` |
 | 中 | 更新寶塔面板（續簽腳本還在用 Python 3.7）；不要因為 PHP 卡住而一起延後 |
 | 中 | 作業系統與 PHP 分開處理：寶塔的 PHP 自行編譯在 `/www/server/php/74`，不依賴 Debian 套件。Debian 11 升級前先拍 snapshot，並確認寶塔支援新版本 |
