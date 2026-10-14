@@ -1,0 +1,288 @@
+---
+layout: default
+title: "用 Grafana 建立戰情中心（一）：接上 Wazuh"
+date: 2026-10-14
+categories: [PVE, Grafana, Wazuh]
+permalink: /docs/pve/grafana-war-room-wazuh/
+last_modified_at: 2026-10-14
+---
+
+# 用 Grafana 建立戰情中心（一）：接上 Wazuh
+
+Wazuh Dashboard 只看得到資安事件；設備狀態在 LibreNMS、Ceph 與 HA 在 PVE、任務失敗與備份在 Graylog。為了每天打開一頁就知道整體狀況，另建一台 Grafana，把各系統的資料拉到同一個畫面。本篇是第一階段：建立 Grafana，以唯讀方式接上 Wazuh Indexer，完成第一版戰情中心。
+
+> 紀錄日期：2026-10-13～14；Grafana 13.2.3（OSS）、Ubuntu 24.04 LXC；Wazuh All-in-one 4.14.8。文中 IP 皆為文件示範位址。
+
+## 架構與分階段計畫
+
+~~~text
+                     ┌─ Wazuh Indexer   → 資安告警、Agent 狀態、弱點    （階段 1，本篇）
+瀏覽器                │
+  ↓ 唯讀帳號          ├─ LibreNMS MySQL  → 設備上下線、告警              （階段 2）
+Grafana（CT 114）────┤
+                     ├─ Prometheus      → Ceph 健康、節點負載、VM／HA    （階段 3）
+                     └─ Graylog／PBS    → PVE 任務失敗、備份結果          （階段 4）
+~~~
+
+階段 5 再排版成專用電腦全螢幕顯示（kiosk）。每接上一個來源都要做到：**唯讀帳號、來源端防火牆只允許 Grafana、從非允許來源實測被擋**。
+
+| 項目 | 選擇 | 原因 |
+| --- | --- | --- |
+| 工具 | Grafana OSS | 可同時接多種資料來源；Wazuh Dashboard 只有 Wazuh 自己的資料 |
+| 作業系統 | Ubuntu 24.04 LTS | 支援到 2029；Debian 13 的 apt 拒絕 SHA1 簽章（Graylog 升級時遇過），不確定 Grafana 套件庫能否通過 |
+| 使用者 | 自己每天看一眼 | 版面以明細與數字為主 |
+
+## 1. 建立 CT 114
+
+先確認編號、IP 與範本，並參考現有容器（jt-ipam）的網路設定：
+
+~~~bash
+pvesh get /cluster/resources --type vm --output-format json | python3 -c "import json,sys; r=[x for x in json.load(sys.stdin) if x['vmid']==114]; print('114 已被使用') if r else print('114 可用')"
+ping -c 2 -W 1 192.0.2.33 >/dev/null && echo "已被使用！" || echo "沒有回應"   # 另對照 jt-ipam
+pveam update >/dev/null && pveam available --section system | grep -i ubuntu-24.04
+pct config 103 | grep -E '^(net0|nameserver|rootfs|unprivileged|features)'
+~~~
+
+~~~bash
+pveam download local ubuntu-24.04-standard_24.04-2_amd64.tar.zst
+pct create 114 local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst \
+  --hostname grafana --cores 2 --memory 2048 --swap 512 \
+  --rootfs VM_Pool:30 \
+  --net0 name=eth0,bridge=vmbr0,firewall=1,gw=192.0.2.1,ip=192.0.2.33/24,type=veth \
+  --nameserver "192.0.2.21 192.0.2.20" \
+  --unprivileged 1 --features nesting=1 --timezone host --onboot 1
+pct start 114
+~~~
+
+- 磁碟 30 GB：階段 3 的 Prometheus 也規劃放在這台。
+- 不在指令中設定 root 密碼（會留在 shell 歷史）；以 `pct enter 114` 進入。
+- 範本較舊，第一次 `apt full-upgrade` 有 193 個套件（109 個 LTS 安全更新），確認沒有移除任何套件後再繼續。
+
+## 2. 安裝 Grafana 並關閉回傳
+
+依 Grafana 官方套件庫安裝（只用 stable）：
+
+~~~bash
+apt install -y gnupg wget
+mkdir -p /etc/apt/keyrings
+wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor > /etc/apt/keyrings/grafana.gpg
+echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" > /etc/apt/sources.list.d/grafana.list
+apt update && apt install grafana
+~~~
+
+Grafana 預設會把匿名使用統計送到 grafana.com 並定期檢查更新。為符合「資料不上雲端」，**啟動前**以環境變數關閉（不改 `grafana.ini`，升級時不會被覆蓋）：
+
+~~~bash
+cat >> /etc/default/grafana-server <<'EOF'
+GF_ANALYTICS_REPORTING_ENABLED=false
+GF_ANALYTICS_CHECK_FOR_UPDATES=false
+GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
+GF_ANALYTICS_FEEDBACK_LINKS_ENABLED=false
+EOF
+systemctl daemon-reload && systemctl enable --now grafana-server
+curl -s http://127.0.0.1:3000/api/health                     # "database": "ok"
+tr '\0' '\n' < /proc/$(pgrep -f 'grafana server' | head -1)/environ | grep ^GF_ANALYTICS   # 4 行皆 false
+~~~
+
+**啟動後立刻**以瀏覽器登入 `http://192.0.2.33:3000`：預設 admin／admin，同網段任何人都能登入，首次登入會要求改密碼（存入密碼管理器）。首頁的「Latest from the blog」只是下載官網文章，不上傳資料；要完全不連外可加 `GF_NEWS_NEWS_FEED_ENABLED=false`。
+
+最後加入 HA（從節點執行，`exit` 離開容器並確認提示字元後再貼）：
+
+~~~bash
+ha-manager add ct:114 --state started
+ha-manager status | grep 114        # 先 queued，十幾秒後 started
+~~~
+
+## 3. 讓 Grafana 讀得到 Wazuh Indexer
+
+All-in-one 的 Indexer 只綁 `127.0.0.1:9200`（Dashboard 由本機連線），Grafana 連不到。兩種做法：
+
+| | 改 Indexer 綁定位址 | 加轉送服務（採用） |
+| --- | --- | --- |
+| 動到 Indexer | 要改 `opensearch.yml` 並重啟 | 不動 |
+| 風險 | 綁到非本機位址會啟用 bootstrap checks，非特權 LXC 可能不通過，**Indexer 起不來、Wazuh 停擺** | 轉送服務掛掉只影響 Grafana |
+| 升級 Wazuh | 設定可能被覆蓋 | 不受影響 |
+
+順序：**先建防火牆，再開服務**。在 CT 112 內：
+
+~~~bash
+cp -a /etc/nftables.conf /etc/nftables.conf.bak-$(date +%Y%m%d-%H%M%S)
+cat >> /etc/nftables.conf <<'EOF'
+
+table inet wazuh_indexer {
+    chain input {
+        type filter hook input priority filter - 1; policy accept;
+        tcp dport 9201 ip saddr 192.0.2.33 accept
+        tcp dport 9201 drop
+    }
+}
+EOF
+nft -c -f /etc/nftables.conf && nft -f /etc/nftables.conf && nft list ruleset | grep -n 'table\|dport'
+~~~
+
+確認原有的 `wazuh_api`（55000）仍在，再建立轉送服務：socat 只轉送 TCP，TLS 由兩端直接加密。
+
+~~~bash
+apt install -y socat
+cat > /etc/systemd/system/indexer-proxy.service <<'EOF'
+[Unit]
+Description=Forward Wazuh IP:9201 to local Wazuh Indexer 127.0.0.1:9200 (for Grafana)
+After=network-online.target wazuh-indexer.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/socat TCP4-LISTEN:9201,bind=192.0.2.32,reuseaddr,fork TCP4:127.0.0.1:9200
+Restart=always
+RestartSec=5
+User=nobody
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload && systemctl enable --now indexer-proxy
+ss -tlnp | grep -E ':920[01] '      # 127.0.0.1:9200（java）與 192.0.2.32:9201（socat）
+~~~
+
+從兩邊實測（Grafana 在 node10 時，從 node10 執行）：
+
+~~~bash
+curl -sk -o /dev/null -w '%{http_code}\n' --max-time 5 https://192.0.2.32:9201/                    # 000：被擋
+pct exec 114 -- curl -sk -o /dev/null -w '%{http_code}\n' --max-time 5 https://192.0.2.32:9201/     # 401：連得到、需要帳號
+~~~
+
+## 4. Indexer 唯讀帳號
+
+建立帳號需要 Indexer 管理權限。All-in-one 安裝時產生的管理員憑證（`admin.pem`）可直接呼叫安全設定 API，**不需要 admin 密碼**。腳本存為 CT 112 的 `/root/grafana-indexer-user.sh`（700）：
+
+~~~bash
+#!/bin/bash
+set -e
+C=/etc/wazuh-indexer/certs
+U=https://127.0.0.1:9200/_plugins/_security/api
+A=(-sk --fail-with-body --cert $C/admin.pem --key $C/admin-key.pem -H 'Content-Type: application/json')
+PW=$(python3 -c "import secrets,string;a=string.ascii_letters+string.digits;print(''.join(secrets.choice(a) for _ in range(24))+'-Aa9')")
+curl "${A[@]}" -X PUT $U/roles/grafana_wazuh_read -d '{"cluster_permissions":["cluster_composite_ops_ro","cluster:monitor/main"],"index_permissions":[{"index_patterns":["wazuh-alerts-*","wazuh-monitoring-*","wazuh-states-vulnerabilities-*"],"allowed_actions":["read","indices:admin/mappings/get"]}]}'; echo
+curl "${A[@]}" -X PUT $U/internalusers/grafana -d "{\"password\":\"$PW\"}"; echo
+curl "${A[@]}" -X PUT $U/rolesmapping/grafana_wazuh_read -d '{"users":["grafana"]}'; echo
+sleep 2
+curl -sk -u "grafana:$PW" "https://127.0.0.1:9200/wazuh-alerts-*/_count"; echo                                   # 筆數
+curl -sk -o /dev/null -w '%{http_code}\n' -u "grafana:$PW" "$U/internalusers"                                    # 403
+curl -sk -o /dev/null -w '%{http_code}\n' -u "grafana:$PW" "https://127.0.0.1:9200/.opendistro_security/_search" # 403
+echo "Grafana password (shown once): $PW"
+unset PW
+~~~
+
+| 權限 | 用途 |
+| --- | --- |
+| 三類 index 的 `read` | 告警、Agent 狀態快照、目前存在的弱點；不能寫入或刪除，也看不到其他 index |
+| `indices:admin/mappings/get` | 查詢編輯器列出欄位 |
+| `cluster_composite_ops_ro` | 多筆查詢（msearch）等唯讀操作 |
+| `cluster:monitor/main` | 讀取根目錄 `/` 的名稱與版本；Grafana 的 Get Version 需要，只能看到版本號 |
+
+密碼只在最後一行顯示一次，存入密碼管理器，截圖時遮住。結尾固定的 `-Aa9` 用來滿足複雜度規則，前 24 碼才是隨機的。
+
+## 5. 資料來源
+
+先在 **Connections → Add new connection** 安裝 OpenSearch plugin（從 grafana.com 下載，不上傳資料）。三個資料來源連線設定相同：
+
+| 欄位 | 設定 |
+| --- | --- |
+| URL | `https://192.0.2.32:9201` |
+| Basic auth | **開啟**，User `grafana` |
+| Skip TLS Verify | 開啟（Indexer 自簽憑證，且憑證寫的是 127.0.0.1；連線仍加密） |
+| PPL enabled | 關閉（唯讀角色未開放 PPL） |
+| Logs → Level field name | **留空** |
+| Version | 按 Get Version and Save，顯示 `OpenSearch (compatibility mode)` |
+
+| 名稱 | Index name | Time field |
+| --- | --- | --- |
+| Wazuh Alerts | `wazuh-alerts-*` | `timestamp` |
+| Wazuh Agents | `wazuh-monitoring-*` | `timestamp` |
+| Wazuh Vulnerabilities | `wazuh-states-vulnerabilities-*` | `vulnerability.detected_at` |
+
+弱點 index 的日期欄位以管理員憑證查 mapping 確認（另有 `package.installed`、`vulnerability.published_at`）。Wazuh Alerts 的 Logs → Message field name 可填 `full_log`。
+
+**Level field name 不要填 `rule.level`**：Grafana 會把數字當成 syslog 嚴重等級翻譯（3→ERROR、7→DEBUG），而 Wazuh 等級是數字越大越嚴重、syslog 相反，低等級的 AppArmor 告警會被標成 ERROR，造成誤判。
+
+## 6. 第一版戰情中心
+
+儀表板「戰情中心」，時間範圍 Last 24 hours。數字面板用 Stat，從查詢正常的面板 Duplicate 再修改最省事。
+
+| 面板 | 資料來源 | 查詢 | 重點設定 | 顏色 |
+| --- | --- | --- | --- | --- |
+| 24 小時告警數 | Wazuh Alerts | 空白；Count；Date Histogram 10m | Calculation **Total**；Graph mode Area | 綠；≥10000 橘 |
+| 高風險告警（≥12） | Wazuh Alerts | `rule.level:>=12` | Total；Graph mode None | 綠；≥1 紅 |
+| 斷線 Agent | Wazuh Agents | `status:disconnected`；**Unique Count `id`**；Interval 15m、**Min Doc Count 1** | Calculation **Last \***；No value `0` | 綠；≥1 紅 |
+| Critical 弱點 | Wazuh Vulnerabilities | `vulnerability.severity:Critical`；Count；Date Histogram auto | **Query options → Relative time `10y`**；Total | 綠；≥1 橘；≥300 紅 |
+| 告警趨勢（10 分鐘） | Wazuh Alerts | 空白；Count；Date Histogram 10m | Time series | — |
+
+設計重點：
+
+- **Calculation**：查詢回來是每個時段一個數字，Stat 只能顯示一個值。總量用 Total；「現在幾台斷線」用 Last \*（最新一次快照，星號略過空值）。
+- **斷線 Agent**：monitoring 每 15 分鐘為每台 Agent 寫一筆快照，用 Count 會重複計算，改用不重複的 `id`。Min Doc Count 1 避免最後一段尚未寫入時誤顯示 0。
+- **No data 不一定代表正常**：24 小時沒有斷線時查不到資料是正常的，但 index 沒資料或欄位名稱錯誤也會是 No data，面板就永遠不會變紅。設定 No value 0 之前，先在 Explore 驗證：Wazuh Agents 查空白條件、Unique Count `id` 應約 18（17 Agent + Manager）；`status:active` 也約 18。
+- **Critical 弱點**：弱點 index 存的是「目前仍存在」的弱點；套用儀表板的 24 小時只會算到最近新偵測到的，所以這個面板單獨看 10 年。
+
+驗收（2026-10-14）：
+
+| 面板 | 顯示 | 對照 |
+| --- | --- | --- |
+| 24 小時告警數 | 3,981～4,350（綠） | 與 §10-5 的每日 1,300～5,300 筆一致 |
+| 高風險告警 | 0（綠） | Explore 查 24 小時為 0 |
+| 斷線 Agent | 0（綠） | Explore 驗證 `id`、`status` 欄位 |
+| Critical 弱點 | 205（橘） | 命令列 `_count?q=vulnerability.severity:Critical` 為 205（10/06 修補後 292） |
+
+## 7. 遇到的問題
+
+| 現象 | 原因／處理 |
+| --- | --- |
+| Get Version 顯示 `Failed to connect to server` | 從 Grafana 容器以 curl 測試，`GET /` 回 403 `no permissions for [cluster:monitor/main]`；角色補上此權限 |
+| 資料來源 `"Unauthorized" is not valid JSON` | Basic auth 開關沒開，沒有送出帳號密碼（401）；開啟後填 User／Password |
+| 新面板 `invalid query, missing metrics and aggregations` | 新增空白面板不會自動帶入 Count 與 Date Histogram；改從正常面板 Duplicate |
+| 改了 Lucene query 數字沒變 | 輸入後要點欄位外讓查詢生效，再 Refresh |
+| Interval 改了沒效果 | `10m` 誤填到 Min Doc Count（只能填數字）；Interval 在展開後的下拉選單 |
+| `pct enter` 後一起貼上 `exit` 與節點指令，指令沒有執行 | 容器 shell 關閉時後續輸入被丟棄；先 `exit`、確認提示字元再貼 |
+
+查詢時觀察到：ubclient 的 rootcheck 掃描會在幾秒內產生大量事件（趨勢圖尖峰）；node10 持續出現低等級的 AppArmor DENIED，列入下一輪告警調校。
+
+## 8. 還原
+
+在 CT 112 內移除 Grafana 的存取（Wazuh 本身不受影響）：
+
+~~~bash
+systemctl disable --now indexer-proxy && rm /etc/systemd/system/indexer-proxy.service && systemctl daemon-reload
+cp -a $(ls -t /etc/nftables.conf.bak-* | head -1) /etc/nftables.conf && nft -f /etc/nftables.conf
+C=/etc/wazuh-indexer/certs; A=(-sk --cert $C/admin.pem --key $C/admin-key.pem -X DELETE)
+curl "${A[@]}" https://127.0.0.1:9200/_plugins/_security/api/rolesmapping/grafana_wazuh_read
+curl "${A[@]}" https://127.0.0.1:9200/_plugins/_security/api/internalusers/grafana
+curl "${A[@]}" https://127.0.0.1:9200/_plugins/_security/api/roles/grafana_wazuh_read
+~~~
+
+nftables 備份檔要選建立 `wazuh_indexer` 之前的那一份；之後若又改過 nftables，改為手動刪除 `table inet wazuh_indexer` 區塊。
+
+## 注意事項
+
+- **Wazuh 升級後**檢查：`indexer-proxy` 為 active、9201 仍只允許 Grafana、`grafana` 帳號能登入，以及原有的 `api.yaml` host 與 55000 規則（見 Wazuh SOP §13）。
+- 若以 `wazuh-passwords-tool` 重設 Indexer 密碼，工具可能以設定檔覆蓋目前的帳號清單，`grafana` 帳號可能消失（未實測）；重新執行 `/root/grafana-indexer-user.sh` 即可補回，並更新 Grafana 三個資料來源的密碼。
+- Skip TLS Verify：只有 Grafana 能連 9201、帳號唯讀，風險有限；待改善為匯入 Wazuh CA（同 jt-ipam）。
+- 資料來源顯示 compatibility mode：Wazuh Indexer 對外回報相容版本，目前查詢正常；若日後出現查詢錯誤再回頭檢查。
+
+## 待辦
+
+| 項目 | 狀態 |
+| --- | --- |
+| CT 114 納管：DNS、jt-ipam、Wazuh Agent、LibreNMS（SNMPv3）、PBS 備份 | 未做 |
+| 階段 2：LibreNMS（MySQL 唯讀帳號） | 未做 |
+| 階段 3：Prometheus、Ceph prometheus 模組、PVE exporter | 未做 |
+| 階段 4：Graylog／PBS（Graylog 的 OpenSearch 可能沒有帳號保護，需另行評估） | 未做 |
+| 階段 5：專用電腦 kiosk（`?kiosk`、開機自動開啟、Viewer 帳號、不休眠） | 未做 |
+| node10 AppArmor DENIED 告警調校 | 待查 |
+
+## 參考資料
+
+- [Grafana：Install on Debian or Ubuntu](https://grafana.com/docs/grafana/latest/setup-grafana/installation/debian/)
+- [Grafana：Configure with environment variables](https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#override-configuration-with-environment-variables)
+- [Grafana OpenSearch data source](https://grafana.com/grafana/plugins/grafana-opensearch-datasource/)
+- [OpenSearch：Security REST API](https://docs.opensearch.org/latest/security/access-control/api/)
+- [OpenSearch：Default action groups](https://docs.opensearch.org/latest/security/access-control/default-action-groups/)
