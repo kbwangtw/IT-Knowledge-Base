@@ -305,7 +305,7 @@ VM 加入 HA 後的注意事項：
 
 **結果**：三台 kernel 皆為 `7.0.14-22-pve`；Ceph `HEALTH_OK`、97 PG active+clean、`noout` 已解除；HA 全部 started；配置恢復為更新前（node10：AdGuard、DC02、Graylog、IPAM、ai、librenms、wireguard；node11：ProxCenter、UBClient、WinClient；node12：CA、DC01、Pihole、wazuh）；Wazuh 18（17 Agent + Manager）；LibreNMS 無斷線設備。
 
-舊 kernel 7.0.14-20 保留作為開機退路，穩定運作一週以上再清除。
+舊 kernel 7.0.14-20 原本保留作為開機退路；10/13 三台升到 7.0.14-23 後，10/14 以 `apt autoremove` 移除（見 [PBS 更新後，怎麼確認備份還能用？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)），三台實測剩 6.17.13-21、7.0.14-22、7.0.14-23，`Manually selected kernels` 為 None。
 
 ## 7. 決定只留 PVE 一套機制（2026-10-13）
 
