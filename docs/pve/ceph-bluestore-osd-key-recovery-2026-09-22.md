@@ -235,7 +235,7 @@ PG: 95 active+clean
 
 ## Sep20 I/O 訊息與安全收尾
 
-Sep20 的 `aio_submit retries` 保留為觀察項目。當次 SMART 檢查沒有看到 media／data integrity error；這不足以保證所有硬體狀態都正常，也沒有證據把本次主要故障歸因於 SSD 損壞。後續可對照 retries 發生時間、負載、OSD 延遲、核心 I/O／reset 訊息及 SMART 計數變化，再判斷是否需獨立追查。
+Sep20 的 `aio_submit retries` 保留為觀察項目（10/14 補記：30 天統計顯示三顆 OSD 每晚都有，七成五集中在 21:00 備份時段，SMART 正常，見 [Ceph 慢操作與備份排程](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/)）。當次 SMART 檢查沒有看到 media／data integrity error；這不足以保證所有硬體狀態都正常，也沒有證據把本次主要故障歸因於 SSD 損壞。後續可對照 retries 發生時間、負載、OSD 延遲、核心 I/O／reset 訊息及 SMART 計數變化，再判斷是否需獨立追查。
 
 **OSD.1 的實際 CephX key 曾在排障對話曝光。** 本次先完成既有金鑰的一致性修復，未將新一輪 rotation 混入事故收尾。後續另排受控維護窗口輪替 OSD.1，完整同步與驗證 MON、local、BlueStore 及啟用流程；此項仍待執行。不要將 secret、含 key 的截圖或完整認證匯出放入 GitHub、Pages、issue 或 Graylog。
 

@@ -4,7 +4,7 @@ title: "PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為�
 permalink: /docs/pve/pve9-subscription-nag-removal/
 date: 2026-10-12
 categories: [PVE, WebUI, APT, Ceph]
-last_modified_at: 2026-10-12
+last_modified_at: 2026-10-14
 ---
 
 # PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？
@@ -253,6 +253,43 @@ mv /etc/apt/sources.list.d/pve-no-subscription.list /etc/apt/sources.list.d/pve-
 ~~~
 
 本次沒有執行這一步。
+
+## 7. PBS 也適用（2026-10-13）
+
+PBS 的訂閱提示來自同一個套件 `proxmox-widget-toolkit` 的同一個檔案，做法相同，只有要重啟的服務與 hook 名稱不同。
+
+先在 PBS31 確認版本與目標：
+
+~~~bash
+proxmox-backup-manager versions
+dpkg -l proxmox-widget-toolkit | awk '/^ii/ {print $2, $3}'
+JS=/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+grep -c "checked_command: function (orig_cmd) {" $JS
+grep -n "checked_command" $JS | head -3
+~~~
+
+本次 PBS 4.2.8、widget-toolkit 5.2.10，目標同樣在第 614 行，`grep -c` 為 1，與 PVE 完全一致。接著備份、patch、重啟：
+
+~~~bash
+cp -n $JS ${JS}.orig
+sed -i 's/^\(\s*checked_command: function (orig_cmd) {\)$/\1 orig_cmd(); return;/' $JS
+grep -n "checked_command: function" $JS
+systemctl restart proxmox-backup-proxy
+systemctl is-active proxmox-backup-proxy
+~~~
+
+APT hook 改用 `/usr/local/sbin/pbs-nonag.sh` 與 `/etc/apt/apt.conf.d/99-pbs-nonag`，內容與 PVE 版相同，只把最後的 `systemctl restart pveproxy.service` 換成 `systemctl restart proxmox-backup-proxy`。
+
+| 項目 | PVE | PBS |
+| --- | --- | --- |
+| 修改的檔案 | `proxmoxlib.js` 第 614 行 | 同一個檔案、同一行 |
+| 重啟服務 | `pveproxy` | `proxmox-backup-proxy` |
+| hook | `pve-nonag.sh`、`99-pve-nonag` | `pbs-nonag.sh`、`99-pbs-nonag` |
+| 套件來源 | 沒有 enterprise 設定檔，使用 `pve-no-subscription` | enterprise 設定檔保留但 `Enabled: false`，使用 `pbs-no-subscription` |
+
+兩種來源寫法都正確；`apt-get update` 沒有警告或錯誤。修改後無痕視窗登入不再出現提示；當天 PBS31 更新 kernel 並重開後再次確認，提示仍未出現。
+
+**重啟 `proxmox-backup-proxy` 會中斷正在進行的備份、GC 或 Verify。** 本環境每晚 21:00～22:30 接收備份、00:00 起 GC、02:00 起 Verify，這些時段不要重啟服務、也不要升級 PBS 套件；APT hook 在 widget-toolkit 升級時會自動重啟服務。
 
 ## 怎麼還原？
 

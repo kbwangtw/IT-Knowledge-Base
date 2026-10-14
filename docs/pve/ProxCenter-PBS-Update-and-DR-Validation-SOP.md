@@ -4,7 +4,7 @@ title: "PBS 更新後，怎麼確認備份還能用？"
 date: 2026-09-11
 categories: [PVE, PBS, ProxCenter, DR]
 permalink: /docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/
-last_modified_at: 2026-10-02
+last_modified_at: 2026-10-14
 ---
 
 # PBS 更新後，怎麼確認備份還能用？
@@ -216,6 +216,38 @@ curl -I http://192.0.2.210:3000
 回復方案必須另外準備。從舊 kernel 開機只涵蓋 kernel，不能宣稱整個 PBS、套件與 ZFS 都已回到更新前。本文沒有完成整套回復演練，也沒有量到完整 RTO／RPO。
 
 <a id="acceptance"></a>
+## 2026-10-13：kernel 7.0.14-19 → 7.0.14-23
+
+PBS Web UI 的 Updates 顯示 `proxmox-kernel-7.0` 可從 7.0.14-22 升到 7.0.14-23。照本文「更新前」的檢查：
+
+| 檢查 | 結果 |
+| --- | --- |
+| PBS | 4.2.8 |
+| 執行中 kernel | **7.0.14-19-pve** |
+| failed unit | 0 |
+| CIFS | 有掛載，Tokyo16 2.7T，已用約 901G（34%） |
+| 根目錄 | 44G，可用 36G（`/boot` 在同一分割區） |
+| `apt -s dist-upgrade` | 只有 2 個 `Inst`，沒有 `Remv` |
+
+**已安裝的是 -22，執行中的卻是 -19**：之前安裝 -22 後一直沒有重開，-22 從未實際使用。PBS 裝完 kernel 更新要記得重開才會生效。
+
+`apt dist-upgrade` 後重開，再核對：
+
+| 檢查 | 結果 |
+| --- | --- |
+| kernel | 7.0.14-23-pve |
+| `proxmox-backup`、`proxmox-backup-proxy` | active、active |
+| CIFS | 自動掛回，容量與重開前相同 |
+| `ls /mnt/tokyo16/ct/101/ \| wc -l` | 11（10 筆備份加 owner） |
+| PVE `pvesm status --storage PBS31` | active，33.72% |
+| PVE `pvesm list PBS31 \| wc -l` | 141（140 筆備份加標題列） |
+
+重開後 `systemctl --failed` 列出 `session-1.scope`。這是 root 的一個登入連線，不是服務；`loginctl list-sessions` 確認後以 `systemctl reset-failed session-1.scope` 清除，failed unit 回到 0。
+
+更新後 PBS31 與三台 PVE 的 kernel 一致。同日也取消了 PBS 的訂閱提示、刪除沒有規則的 Prune Job、把 Verify 改到 02:00，見 [Ceph 慢操作與備份排程](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/) 與 [取消訂閱提示](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve9-subscription-nag-removal/) 第 7 節。
+
+**維護時段：** 本環境每晚 21:00～22:30 接收備份、00:00 起 GC、02:00 起 Verify，更新與重開要避開。
+
 ## 每次維護要留下的結案資料
 
 記錄更新前後版本、重開時間、掛載來源、PBS 服務、PVE storage 狀態與工作日誌。還原演練另外記錄快照時間、還原開始與完成時間、開機時間、應用程式驗收結果。
