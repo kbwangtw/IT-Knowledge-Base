@@ -25,6 +25,7 @@ last_modified_at: 2026-10-14
 | systemd journal | 873M | 上限 200M、保留 1 個月 | 已確認 96M |
 | Ops Agent | 403，log 送不出去 | 補上 IAM 角色 | 重啟後 log 只有 info；Logs Explorer 測試訊息待確認 |
 | 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | 已確認；Cloudflare「完整（嚴格）」模式待確認 |
+| 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | 已確認 14 份快照都是 READY |
 | GCP 防火牆 | RDP、SSH、面板、80/443 全部對全世界開放 | RDP 刪除；SSH、面板限定來源；80/443 只允許 Cloudflare | 直連逾時、經 Cloudflare 回 200；面板與新 SSH 連線待確認 |
 
 ## 1. 先看空間被誰吃掉
@@ -351,6 +352,29 @@ curl -sS -o /dev/null -m 10 -w "via CF HTTP=%{http_code}\n" https://example.com
 
 **待確認**：從管理者電腦登入面板；另開新的瀏覽器 SSH 視窗登入。Cloudflare 的 IP 清單偶爾會更新，網站若突然出現 522，重新執行第 2 步。
 
+## 7. 備份：快照排程早就有了（2026-10-14 補記）
+
+原本以為這台沒有備份，查了才發現建立 VM 時，Console 已經自動建立並套用了 `default-schedule-1`。不過「有排程」不等於「有備份」（第 5 節的續簽排程就是反例），所以排程規則和實際產生的快照都要確認。以下指令都在 Cloud Shell 執行：
+
+~~~bash
+gcloud compute resource-policies describe default-schedule-1 --region=<REGION> \
+  --format="yaml(snapshotSchedulePolicy)"
+gcloud compute snapshots list --filter="sourceDisk~<DISK>" \
+  --format="table(name,status,storageBytes,creationTimestamp)" --sort-by=~creationTimestamp
+~~~
+
+| 項目 | 結果 | 判斷 |
+| --- | --- | --- |
+| `maxRetentionDays` | 14 | 被入侵好幾天才發現，也還有乾淨的版本 |
+| `onSourceDiskDelete` | `KEEP_AUTO_SNAPSHOTS` | VM 設定是「刪除執行個體時刪除磁碟」，這項可以保證快照不會跟著消失 |
+| `guestFlush` | false | crash-consistent，等同在那個瞬間直接拔電源 |
+| 實際快照 | 9/30 到 10/13 每天一份，全部 `READY` | 已確認 |
+| 實際拍攝時間 | 每天 14:20 UTC（台灣 22:20） | 名稱裡的時間戳記和 `creationTimestamp` 一致 |
+
+快照是增量的：最舊的一份約 3.3 GB，其他每天 0.1 到 0.5 GB。10/5 清 log 那天約 0.9 GB，屬於合理範圍。**10/12 也有約 0.9 GB，原因還沒查。**
+
+一顆磁碟同時只能套一個快照排程，所以不要再另外建立排程。
+
 ## 排查時踩到的坑
 
 這幾個是指令本身的陷阱，結果看起來合理，其實是錯的：
@@ -371,13 +395,16 @@ curl -sS -o /dev/null -m 10 -w "via CF HTTP=%{http_code}\n" https://example.com
 | --- | --- |
 | 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
 | 高 | 補完上面標示「待確認」的項目，尤其是新開的瀏覽器 SSH 能登入、Cloudflare 已是「完整（嚴格）」 |
-| 高 | 設定 GCE disk snapshot 排程；PHP 沒有修補，被入侵時要能還原 |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
 | 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它）。7.4 可以正常執行，改完就不必再關掉 `E_DEPRECATED` |
+| 中 | 寶塔計畫任務加每日資料庫備份（mysqldump）；快照是 crash-consistent，MariaDB 不保證能完整還原 |
+| 中 | 查 10/12 快照約 0.9 GB 的變動來源 |
 | 中 | 外圍防護：Cloudflare WAF managed rules；`php.ini` 的 `disable_functions` 停用 `exec`、`system` 等（先確認網站沒用到）；寶塔開啟 `open_basedir` |
 | 中 | 更新寶塔面板（續簽腳本還在用 Python 3.7）；不要因為 PHP 卡住而一起延後 |
 | 中 | 作業系統與 PHP 分開處理：寶塔的 PHP 自行編譯在 `/www/server/php/74`，不依賴 Debian 套件。Debian 11 升級前先拍 snapshot，並確認寶塔支援新版本 |
 | 低 | 評估長期方案：PHP 7.4 改放 container、主機升級作業系統；或購買 PHP 7.4 付費延長支援；或改寫網站 |
+| 低 | 找時間演練一次「從快照建磁碟並換上 VM」的還原流程 |
+| 低 | Shielded VM 的安全啟動目前停用；開啟要關機，並確認 kernel module 相容 |
 | 低 | 7/7 有一次沒有 shutdown 紀錄的開機，原因未查明 |
 | 低 | DMARC 目前是 `p=none`，DNS 上也沒看到 DKIM |
 | 低 | 專案只有一個 Owner，建議加一個備援管理者 |
