@@ -24,11 +24,11 @@ last_modified_at: 2026-10-14
 | 網站 log 輪替 | 無 | logrotate：每天、保留 14 份、200M 提早輪替 | 模擬執行無錯誤；首次實際輪替待隔天確認 |
 | systemd journal | 873M | 上限 200M、保留 1 個月 | 已確認 96M |
 | Ops Agent | 403，log 送不出去 | 補上 IAM 角色 | 重啟後 log 只有 info；Logs Explorer 測試訊息待確認 |
-| 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | 已確認；Cloudflare「完整（嚴格）」模式待確認 |
+| 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | 已確認；10/14 確認 Cloudflare 為「完整（嚴格）」 |
 | 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | 已確認 14 份快照都是 READY |
 | 資料庫備份 | 從來沒有 | 寶塔計畫任務：每天 14:00 UTC、保留 7 份 | 已確認備份檔完整（9 個 table、Dump completed） |
 | access log 暴增 | 每分鐘約 3,500 筆，爬蟲陷阱 | 連結拿掉 `time()`；Cloudflare 只質詢舊格式網址 | 已確認每分鐘 7 筆，真人不被質詢 |
-| GCP 防火牆 | RDP、SSH、面板、80/443 全部對全世界開放 | RDP 刪除；SSH、面板限定來源；80/443 只允許 Cloudflare | 直連逾時、經 Cloudflare 回 200；面板與新 SSH 連線待確認 |
+| GCP 防火牆 | RDP、SSH、面板、80/443 全部對全世界開放 | RDP 刪除；SSH、面板限定來源；80/443 只允許 Cloudflare | 直連逾時、經 Cloudflare 回 200；10/14 確認面板與新 SSH 連線可登入 |
 
 ## 1. 先看空間被誰吃掉
 
@@ -306,6 +306,8 @@ echo | openssl s_client -connect 127.0.0.1:443 -servername example.com 2>/dev/nu
 
 **待確認**：Cloudflare 概觀頁顯示「完整（嚴格）」（curl 回 200 在「完整」模式下也會成立，不能當證據）；寶塔續簽排程改為停用；開啟「一律使用 HTTPS」（當時 24 小時內有 474 個明文 HTTP 請求）。
 
+> 10/14：「完整（嚴格）」已在 Cloudflare 概觀頁確認，續簽任務已停用。剩下「一律使用 HTTPS」。
+
 ## 6. 防火牆：只開必要的來源
 
 原本的 GCP 防火牆：
@@ -353,6 +355,8 @@ curl -sS -o /dev/null -m 10 -w "via CF HTTP=%{http_code}\n" https://example.com
 直連 `exit=28`（逾時），經 Cloudflare `HTTP=200`。
 
 **待確認**：從管理者電腦登入面板；另開新的瀏覽器 SSH 視窗登入。Cloudflare 的 IP 清單偶爾會更新，網站若突然出現 522，重新執行第 2 步。
+
+> 10/14：面板從管理者電腦可登入，新開的瀏覽器 SSH 視窗可登入。
 
 ## 7. 備份：快照排程早就有了（2026-10-14 補記）
 
@@ -536,7 +540,7 @@ ls -l $F
 | 優先 | 項目 |
 | --- | --- |
 | 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
-| 高 | 補完上面標示「待確認」的項目，尤其是新開的瀏覽器 SSH 能登入、Cloudflare 已是「完整（嚴格）」（面板登入、停用寶塔續簽任務已於 10/14 確認） |
+| 中 | 剩下兩個待確認：Logs Explorer 搜得到 Ops Agent 測試訊息；Cloudflare 開啟「一律使用 HTTPS」 |
 | 高 | 確認 `cms/plugin/kindeditor/php/` 的 `upload_json.php`、`file_manager_json.php` 未登入時無法存取；KindEditor 有公開的任意上傳與目錄瀏覽漏洞 |
 | 中 | 檢查 `$_GET['pid']`、`$_GET['news']`、`$_GET['n']` 是否直接放進 SQL（SQL injection） |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
