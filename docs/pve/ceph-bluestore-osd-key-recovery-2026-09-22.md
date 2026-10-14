@@ -2,7 +2,7 @@
 layout: default
 title: "PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰"
 date: 2026-09-22
-last_modified_at: 2026-10-12
+last_modified_at: 2026-10-14
 categories: [PVE, Ceph, Troubleshooting]
 permalink: /docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/
 ---
@@ -14,6 +14,8 @@ permalink: /docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/
 重開機讓潛藏的認證資料問題再次浮現。9/21 更新本身沒有更新 Ceph 套件，不能把本案簡化成「PVE 更新弄壞 Ceph」。
 
 **10/12 補記：修復後第一次三台整機滾動重開（kernel 更新），三顆 OSD 都正常加入，叢集回到 HEALTH_OK。**
+
+**10/14 補記：已曝光的 OSD.1 金鑰已完成輪換，MON／local／BlueStore 三處都換成新 key，osd.1 約 20 秒後 up，叢集回到 HEALTH_OK。**
 
 > 依 2026-09-21～22「PVE 更新後排查 Web介面」對話的已確認結果整理，日期採 UTC+8。保留節點及 OSD 編號，不公開 CephX secret、完整 label 或原始截圖。本文的操作範例依當時成功流程整理並加入失敗即停止的檢查；不是本次文件發布時重新操作正式叢集的紀錄。
 
@@ -237,7 +239,64 @@ PG: 95 active+clean
 
 Sep20 的 `aio_submit retries` 保留為觀察項目（10/14 補記：30 天統計顯示三顆 OSD 每晚都有，七成五集中在 21:00 備份時段，SMART 正常，見 [Ceph 慢操作與備份排程](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/)）。當次 SMART 檢查沒有看到 media／data integrity error；這不足以保證所有硬體狀態都正常，也沒有證據把本次主要故障歸因於 SSD 損壞。後續可對照 retries 發生時間、負載、OSD 延遲、核心 I/O／reset 訊息及 SMART 計數變化，再判斷是否需獨立追查。
 
-**OSD.1 的實際 CephX key 曾在排障對話曝光。** 本次先完成既有金鑰的一致性修復，未將新一輪 rotation 混入事故收尾。後續另排受控維護窗口輪替 OSD.1，完整同步與驗證 MON、local、BlueStore 及啟用流程；此項仍待執行。不要將 secret、含 key 的截圖或完整認證匯出放入 GitHub、Pages、issue 或 Graylog。
+**OSD.1 的實際 CephX key 曾在排障對話曝光。** 本次先完成既有金鑰的一致性修復，未將新一輪 rotation 混入事故收尾。10/14 已完成輪替，過程見下一節；舊 key 在 MON 端已失效。不要將 secret、含 key 的截圖或完整認證匯出放入 GitHub、Pages、issue 或 Graylog。
+
+## 10/14 補記：OSD.1 金鑰輪換
+
+### 為什麼要換
+
+CephX key 不會自己過期。osd.1 的 caps 是 `mon`／`mgr` = `allow profile osd`、`osd` = `allow *`，拿到 key 又能連到 Ceph 網路的人，理論上可以冒充 osd.1 讀寫儲存層。Ceph 網路不對外，實際風險不高，但外流的 key 會一直有效，只有換掉才能讓它失效。
+
+### 做法
+
+原則和 9/22 相同：**osd.1 停機時，把 MON、local keyring、BlueStore label 三處一起換成同一把新 key，三處一致才啟動。** label 一定要換：`/var/lib/ceph/osd/ceph-1` 是 tmpfs，重開機時由 `ceph-volume` 依 label 重建 keyring，漏掉 label，下次重開 osd.1 就會用舊 key 而無法登入。
+
+全程在 node11 的 tmux 中執行，白天 12:00 左右進行，避開 21:00～03:00 的備份、GC 與 Verify。輸出只看 hash 前幾碼與 OK／錯誤字樣，不顯示 key。
+
+| 步驟 | 內容 | 本次結果 |
+| --- | --- | --- |
+| 0. 事前檢查 | HEALTH_OK、3 up／3 in、97 active+clean；四個 pool 都是 size 3／min_size 2；`ceph auth import` 可用；沒有備份在跑 | 通過 |
+| 確認 key 類型 | osd.0／1／2 的 key 與 `ceph-authtool --gen-print-key` 產生的 key 都是 60 字元，屬於 9/14 遷移後的新類型，預設產生的就是同類型 | 通過 |
+| 1. 備份與稽核 | `ceph auth get osd.1` 與 local keyring 複製到 `/root/osd1-rotate/`（700／600）；三處 hash 比對 | `THREE_WAY_MATCH`、`KEY=OLD` |
+| 2. 停止 | `ceph osd set noout`，`systemctl stop ceph-osd@1` | inactive、osd.1 down |
+| 3. 換 key | 產生新 key，依序寫入 local → label → MON，最後才動 MON | `LOCAL_OK`、`LABEL_OK`、`MON_OK`；三處一致、與舊值不同（`KEY=NEW`）；keyring 仍為 `ceph:ceph` 600 |
+| 4. 啟動 | `systemctl start ceph-osd@1` | 約 20 秒後 up；短暫 11 個 PG peering，約 1 分鐘內回到 97 active+clean；日誌沒有 auth／cephx 錯誤 |
+| 5. 收尾 | `ceph osd unset noout`，再稽核一次，`shred` 刪除備份 | HEALTH_OK；`THREE_WAY_MATCH`、`KEY=NEW`；備份已清除 |
+
+換 key 的核心步驟如下。MON 用的 keyring 由原本的匯出檔只替換 `key =` 那一行，caps 保持不變；任何檢查失敗就停止，osd.1 保持停機：
+
+~~~bash
+(
+  set +x; set -euo pipefail; umask 077
+  dir=/var/lib/ceph/osd/ceph-1; w=/root/osd1-rotate
+  [ "$(systemctl show ceph-osd@1 -p ActiveState --value)" = inactive ] || { echo OSD_NOT_STOPPED; exit 1; }
+  NEWKEY=$(ceph-authtool --gen-print-key | tr -d '[:space:]')
+  [ "${#NEWKEY}" -eq 60 ] || { echo "KEY_LENGTH_WRONG ${#NEWKEY}"; exit 1; }
+  sed "s|^\([[:space:]]*key = \).*|\1${NEWKEY}|" "$w/mon-old.keyring" > "$w/mon-new.keyring"
+  grep -qF "$NEWKEY" "$w/mon-new.keyring" || { echo SED_FAILED; exit 1; }
+  diff <(grep caps "$w/mon-old.keyring") <(grep caps "$w/mon-new.keyring") >/dev/null || { echo CAPS_CHANGED; exit 1; }
+  sed "s|^\([[:space:]]*key = \).*|\1${NEWKEY}|" "$w/local-old.keyring" > "$dir/keyring"
+  grep -qF "$NEWKEY" "$dir/keyring" || { echo LOCAL_FAILED; exit 1; }
+  echo LOCAL_OK
+  ceph-bluestore-tool set-label-key --dev "$dir/block" --key osd_key -v "$NEWKEY"
+  echo LABEL_OK
+  ceph auth import -i "$w/mon-new.keyring"
+  echo MON_OK
+  unset NEWKEY
+  echo ROTATE_DONE
+)
+~~~
+
+稽核用的比對與上方「2. 比較解析後的 key」相同（`id=1`），另外比對備份的舊 key，用來分辨 `KEY=OLD`／`KEY=NEW`。
+
+退回方案（本次沒有用到）：停止 osd.1，用備份的舊 keyring 寫回 local、label，`ceph auth import -i mon-old.keyring` 還原 MON，稽核一致後再啟動。只在啟動後出現認證錯誤時使用；退回後用的是外流的舊 key，只能暫時使用。
+
+### 注意事項
+
+- Tentacle 另有 `ceph auth rotate <entity> [--key_type]`，但它會在 OSD 運作中直接換掉 MON 端的 key，順序不受控制，本次不使用。
+- 不要把指令輸出貼回 shell：本次曾把上一段輸出一起貼上，只出現 `command not found`，但輸出中可能剛好有可執行的內容。
+- 排障時，含 key 的輸出（`ceph auth get`、keyring、`show-label`）只回報 hash 或 OK／錯誤字樣，避免再次需要事後輪換。
+- 待驗證：下次整機重開（例如 ProxCenter 滾動更新）後，確認 osd.1 正常 up，並再跑一次三處比對，證明 label 的新 key 在重開後仍然有效。
 
 ## 防復發：更新／重開機前後檢查清單
 
@@ -264,7 +323,8 @@ Sep20 的 `aio_submit retries` 保留為觀察項目（10/14 補記：30 天統�
 - [ ] 各節點核對 CephFS 真正掛載來源／FSTYPE、PVE storage 狀態與必要應用讀寫。`pvesm status` 可能嘗試啟用 storage，須留意操作脈絡。
 - [ ] 新備份查看最終 TASK OK，再依維護計畫做還原驗證；不得沿用舊日期結果宣稱本次通過。
 - [x] 修復後整機滾動重開驗證：10/12 kernel 更新時完成，三顆 OSD 正常加入、HEALTH_OK（未重跑三層 hash）。
-- [ ] 已曝光 key 的安全輪替，另排維護並記錄日期與結果。
+- [x] 已曝光 key 的安全輪替：10/14 完成，三處一致、HEALTH_OK。
+- [ ] 輪換後的重開驗證：下次整機重開後確認 osd.1 up，並重跑三處比對。
 
 ## 相關紀錄
 
