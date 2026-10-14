@@ -2434,7 +2434,7 @@ Guest Agent 沒回應時，從 PVE 主機分不出是「沒安裝」還是「沒
 | UBClient（Ubuntu 26.04.1 LTS） | 沒有回應；`apt` 顯示 `Selecting previously unselected package`，代表從來沒裝過 | VM 內 `sudo apt install -y qemu-guest-agent` 後 `sudo systemctl start qemu-guest-agent` |
 | WinClient（Windows 10 Pro） | 原本就有回應 | 不需處理 |
 
-Ubuntu 的 `qemu-guest-agent` 是 static unit，安裝時會顯示 `not starting it`，所以第一次要手動 start；之後開機偵測到 `/dev/virtio-ports/org.qemu.guest_agent.0` 會自動啟動，不必 `enable`。安裝後 `qm agent 104 ping` 有回應、`get-osinfo` 回傳 Ubuntu 26.04.1 LTS，`qm shutdown 104`、`qm shutdown 108` 都順利完成並回到 stopped。
+Ubuntu 的 `qemu-guest-agent` 是 static unit，安裝時會顯示 `not starting it`，所以第一次要手動 start；之後開機偵測到 `/dev/virtio-ports/org.qemu.guest_agent.0` 會自動啟動，不必 `enable`；10/13 重新開機實測，UBClient 11:36:47 開機、Guest Agent 11:36:51 啟動，相差 4 秒（`qm guest exec 104 -- uptime -s` 與 `systemctl show qemu-guest-agent -p ActiveEnterTimestamp` 對照）。安裝後 `qm agent 104 ping` 有回應、`get-osinfo` 回傳 Ubuntu 26.04.1 LTS，`qm shutdown 104`、`qm shutdown 108` 都順利完成並回到 stopped。
 
 Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警以 JSON 送到 Graylog 的 Syslog UDP 1514，再由 Graylog Event Definition 寄 Gmail。這是 Wazuh 第一次把告警轉到 Graylog；其他告警仍只在 Wazuh Dashboard。
 
