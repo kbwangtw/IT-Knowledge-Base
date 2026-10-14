@@ -29,7 +29,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
 | 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
-| 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目 |
+| 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目；10/14 ubclient 套件更新並修正 logrotate 重複設定（12-6） |
 | 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
 | 14 | WireGuard VPN 健康監控 | 完成 | 2026-10-13：ct:109 內部檢查（100150）＋ Manager 外部檢查 ct:109（100151）；`syslog_output` 只把 wireguard 群組送 Graylog；兩種情況的 Gmail 告警都實測收到 |
 
@@ -2340,6 +2340,84 @@ pct exec 113 -- systemctl restart hermes-gateway
 ~~~
 
 結果：`hermes-gateway` active，管理者帳號傳訊息 Bot 正常回應。之後不在白名單內的帳號傳訊息，Bot 不回應、也無法送出配對申請。還原方式：把最新的 `.env.bak-*` 複製回 `.env` 後重啟服務。確認運作正常後，已刪除 `.env.bak-*`（內含 Bot token 等機密）與 `telegram-pending.json.bak`（陌生帳號資料）（2026-10-06）；備份檔比現行 `.env` 多 2 bytes，正是移除的 `# `，證明只修改了該行。若擔心 token 外洩，最徹底的做法是在 @BotFather 重新產生 token（`rm` 不保證資料從 Ceph 磁碟上消失）。Ubuntu 發布 ffmpeg 修補後隨一般更新套用。
+
+### 12-6 ubclient 套件更新與 logrotate 修正（2026-10-14）
+
+ubclient（VM 104，Ubuntu 26.04）有 21 個套件待更新：sssd 系列 15 個、bluez 系列 4 個、`python3-jwt`（安全更新）與 `libipa-hbac0t64`，全部是同版號內的小改版。
+
+**更新前先看清單**（`apt-get -s` 只模擬，不安裝）：
+
+~~~bash
+sudo apt update
+apt list --upgradable 2>/dev/null
+sudo apt-get -s dist-upgrade | grep -E "^(Inst|Remv)" | awk '{print $1, $2}'
+cat /var/run/reboot-required 2>/dev/null || echo "目前不需要重開"
+~~~
+
+| 檢查 | 結果 | 判讀 |
+| --- | --- | --- |
+| kernel（`linux-image`） | 沒有 | 不用重開 |
+| `Remv` | 沒有 | 不會移除套件，用 `apt upgrade` 即可 |
+| `wazuh-agent` | 不在清單 | 不用另外擋住（Agent 版本要配合 Manager） |
+| sssd | `inactive`，`realm list` 沒有網域 | 沒有加入 AD，sssd 更新不影響登入（本機帳號登入） |
+
+sssd 若有在用（AD 登入），更新時要保留原本的 SSH 連線，另開新連線確認 AD 帳號能登入後才關。本案 sssd 沒在用，因此沒有打快照，以前一晚的 PBS 備份作為保底。
+
+~~~bash
+sudo apt upgrade
+sudo systemctl --failed --no-pager
+cat /var/run/reboot-required 2>/dev/null || echo "不需要重開"
+apt list --upgradable 2>/dev/null | tail -n +2
+systemctl is-active wazuh-agent
+~~~
+
+結果：21 個套件更新完成、清單清空、不需重開、`wazuh-agent` active。但 `systemctl --failed` 列出 **`logrotate.service` failed**。
+
+#### logrotate 失敗：cloud-init 拆套件留下重複設定
+
+~~~bash
+journalctl -u logrotate --since "7 days ago" --no-pager | grep -iE "error|fail" | tail -20
+~~~
+
+~~~text
+error: cloud-init-base:1 duplicate log entry for /var/log/cloud-init.log
+error: found error in file cloud-init-base, skipping
+~~~
+
+10/11 起每天都失敗，與本次更新無關。`/etc/logrotate.d/` 有兩個檔案都管 `/var/log/cloud-init*.log`，logrotate 不允許重複，便跳過其中一個並回報失敗；其他 log 照常輪替，只有 cloud-init 的 log 沒有輪替。
+
+~~~bash
+for f in $(grep -l "cloud-init" /etc/logrotate.d/*); do
+  echo "== $f"; dpkg -S "$f"; ls -l "$f"; cat "$f"; echo
+done
+dpkg-query -W -f='${Package} ${Version}\n' cloud-init cloud-init-base
+dpkg-query -W -f='${Conffiles}\n' cloud-init | grep logrotate
+~~~
+
+| 檔案 | 所屬套件 | 狀態 |
+| --- | --- | --- |
+| `/etc/logrotate.d/cloud-init` | `cloud-init`（2025/6） | **obsolete**：新版套件已不提供，dpkg 保留未刪 |
+| `/etc/logrotate.d/cloud-init-base` | `cloud-init-base`（7/24） | 目前使用中 |
+
+兩個套件都是 `26.1-0ubuntu3~26.04.1`，兩個檔案內容完全相同。新版 cloud-init 拆成 `cloud-init` 與 `cloud-init-base`，logrotate 設定改由 `cloud-init-base` 提供，舊檔被當成使用者設定檔留下。處理：保留套件使用中的 `cloud-init-base`，舊檔搬出目錄（不刪除，可還原）：
+
+~~~bash
+sudo mv /etc/logrotate.d/cloud-init /root/logrotate.d-cloud-init.bak
+sudo logrotate -d /etc/logrotate.conf 2>&1 | grep -iE "duplicate|error:" || echo "沒有錯誤"
+sudo systemctl start logrotate
+systemctl show logrotate -p Result --value          # success
+sudo systemctl --failed --no-pager | tail -1        # 0 loaded units listed.
+~~~
+
+結果：`success`，沒有失敗的服務。`-d` 只模擬；若用 `grep error` 過濾，會誤抓到 `cups/error_log`、`ppp-connect-errors` 這類檔名，不是錯誤。
+
+#### 注意：`obsolete` 不等於檔案沒在用
+
+順手用 `dpkg-query -W -f='${Conffiles}\n' | grep obsolete` 掃描整台，出現 `/etc/grub.d/10_linux`、`00_header`、`/etc/cloud/cloud.cfg` 等大量 `obsolete`。**這些檔案仍在使用，不能刪**：Ubuntu 26.04 把許多設定檔從舊套件搬到新套件，舊套件的紀錄會標 `obsolete`，新套件以正常狀態擁有同一個檔案；上面的指令沒有顯示套件名稱，看起來就像一堆廢棄檔。誤刪 `/etc/grub.d/` 的腳本，下次 `update-grub` 可能讓 VM 無法開機。
+
+本次可以搬走 logrotate 舊檔，依據是**實際報錯**加上**舊檔只屬於舊套件、內容與新檔相同**，不是因為它標了 `obsolete`。原則：有實際錯誤或衝突時才處理單一檔案，不要把 `obsolete` 清單當成待刪清單。
+
+更新後也建議固定跑一次 `systemctl --failed`：本次的 logrotate 失敗已存在數天，是更新後檢查才發現。
 
 ## 13. jt-ipam 整合（2026-10-06）
 
