@@ -4,7 +4,7 @@ title: "PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？"
 permalink: /docs/pve/pve-cluster-fail2ban-hardening/
 date: 2026-09-14
 categories: [PVE, Security, Fail2Ban, Network]
-last_modified_at: 2026-10-13
+last_modified_at: 2026-10-14
 ---
 
 # PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？
@@ -146,7 +146,7 @@ ignoreip 只放必要且確認可信的管理來源。遇到誤封，先核對�
 
 ## 本次結論
 
-已確認 node10 的遞增封鎖與 iptables 命中，三台配置已處理。上游入口已於 10/12 查清（路由器轉送 8006），已改用 WireGuard，8006 轉送已於 10/13 停用並從外部確認。尚未完成的是觀察停用後的封鎖數量變化、三台逐一封包驗證，以及 PVE Firewall 的完整啟用計畫。
+已確認 node10 的遞增封鎖與 iptables 命中，三台配置已處理。上游入口已於 10/12 查清（路由器轉送 8006），已改用 WireGuard，8006 轉送已於 10/13 停用並從外部確認。停用後 10/13 12:00～10/14 三台都沒有外部登入嘗試，不再另外追蹤。尚未完成的是三台逐一封包驗證，以及 PVE Firewall 的完整啟用計畫。
 
 - [Fail2Ban 1.1.0 設定參考](https://github.com/fail2ban/fail2ban/blob/1.1.0/config/jail.conf)
 - [Proxmox Firewall 文件](https://pve.proxmox.com/pve-docs/chapter-pve-firewall.html)

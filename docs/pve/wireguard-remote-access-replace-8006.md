@@ -4,7 +4,7 @@ title: "不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家"
 permalink: /docs/pve/wireguard-remote-access-replace-8006/
 date: 2026-10-12
 categories: [PVE, WireGuard, VPN, Security, Network]
-last_modified_at: 2026-10-13
+last_modified_at: 2026-10-14
 ---
 
 # 不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家
@@ -205,14 +205,16 @@ journalctl -u pvedaemon --since "2026-10-12 15:00" --no-pager | grep "authentica
 
 從現在開始，在外面管理 PVE 一定要先連 VPN。規則只是停用而沒有刪除，日後整理數據機設定時要留意不要誤啟用。
 
-幾天後再用實際紀錄做最後確認，預期不再出現外部 IP 的登入失敗：
+10/14 用三台的 pvedaemon 紀錄做最後確認：**10/13 12:00 停用後到 10/14，三台都沒有任何外部 IP 的登入失敗**，Ceph 也是 HEALTH_OK。此項目結案，不再另外追蹤。日後若想再查，可用：
 
 ~~~bash
 for n in node10 node11 node12; do
   echo "===== $n ====="
-  ssh root@$n 'journalctl -u pvedaemon --since "7 days ago" --no-pager | grep "authentication failure" | awk "{print \$1, \$2}" | sort | uniq -c'
+  ssh root@$n 'journalctl -u pvedaemon --since "7 days ago" --no-pager | grep "authentication failure" | grep -o "rhost=[^ ]*" | sort | uniq -c'
 done
 ~~~
+
+沒有輸出代表沒有登入失敗；若出現外部 IP，先檢查數據機的 8006 規則是否被誤啟用。
 
 ## 9. VPN 監控：Wazuh 偵測、Graylog 寄信
 
@@ -410,7 +412,7 @@ ha-manager set ct:109 --state started
 
 ## 本次結論
 
-外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上。8006 轉送於 10/13 停用，關掉 Wi-Fi 從外部確認打不開、VPN 仍可用；10/12 曾誤記為已刪除，當時仍有外部 IP 嘗試登入。VPN 監控已完成：wg0 或 WGDashboard 異常（100150），以及 ct:109 整台停機（100151），都會經 Graylog 寄到 Gmail，10/13 兩種情況都實測收到。待辦：幾天後用 pvedaemon 與 Fail2Ban 紀錄確認不再有外部登入嘗試。
+外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上。8006 轉送於 10/13 停用，關掉 Wi-Fi 從外部確認打不開、VPN 仍可用；10/12 曾誤記為已刪除，當時仍有外部 IP 嘗試登入。VPN 監控已完成：wg0 或 WGDashboard 異常（100150），以及 ct:109 整台停機（100151），都會經 Graylog 寄到 Gmail，10/13 兩種情況都實測收到。10/13 12:00～10/14 三台都沒有外部登入嘗試，不再另外追蹤。
 
 ## 相關紀錄
 
