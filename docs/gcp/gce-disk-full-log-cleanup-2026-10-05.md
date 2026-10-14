@@ -27,7 +27,7 @@ last_modified_at: 2026-10-14
 | 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | 已確認；Cloudflare「完整（嚴格）」模式待確認 |
 | 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | 已確認 14 份快照都是 READY |
 | 資料庫備份 | 從來沒有 | 寶塔計畫任務：每天 14:00 UTC、保留 7 份 | 已確認備份檔完整（9 個 table、Dump completed） |
-| access log 暴增 | 每分鐘約 3,500 筆，爬蟲陷阱 | Cloudflare 自訂規則質詢 `/product.php` | 已確認降到每分鐘個位數；程式修正待做 |
+| access log 暴增 | 每分鐘約 3,500 筆，爬蟲陷阱 | 連結拿掉 `time()`；Cloudflare 只質詢舊格式網址 | 已確認每分鐘 7 筆，真人不被質詢 |
 | GCP 防火牆 | RDP、SSH、面板、80/443 全部對全世界開放 | RDP 刪除；SSH、面板限定來源；80/443 只允許 Cloudflare | 直連逾時、經 Cloudflare 回 200；面板與新 SSH 連線待確認 |
 
 ## 1. 先看空間被誰吃掉
@@ -478,6 +478,44 @@ sudo tail -n 3000 $L | grep "product.php" | awk '{print substr($4,14,5)}' | uniq
 
 無痕視窗開產品頁正常。Cloudflare 圖表上，Served by Origin 降到接近 0，Mitigated 每分鐘 4,000 到 5,000 筆：爬蟲沒有停，只是被擋在 Cloudflare 那一層。**這條規則在拆掉陷阱、而且爬蟲確定不再來之前，都不能停用。**
 
+### 拆掉陷阱：連結拿掉 `time()`
+
+改之前要先確認那串數字沒有被程式用到。`product.php` 本身沒有讀 `$_GET`，它 include 的 `product/*.php` 用的是 `$main_sn = $_GET['pid'];`，整個網站也沒有用到 `QUERY_STRING`，所以拿掉不影響功能。
+
+~~~bash
+S=/www/wwwroot/example.com
+F="$S/menu/menu_list.php $S/product/small_main_img.php"
+
+# 備份放在網站目錄外面：.bak 不會被當成 PHP 執行，Apache 會直接送出原始碼
+B=/root/site-backup-$(date +%F)
+sudo mkdir -p $B && sudo cp -a --parents $F $B/
+
+# 先預覽（-n + p），確認後才用 -i 寫入
+sudo sed -n "s/product\.php?' \. time() \. '&pid=/product.php?pid=/p" $F
+sudo sed -i "s/product\.php?' \. time() \. '&pid=/product.php?pid=/" $F
+
+sudo grep -n "product.php?" $F
+for f in $F; do sudo /www/server/php/74/bin/php -l $f; done
+ls -l $F
+~~~
+
+兩個檔案語法檢查都通過，擁有者仍是 `www`，大小各少 15 bytes，剛好是 `' . time() . '&` 的長度。瀏覽器上的連結變成 `product.php?pid=2`，頁面正常。
+
+### 收緊規則：真人不再被質詢
+
+~~~text
+(http.request.uri.path eq "/product.php" and not starts_with(http.request.uri.query, "pid=") and not cf.client.bot)
+~~~
+
+| 測試（每次開新的無痕視窗） | 結果 |
+| --- | --- |
+| 從選單點產品 | 直接進入 |
+| 手動輸入舊格式 `product.php?123&pid=2` | 出現質詢 |
+| 點 Products 主選單 | 直接進入 |
+| 主機每分鐘請求數 | 7 筆（處理前約 3,500） |
+
+規則上線後約擋下 8.4 萬次請求，通過質詢的比例（CSR）為 0%，代表被擋下的都是機器人。
+
 ## 排查時踩到的坑
 
 這幾個是指令本身的陷阱，結果看起來合理，其實是錯的：
@@ -499,8 +537,8 @@ sudo tail -n 3000 $L | grep "product.php" | awk '{print substr($4,14,5)}' | uniq
 | --- | --- |
 | 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
 | 高 | 補完上面標示「待確認」的項目，尤其是新開的瀏覽器 SSH 能登入、Cloudflare 已是「完整（嚴格）」（面板登入、停用寶塔續簽任務已於 10/14 確認） |
-| 高 | 拆掉爬蟲陷阱：`menu_list.php`、`small_main_img.php` 的連結拿掉 `time()`，改成 `product.php?pid=N` |
-| 高 | 程式修正後，把 Cloudflare 規則收緊為只質詢查詢字串不是 `pid=` 開頭的請求 |
+| 高 | 確認 `cms/plugin/kindeditor/php/` 的 `upload_json.php`、`file_manager_json.php` 未登入時無法存取；KindEditor 有公開的任意上傳與目錄瀏覽漏洞 |
+| 中 | 檢查 `$_GET['pid']`、`$_GET['news']`、`$_GET['n']` 是否直接放進 SQL（SQL injection） |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
 | 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它）。7.4 可以正常執行，改完就不必再關掉 `E_DEPRECATED` |
 | 中 | 寶塔資料庫備份設定「失敗時通知」（要先設定通知管道） |
@@ -511,6 +549,8 @@ sudo tail -n 3000 $L | grep "product.php" | awk '{print substr($4,14,5)}' | uniq
 | 中 | 作業系統與 PHP 分開處理：寶塔的 PHP 自行編譯在 `/www/server/php/74`，不依賴 Debian 套件。Debian 11 升級前先拍 snapshot，並確認寶塔支援新版本 |
 | 低 | 評估長期方案：PHP 7.4 改放 container、主機升級作業系統；或購買 PHP 7.4 付費延長支援；或改寫網站 |
 | 低 | 設定 Cloudflare Authenticated Origin Pulls：防火牆只認 Cloudflare IP，別人透過自己的 Cloudflare 帳號或 Workers 仍可連到主機 |
+| 低 | `product.php` 遇到舊格式網址時 301 導回 `?pid=N`，讓搜尋引擎更快換成新網址 |
+| 低 | 爬蟲停止後，再評估 Cloudflare 規則是否保留 |
 | 低 | Apache 設定 `mod_remoteip`，log 才看得到訪客真實 IP |
 | 低 | 找時間演練一次「從快照建磁碟並換上 VM」的還原流程 |
 | 低 | Shielded VM 的安全啟動目前停用；開啟要關機，並確認 kernel module 相容 |
