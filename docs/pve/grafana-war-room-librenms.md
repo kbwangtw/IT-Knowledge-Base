@@ -101,6 +101,14 @@ Connections → Add new connection → Infinity → Install → Add new data sou
 
 驗收：16 列皆為 Up；上線時間合理（grafana 1 day、多數 2 days）。表格上 melayu17 只有 1 hour，查證為當天更新 DSM 後重開，屬預期。
 
+**「系統」欄顯示 proxmox**：LXC 容器與 PVE 主機共用 kernel，SNMP 回報的 `version` 都是 `7.0.14-23-pve`，LibreNMS 因此把容器的 `os` 判斷為 proxmox。實際發行版在 `features` 欄（由 snmpd 的 `extend distro` 回報）：
+
+~~~bash
+pct exec 102 -- mysql librenms -e "select hostname, os, version, features, hardware from devices order by hostname;"
+~~~
+
+以 `snmp-v3-add.sh` 加入的主機有值（如 Ubuntu 24.04、Debian 13.7、Debian 12.15）；adguard、pihole、wireguard 與三台 PVE 節點為空（推測 snmpd 設定沒有 `extend distro`，待確認）；NAS 為 dsm、無此欄。
+
 ## 6. 發現：jt-ipam 的 LibreNMS Token 屬於 admin
 
 `personal_access_tokens` 只有兩筆：`admin` 的 `jt-ipam`（不過期）與 `grafana` 的 `Grafana war room`。jt-ipam 主機若被入侵，該 Token 可修改 LibreNMS 任何設定。jt-ipam 的「自動加入監控」功能可能需要寫入權限，暫不更動，列為待評估。
@@ -121,6 +129,8 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 | 2027-10-14 前更換 Grafana 用的 LibreNMS Token | 長期追蹤 |
 | 評估 jt-ipam 改用權限較小的 LibreNMS 使用者 | 待評估 |
 | 「目前告警」面板（`/api/v0/alerts?state=1`） | 可擴充 |
+| 設備清單「系統」欄：LXC 與 PVE 節點都顯示 proxmox（見下方說明），改為「類型」（`os`）＋「發行版」（`features`） | 待做 |
+| adguard、pihole、wireguard、node10～12 的 `features` 為空，補 `extend distro` | 待做 |
 
 ## 參考資料
 
