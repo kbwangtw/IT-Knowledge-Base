@@ -32,6 +32,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目；10/14 ubclient 套件更新並修正 logrotate 重複設定（12-6） |
 | 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
 | 14 | WireGuard VPN 健康監控 | 完成 | 2026-10-13：ct:109 內部檢查（100150）＋ Manager 外部檢查 ct:109（100151）；`syslog_output` 只把 wireguard 群組送 Graylog；兩種情況的 Gmail 告警都實測收到 |
+| 15 | Grafana 唯讀存取 | 完成 | 2026-10-14：socat 轉送 9201 → Indexer（Indexer 設定不動）、nftables 只允許 Grafana；Indexer 唯讀角色 `grafana_wazuh_read`；戰情中心第一版完成 |
 
 ## 先認識四個名詞
 
@@ -2545,6 +2546,18 @@ Ubuntu 的 `qemu-guest-agent` 是 static unit，安裝時會顯示 `not starting
 Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警以 JSON 送到 Graylog 的 Syslog UDP 1514，再由 Graylog Event Definition 寄 Gmail。這是 Wazuh 第一次把告警轉到 Graylog；其他告警仍只在 Wazuh Dashboard。
 
 完整設定、踩雷與實測見 [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/) 第 9 節。
+
+## 15. Grafana 唯讀存取（2026-10-14）
+
+為了在 Grafana 戰情中心顯示告警、Agent 狀態與弱點，在本容器加了三項設定（Indexer 本身的設定與綁定位址不動）：
+
+| 項目 | 內容 |
+| --- | --- |
+| `indexer-proxy.service` | socat 監聽 Wazuh IP 的 9201，轉送到 `127.0.0.1:9200`（TLS 由兩端直接加密） |
+| nftables `table inet wazuh_indexer` | 9201 只允許 Grafana 主機，其他來源丟棄 |
+| Indexer 角色 `grafana_wazuh_read`、帳號 `grafana` | 只能讀 `wazuh-alerts-*`、`wazuh-monitoring-*`、`wazuh-states-vulnerabilities-*`；以管理員憑證建立（`/root/grafana-indexer-user.sh`） |
+
+升級 Wazuh 後，除了第 13 節的 `api.yaml` host 與 55000 規則，也確認 `indexer-proxy` 為 active、9201 規則仍在、`grafana` 帳號能登入。完整建置、驗證與還原見 [用 Grafana 建立戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)。
 
 ## 風險與注意事項
 

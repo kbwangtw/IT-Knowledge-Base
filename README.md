@@ -16,6 +16,7 @@
 - [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal.md)（三台已 patch 並加 APT hook，Repository 已確認 no-subscription，三台登入驗證完成；PBS 也已套用）
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy.md)
 - [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop.md)（主要流程已實測，17 台 Agent 上線）
+- [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh.md)（第一版完成；LibreNMS、Ceph／PVE、Graylog 待接）
 - [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22.md)
 - [ML30 Gen11 擴充紀錄：哪些零件裝好了？哪些還要測？](docs/hardware/hpe/ml30-gen11/index.md)
 - [Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？](docs/pve/ceph-bluestore-slow-op-backup-schedule.md)（硬碟正常；備份錯開、PBS 排程整理）
