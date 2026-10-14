@@ -307,7 +307,14 @@ echo | openssl s_client -connect 127.0.0.1:443 -servername example.com 2>/dev/nu
 
 **待確認**：Cloudflare 概觀頁顯示「完整（嚴格）」（curl 回 200 在「完整」模式下也會成立，不能當證據）；寶塔續簽排程改為停用；開啟「一律使用 HTTPS」（當時 24 小時內有 474 個明文 HTTP 請求）。
 
-> 10/14：「完整（嚴格）」已在 Cloudflare 概觀頁確認，續簽任務已停用。剩下「一律使用 HTTPS」。
+> 10/14：「完整（嚴格）」已在 Cloudflare 概觀頁確認，續簽任務已停用。「一律使用 HTTPS」其實原本就已開啟：
+>
+> ~~~bash
+> curl -sI http://example.com | head -1                                   # HTTP/1.1 301 Moved Permanently
+> curl -sI "http://example.com/product.php?pid=2" | grep -i "^location"   # https://example.com/product.php?pid=2
+> ~~~
+>
+> 當初從「24 小時有 474 個明文 HTTP 請求」推論它沒開，這個推論不成立：開關打開時，訪客的 `http://` 請求一樣會先到 Cloudflare，只是每個都回 301。光看請求數分不出來，要看回應。HSTS 先不開：瀏覽器會記住好幾個月，HTTPS 一旦出問題就無法從伺服器端救回。
 
 ## 6. 防火牆：只開必要的來源
 
@@ -576,6 +583,7 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 | grep 多行 JSON 只抓到 `"reason"` 那行，看不到時間 | 只有第一行有時間戳記 | grep 有時間戳記的那行，例如 `error sending to Cloud Logging` |
 | awk 比對 `$2 >= "05:29"` 找重啟後的錯誤 | 只比時間沒比日期，前幾天的訊息也會算進去 | 先清空 log 再觀察，或同時比對日期 |
 | `sudo wc -l < $L` 顯示 Permission denied | `<` 由自己的 shell 先開檔，sudo 還沒執行 | `sudo wc -l $L`；`*`、`<`、`>`、`\|` 都是 sudo 之前處理的 |
+| 看到有明文 HTTP 請求，就以為沒開「一律使用 HTTPS」 | 開啟後請求一樣會到 Cloudflare，只是回 301 | 用 `curl -sI http://...` 看狀態碼 |
 | 以為 Apache 假死而重啟 | 被上面兩個錯誤結果誤導 | 先用不會騙人的指令確認，再動服務 |
 
 ## 還沒做完的事
@@ -585,7 +593,7 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 | 優先 | 項目 |
 | --- | --- |
 | 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
-| 中 | 剩下兩個待確認：Logs Explorer 搜得到 Ops Agent 測試訊息；Cloudflare 開啟「一律使用 HTTPS」 |
+| 中 | 最後一個待確認：Logs Explorer 搜得到 Ops Agent 測試訊息 |
 | 中 | 通知會用 CMS 後台的人：編輯器上傳已關閉，需要時聯絡管理者暫時開啟 |
 | 中 | 檢查 `$_GET['pid']`、`$_GET['news']`、`$_GET['n']` 是否直接放進 SQL（SQL injection） |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
@@ -612,7 +620,7 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 
 磁碟滿的主因是一行 PHP deprecated 警告，7 個月寫了 4.5G。止血後加上 logrotate 與 journald 上限，使用率從 100% 降到 43%。過程中另外修好 Ops Agent 的 IAM 權限、換掉過期的主機憑證，並把防火牆收斂到必要來源。
 
-10/14 回頭確認時，又處理了三件事：資料庫原本完全沒有備份，已改為每天備份並和磁碟快照接上；網站連結裡的 `time()` 做出爬蟲陷阱，access log 每天翻倍，拆掉陷阱並用 Cloudflare 規則擋下後，主機請求從每分鐘約 3,500 筆降到 7 筆；KindEditor 上傳 API 不用登入就能用，已在 Cloudflare 封鎖，沒有發現入侵跡象。網站只能跑 PHP 7.4，所以外圍防護與備份比升級更重要。剩下的「待確認」只有 Ops Agent 測試訊息與「一律使用 HTTPS」。
+10/14 回頭確認時，又處理了三件事：資料庫原本完全沒有備份，已改為每天備份並和磁碟快照接上；網站連結裡的 `time()` 做出爬蟲陷阱，access log 每天翻倍，拆掉陷阱並用 Cloudflare 規則擋下後，主機請求從每分鐘約 3,500 筆降到 7 筆；KindEditor 上傳 API 不用登入就能用，已在 Cloudflare 封鎖，沒有發現入侵跡象。網站只能跑 PHP 7.4，所以外圍防護與備份比升級更重要。剩下的「待確認」只有 Ops Agent 測試訊息。
 
 - [Ops Agent 疑難排解](https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent/troubleshoot-run-ingestion)
 - [Compute Engine 存取範圍與 IAM](https://cloud.google.com/compute/docs/access/service-accounts#accesscopesiam)
