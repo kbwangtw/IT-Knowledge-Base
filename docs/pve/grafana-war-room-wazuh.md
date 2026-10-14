@@ -272,7 +272,7 @@ nftables 備份檔要選建立 `wazuh_indexer` 之前的那一份；之後若又
 | LibreNMS | `/root/snmp-v3-add.sh 114 Node10`（`snmpd=active usmUser=1 createUser=0 udp161=1`）→ `/root/snmp-v3-lnms.sh grafana.<網域>` → `lnms device:poll` | v3／authPriv／SHA／AES |
 | PBS 備份 | `pvesh get /cluster/backup`：三台節點各有 `all: 1`、無排除的備份工作（21:00／21:30／22:00） | 不需調整，HA 搬到哪台都會被備份 |
 | HA | `ha-manager add ct:114` | started |
-| jt-ipam | LibreNMS 的「Auto-create discovered IPs」預設開啟，同步時以設備主要 IP 建立紀錄；Wazuh 只比對不建立 | IP 清單已出現 .33（grafana）；「缺少 Agent」不再列出待確認 |
+| jt-ipam | LibreNMS 的「Auto-create discovered IPs」預設開啟，同步時以設備主要 IP 建立紀錄；Wazuh 只比對不建立 | IP 清單已出現 .33（grafana）；`wazuh_agents` 同步到 Agent 018（ip .33、active），並已對應到 .33 的 IP 紀錄（`jt_ipam_address_id`），共 18 筆 |
 
 `lnms` 指令要以 `su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms ..."` 執行；沒有 `-` 與 `cd` 時工作目錄停在 `/root`，fping 會因權限不足失敗（`posix_spawn() failed: Permission denied`）。
 
@@ -289,7 +289,7 @@ nftables 備份檔要選建立 `wazuh_indexer` 之前的那一份；之後若又
 
 | 項目 | 狀態 |
 | --- | --- |
-| CT 114 納管：DNS、jt-ipam、Wazuh Agent、LibreNMS（SNMPv3）、PBS 備份 | 完成（第 9 節）；jt-ipam「缺少 Agent」頁面待確認 |
+| CT 114 納管：DNS、jt-ipam、Wazuh Agent、LibreNMS（SNMPv3）、PBS 備份 | 完成（第 9 節） |
 | 階段 2：LibreNMS（MySQL 唯讀帳號） | 未做 |
 | 階段 3：Prometheus、Ceph prometheus 模組、PVE exporter | 未做 |
 | 階段 4：Graylog／PBS（Graylog 的 OpenSearch 可能沒有帳號保護，需另行評估） | 未做 |
