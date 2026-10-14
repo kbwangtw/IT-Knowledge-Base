@@ -290,7 +290,7 @@ nftables 備份檔要選建立 `wazuh_indexer` 之前的那一份；之後若又
 | 項目 | 狀態 |
 | --- | --- |
 | CT 114 納管：DNS、jt-ipam、Wazuh Agent、LibreNMS（SNMPv3）、PBS 備份 | 完成（第 9 節） |
-| 階段 2：LibreNMS（MySQL 唯讀帳號） | 未做 |
+| 階段 2：LibreNMS | 完成（改用 API 唯讀 Token），見[戰情中心（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/) |
 | 階段 3：Prometheus、Ceph prometheus 模組、PVE exporter | 未做 |
 | 階段 4：Graylog／PBS（Graylog 的 OpenSearch 可能沒有帳號保護，需另行評估） | 未做 |
 | 階段 5：專用電腦 kiosk（`?kiosk`、開機自動開啟、Viewer 帳號、不休眠） | 未做 |

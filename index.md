@@ -50,6 +50,7 @@ last_modified_at: 2026-10-14
 | [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](docs/pve/wireguard-remote-access-replace-8006/) | 10/12 WGDashboard、split tunnel、伺服器端 Allowed IPs 只放 /32 的踩雷；iPhone 與筆電已從外部連上，10/13 停用 8006 轉送並從外部確認（更正 10/12 的誤判）、加上 VPN 異常 Gmail 告警 |
 | [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop/) | 9/30 主要流程已實測：LXC 規劃、All-in-one 安裝、密碼與 API 收斂、PBS 備份還原、HA、17 台 Agent（PVE 節點、PBS、Linux 容器、Ubuntu／Windows VM、AD 與 CA）|
 | [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh/) | 10/14 第一版完成：Grafana LXC、以 socat 轉送與 nftables 唯讀接上 Wazuh Indexer；告警數、高風險告警、斷線 Agent、Critical 弱點四格數字與告警趨勢 |
+| [用 Grafana 建立戰情中心（二）：接上 LibreNMS](docs/pve/grafana-war-room-librenms/) | 10/14 以 Global Read 使用者的 API Token 接上 LibreNMS（Sanctum `createToken()` 讓 Token 屬於唯讀帳號）；斷線設備數字與設備清單 |
 
 ## 雲端主機（GCP）
 
