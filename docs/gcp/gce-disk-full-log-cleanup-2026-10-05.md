@@ -4,7 +4,7 @@ title: "GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題"
 permalink: /docs/gcp/gce-disk-full-log-cleanup-2026-10-05/
 date: 2026-10-05
 categories: [GCP, Debian, Logging, Security, Cloudflare]
-last_modified_at: 2026-10-05
+last_modified_at: 2026-10-14
 ---
 
 # GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題
@@ -365,13 +365,19 @@ curl -sS -o /dev/null -m 10 -w "via CF HTTP=%{http_code}\n" https://example.com
 
 ## 還沒做完的事
 
+> 2026-10-14 補記：這個網站**只能在 PHP 7.4 執行**，升級 PHP 不是選項。PHP 7.4 已停止官方安全更新，所以重點從「規劃升級」改為「在 7.4 上把外圍防護做緊」。
+
 | 優先 | 項目 |
 | --- | --- |
 | 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
+| 高 | 補完上面標示「待確認」的項目，尤其是新開的瀏覽器 SSH 能登入、Cloudflare 已是「完整（嚴格）」 |
+| 高 | 設定 GCE disk snapshot 排程；PHP 沒有修補，被入侵時要能還原 |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
-| 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它），為 PHP 8 做準備 |
-| 中 | 更新寶塔面板（續簽腳本還在用 Python 3.7） |
-| 中 | 規劃 Debian 11、PHP 7.4 升級；兩者都已停止官方安全更新 |
+| 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它）。7.4 可以正常執行，改完就不必再關掉 `E_DEPRECATED` |
+| 中 | 外圍防護：Cloudflare WAF managed rules；`php.ini` 的 `disable_functions` 停用 `exec`、`system` 等（先確認網站沒用到）；寶塔開啟 `open_basedir` |
+| 中 | 更新寶塔面板（續簽腳本還在用 Python 3.7）；不要因為 PHP 卡住而一起延後 |
+| 中 | 作業系統與 PHP 分開處理：寶塔的 PHP 自行編譯在 `/www/server/php/74`，不依賴 Debian 套件。Debian 11 升級前先拍 snapshot，並確認寶塔支援新版本 |
+| 低 | 評估長期方案：PHP 7.4 改放 container、主機升級作業系統；或購買 PHP 7.4 付費延長支援；或改寫網站 |
 | 低 | 7/7 有一次沒有 shutdown 紀錄的開機，原因未查明 |
 | 低 | DMARC 目前是 `p=none`，DNS 上也沒看到 DKIM |
 | 低 | 專案只有一個 Owner，建議加一個備援管理者 |
