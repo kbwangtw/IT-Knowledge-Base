@@ -27,7 +27,7 @@ last_modified_at: 2026-10-14
 | 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | 已確認；10/14 確認 Cloudflare 為「完整（嚴格）」 |
 | 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | 已確認 14 份快照都是 READY |
 | 資料庫備份 | 從來沒有 | 寶塔計畫任務：每天 14:00 UTC、保留 7 份 | 已確認備份檔完整（9 個 table、Dump completed） |
-| access log 暴增 | 每分鐘約 3,500 筆，爬蟲陷阱 | 連結拿掉 `time()`；Cloudflare 只質詢舊格式網址 | 已確認每分鐘 7 筆，真人不被質詢 |
+| access log 暴增 | 每分鐘約 3,500 筆，爬蟲陷阱 | 連結拿掉 `time()`；Cloudflare 只質詢舊格式網址 | 已確認每分鐘 7 筆，真人不被質詢；10/15 磁碟回到 44% |
 | KindEditor 上傳 API | 未登入可瀏覽、上傳 | Cloudflare 封鎖 `/cms/plugin/kindeditor/php/` | 已確認回 403；未發現入侵跡象 |
 | GCP 防火牆 | RDP、SSH、面板、80/443 全部對全世界開放 | RDP 刪除；SSH、面板限定來源；80/443 只允許 Cloudflare | 直連逾時、經 Cloudflare 回 200；10/14 確認面板與新 SSH 連線可登入 |
 
@@ -326,7 +326,7 @@ echo | openssl s_client -connect 127.0.0.1:443 -servername example.com 2>/dev/nu
 | --- | --- | --- |
 | default-allow-rdp（3389） | 0.0.0.0/0 | Linux 用不到 |
 | default-allow-ssh（22） | 0.0.0.0/0 | btmp 有 1.6M 的失敗登入 |
-| 寶塔面板（自訂 port） | 0.0.0.0/0 | 管理後台對外，而且面板很久沒更新 |
+| 寶塔面板（自訂 port） | 0.0.0.0/0 | 管理後台對外（當時以為面板很久沒更新，10/15 查證已是最新 LTS，見「寶塔面板：其實已是最新 LTS」） |
 | default-allow-http/https | 0.0.0.0/0 | 知道主機 IP 就能繞過 Cloudflare |
 
 修改前先確認專案只有這一台 VM，因為 `default-*` 規則會套用到整個 VPC：
@@ -530,6 +530,22 @@ ls -l $F
 
 規則上線後約擋下 8.4 萬次請求，通過質詢的比例（CSR）為 0%，代表被擋下的都是機器人。
 
+### 隔天確認（10/15）
+
+~~~bash
+df -h /
+sudo sh -c 'ls -lh --time-style=long-iso /www/wwwlogs/' | grep example.com
+~~~
+
+| 項目 | 結果 |
+| --- | --- |
+| 磁碟使用率 | 48% → 44%（已用 6.1G，剩 7.8G） |
+| 10/13 的 access log | 571M 壓縮後 36M |
+| 10/14 的 access log | 85M，幾乎都是 01:45 UTC 規則生效前寫的 |
+| 10/15 的 access log | 2 小時 275K，約每天 3M，回到 10/6 以前的水準 |
+| logrotate | 每天 00:00 輪替，保留份數與壓縮都正常 |
+
+
 ## 9. KindEditor：上傳 API 不用登入就能用（2026-10-14 補記）
 
 查爬蟲時順便搜尋了讀取 `$_GET` 的程式，看到 CMS 裡附帶的 KindEditor 編輯器：`cms/plugin/kindeditor/php/upload_json.php` 和 `file_manager_json.php`。KindEditor 官方範例的 PHP 不檢查登入，舊版也有公開的上傳繞過手法。
@@ -572,7 +588,37 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 | `file_manager_json.php`、`upload_json.php` | 都是 HTTP 403 |
 | 主機 log 裡的 kindeditor | 維持部署前的 2 筆，部署後的請求沒有到達主機 |
 
-需要上傳圖片時，到 Cloudflare 把 `kindeditor-block` 改成「已停用」，用完立刻改回「使用中」。
+需要上傳圖片時，到 Cloudflare 把 `kindeditor-block` 改成「已停用」，用完立刻改回「使用中」。10/15 已通知會用後台的同事。
+
+### 寶塔面板：其實已是最新 LTS（10/15 補記）
+
+10/5 看到續簽腳本用 Python 3.7，就推測面板很久沒更新。更新前先記錄現況，並手動拍一份快照（每日快照有 14 天保留，手動快照不會自動刪除）：
+
+~~~bash
+sudo /www/server/panel/pyenv/bin/python3 --version     # Python 3.7.9
+gcloud compute snapshots create <DISK>-before-bt-update-$(date +%Y%m%d) \
+  --source-disk=<DISK> --source-disk-zone=<ZONE> --storage-location=<REGION>
+~~~
+
+面板右上角的「更新」顯示「當前已經是最新版本」：穩定版 10.0.2-LTS，發佈於 2025/12/11。Python 3.7 是這個 LTS 版本自己內建的，不是沒更新造成的，所以這項不用處理。寶塔官網的下載頁另有「穩定版 12.0.0」。面板內的「更新」只檢查同一條版本線，所以不會提供 10 → 12 這種跨大版本的升級。決定維持 10.x LTS，不升級：
+
+- 跨兩個大版本，介面、設定檔與內建元件的變動都可能比較大。
+- 12.0.0 對 Debian 11、PHP 7.4 管理、現有 Apache 設定的相容性未查證。
+- 10.0.2-LTS 在 2025/12 才發佈，應仍在支援期內。
+- 網站能否運作取決於 Apache、PHP、資料庫，不是面板版本；升級的好處有限，出錯的代價高。
+
+如果之後要升，先用快照複製一台測試 VM，在上面升級並驗證網站、計畫任務與 PHP 7.4，再決定正式機。
+
+官方[更新日誌](https://docs.bt.cn/update-log/)只列正式版（11.x、13.x，最新是 2026-09-21 的 13.1.0），沒有 10.x LTS 和 12.0.0 的條目，所以實際上有三條線：正式版 13.x、穩定版 12.0.0、LTS 10.0.2。正式版在 10.0.2-LTS（2025-12-11）之後有幾項面板本身的安全修補，無法確認 LTS 是否也有：
+
+| 版本 | 日期 | 安全相關內容 |
+| --- | --- | --- |
+| 11.4.0 | 2025-12-16 | 修復 CVE-2025-12914 |
+| 11.8.0 | 2026-06-09 | 修復多處介面權限校驗、路徑校驗等安全風險；SSL 設定、匯入包、檔案寫入等場景的安全校驗 |
+
+這些都是面板介面本身的漏洞，必須先連得到面板才能利用。這台的面板只對管理者 IP 開放（第 6 節），是目前最主要的防線，所以維持 LTS 的決定不變，但防火牆限制不能放寬。
+
+官方更新日誌完全沒有 10.x 的紀錄，10.0.2-LTS 之後也沒有新版，無法得知 LTS 是否還在維護、是否補上上述修補。短期仍維持 LTS，但把「面板兩步驟驗證」和「用測試 VM 評估升級到 12.0.0 穩定版」提高到中優先。
 
 ## 排查時踩到的坑
 
@@ -594,17 +640,17 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 
 | 優先 | 項目 |
 | --- | --- |
-| 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
 | 低 | 同一筆 syslog 在 Cloud Logging 出現兩次，確認是否為 `/var/log/syslog` 與 `/var/log/messages` 重複收集 |
-| 中 | 通知會用 CMS 後台的人：編輯器上傳已關閉，需要時聯絡管理者暫時開啟 |
 | 中 | 檢查 `$_GET['pid']`、`$_GET['news']`、`$_GET['n']` 是否直接放進 SQL（SQL injection） |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
 | 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它）。7.4 可以正常執行，改完就不必再關掉 `E_DEPRECATED` |
 | 中 | 寶塔資料庫備份設定「失敗時通知」（要先設定通知管道） |
-| 中 | 寶塔面板顯示 Python 3.7 的 deprecation 警告，與更新寶塔面板一起處理 |
 | 低 | 10/19 的快照若也接近 0.9 GB，確認是 fstrim 造成 |
 | 中 | 外圍防護：Cloudflare WAF managed rules；`php.ini` 的 `disable_functions` 停用 `exec`、`system` 等（先確認網站沒用到）；寶塔開啟 `open_basedir` |
-| 中 | 更新寶塔面板（續簽腳本還在用 Python 3.7）；不要因為 PHP 卡住而一起延後 |
+| 低 | 寶塔 LTS 內建 Python 3.7.9，等 LTS 新版換掉；可開啟面板的「有更新時提醒我」 |
+| 中 | 寶塔面板開啟兩步驟驗證（動態口令），補強只靠來源 IP 限制的面板登入 |
+| 中 | 查 CVE-2025-12914 是否影響 10.0.2-LTS；若影響且 LTS 沒有修補，用測試 VM 評估升級 |
+| 中 | 10.x 沒有公開更新紀錄、10 個月沒有新版；用快照建測試 VM，評估升級到 12.0.0 穩定版（驗證網站、計畫任務、PHP 7.4） |
 | 中 | 作業系統與 PHP 分開處理：寶塔的 PHP 自行編譯在 `/www/server/php/74`，不依賴 Debian 套件。Debian 11 升級前先拍 snapshot，並確認寶塔支援新版本 |
 | 低 | 評估長期方案：PHP 7.4 改放 container、主機升級作業系統；或購買 PHP 7.4 付費延長支援；或改寫網站 |
 | 低 | 設定 Cloudflare Authenticated Origin Pulls：防火牆只認 Cloudflare IP，別人透過自己的 Cloudflare 帳號或 Workers 仍可連到主機 |
