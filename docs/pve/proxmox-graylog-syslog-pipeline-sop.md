@@ -685,12 +685,14 @@ end
 
 Rule Simulation（JSON）：`{"message": "test", "synology_src_ip": "<WireGuard 容器 IP>"}` → `src_host` 為 WireGuard 容器的主機名稱。實際登入 DSM 後，訊息出現 `src_ip`、`src_host`。
 
+兩台 NAS（melayu17、tokyo16）的記錄傳送設定相同，都已確認：「傳送測試日誌」進入 Synology Syslog stream；登入後訊息有 `src_ip`、`src_host`。啟用兩步驟驗證的帳號登入時會有兩筆紀錄：先是 `passed the first authentication of 2FA via [password]`，再是 `signed in to [DSM] successfully via [OTP]`，後者解析為 `synology_auth_method: OTP`、`synology_auth_result: success`。tokyo16 每天的日誌量明顯較多，需留意預設 index set 的保留期與磁碟用量。
+
 - 經 WireGuard 從外部登入時，NAS 看到的來源是 WireGuard 容器（NAT），`src_host` 因此顯示 WireGuard 主機名稱，可據此辨識 VPN 登入。
 - 欄位名稱與第 12 節相同，`src_host:"<名稱>"` 可同時查 PVE 與 NAS 的紀錄。
 - Stage 0 的條件是 at least one rule：只有登入紀錄會繼續到 Stage 9，正好是有 `synology_src_ip` 的訊息；其他系統事件不受影響。
 - 透過 QuickConnect 連線時日誌記錄的來源 IP（使用者 IP 或 Synology 中繼）尚未觀察到，待有紀錄再確認。
 
-待補：另一台 NAS 的記錄傳送設定、DSM「日誌過濾器」送出的日誌種類；評估 NAS 登入失敗多次的告警（`synology_auth_result:failed`）。
+待補：DSM「日誌過濾器」送出的日誌種類（並找出 tokyo16 日誌量大的來源）；評估 NAS 登入失敗多次的告警（`synology_auth_result:failed`）。
 
 ## 目前完成與待辦
 
