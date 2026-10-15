@@ -4,7 +4,7 @@ title: "不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家"
 permalink: /docs/pve/wireguard-remote-access-replace-8006/
 date: 2026-10-12
 categories: [PVE, WireGuard, VPN, Security, Network]
-last_modified_at: 2026-10-14
+last_modified_at: 2026-10-15
 ---
 
 # 不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家
@@ -82,7 +82,7 @@ grep -A6 '^\[Account\]' "$INI" | sed -E 's/^(password\s*=\s*.{4}).*/\1...（已�
 
 本案為 `$2b$` 開頭的 bcrypt。最後找到了原本的密碼，沒有重設；若要重設，做法是停止 `wg-dashboard`、備份 ini、用 WGDashboard 自己的 Python 環境以 bcrypt 產生新雜湊替換 `password` 那一行，再啟動服務。
 
-同一段輸出會顯示 `totp_key`。本案雙因素驗證沒有啟用；若之後要啟用，應先換一把新的 key，不要沿用曾經顯示在畫面上的那一把。
+同一段輸出會顯示 `totp_key`。若要啟用雙因素驗證，應先換一把新的 key，不要沿用曾經顯示在畫面上的那一把；本案已於 10/15 換 key 並啟用，見第 10 節。
 
 ## 3. 調整 Peer 預設值：改成 split tunnel
 
@@ -410,9 +410,89 @@ ha-manager set ct:109 --state started
 
 **Grace Period 會影響測試**：上一封信 09:42 寄出，第一次停機測試的事件落在 30 分鐘內，就算觸發也不會寄信。連續測試時，要等前一封信超過 30 分鐘。
 
+## 10. 啟用 WGDashboard 雙因素驗證（10/15）
+
+VPN 是唯一的遠端管理入口，WGDashboard 再加上 TOTP，密碼外洩也登不進去。原本 `enable_totp = false`、`totp_verified = false`，`totp_key` 是安裝時產生、曾在排障時顯示過的那一把，所以先換 key 再啟用。
+
+### 10-1 停止 WGDashboard 會不會斷 VPN？
+
+本次是從外網經 VPN 操作，先確認這點（唯讀）：
+
+~~~bash
+pct exec 109 -- bash -c '
+cd /etc/wgdashboard/src
+grep -E "^(Exec|Type|Restart)" /etc/systemd/system/wg-dashboard.service
+grep -nE "wg-quick|ip link|kill|stop_wgd" wgd.sh | head -20
+systemctl is-enabled wg-quick@wg0 2>/dev/null || echo "wg-quick@wg0 沒有啟用"
+grep -iE "autostart" wg-dashboard.ini
+'
+~~~
+
+| 檢查 | 結果 | 判讀 |
+| --- | --- | --- |
+| `ExecStop` | `wgd.sh stop` → `stop_wgd()` | 只 `kill` gunicorn／python |
+| `wg-quick` | `wgd.sh` 中只用來檢查指令是否存在 | 沒有 `wg-quick down` |
+| wg0 由誰帶起 | `wg-quick@wg0` 未啟用；`autostart = wg0` | WGDashboard 啟動時帶起，之後由核心獨立運作 |
+
+**停止 WGDashboard 只停網頁介面，wg0 不受影響。** 實測停止期間 `wg show interfaces` 仍有 wg0，SSH 經 VPN 沒有中斷。
+
+### 10-2 換 TOTP key（從 PVE 節點執行）
+
+先設一個 3 分鐘後自動啟動 WGDashboard 的保險計時器，出錯也會自己恢復（`autostart` 會一併帶起 wg0）；完成後取消。新 key 用 WGDashboard 自己 venv 的 `pyotp` 產生，直接寫入設定檔，畫面不顯示：
+
+~~~bash
+pct exec 109 -- bash -c '
+set -euo pipefail
+cd /etc/wgdashboard/src
+systemd-run --quiet --on-active=180 --unit=wgd-safety systemctl start wg-dashboard
+cp -a wg-dashboard.ini /root/wg-dashboard.ini.bak-20261015
+chmod 600 /root/wg-dashboard.ini.bak-20261015
+old=$(grep -E "^totp_key *=" wg-dashboard.ini | sha256sum | cut -c1-12)
+
+systemctl stop wg-dashboard; sleep 2
+echo "停止後的 WireGuard 介面：$(wg show interfaces)"
+
+NEW=$(venv/bin/python3 -c "import pyotp; print(pyotp.random_base32())")
+[ ${#NEW} -ge 32 ] || { echo KEY_TOO_SHORT; exit 1; }
+sed -i "s|^totp_key *=.*|totp_key = $NEW|" wg-dashboard.ini
+unset NEW
+new=$(grep -E "^totp_key *=" wg-dashboard.ini | sha256sum | cut -c1-12)
+[ "$old" != "$new" ] && echo KEY_CHANGED || { echo KEY_NOT_CHANGED; exit 1; }
+
+systemctl start wg-dashboard; sleep 5
+echo "WGDashboard：$(systemctl is-active wg-dashboard)，介面：$(wg show interfaces)"
+systemctl stop wgd-safety.timer 2>/dev/null && echo "保險計時器已取消"
+'
+~~~
+
+本次結果：停止後仍有 wg0、`KEY_CHANGED`、WGDashboard 重新 active、計時器已取消。WGDashboard 停止的幾秒內，9-1 的健康檢查若剛好執行，可能觸發 100150 告警，屬預期。
+
+### 10-3 網頁啟用與確認
+
+1. 手機準備驗證器 App（Google Authenticator、Microsoft Authenticator 等），時間設為自動同步。
+2. 經 VPN 登入 WGDashboard → **Settings** → 開啟 MFA／2FA → 用 App 掃描 QR code → 輸入 6 位數驗證碼。
+3. 原本的頁面先不要登出，另開無痕視窗登入，確認會要求驗證碼。
+
+~~~bash
+pct exec 109 -- grep -E "^(enable_totp|totp_verified)" /etc/wgdashboard/src/wg-dashboard.ini
+pct exec 109 -- shred -u /root/wg-dashboard.ini.bak-20261015    # 確認後刪除含舊 key 的備份
+~~~
+
+本次結果：`enable_totp = true`、`totp_verified = true`，備份已刪除。
+
+### 10-4 被鎖在外面時
+
+手機遺失或驗證碼一直錯誤時，從 PVE 節點關掉 2FA（不影響 VPN），再重新綁定：
+
+~~~bash
+pct exec 109 -- bash -c 'cd /etc/wgdashboard/src && sed -i "s/^enable_totp *=.*/enable_totp = false/" wg-dashboard.ini && systemctl restart wg-dashboard && grep ^enable_totp wg-dashboard.ini'
+~~~
+
+WGDashboard 沒有備用碼可用（本次未看到相關功能），這段指令就是救援方式。換手機時，記得先在新手機綁定再移除舊手機的項目。
+
 ## 本次結論
 
-外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上。8006 轉送於 10/13 停用，關掉 Wi-Fi 從外部確認打不開、VPN 仍可用；10/12 曾誤記為已刪除，當時仍有外部 IP 嘗試登入。VPN 監控已完成：wg0 或 WGDashboard 異常（100150），以及 ct:109 整台停機（100151），都會經 Graylog 寄到 Gmail，10/13 兩種情況都實測收到。10/13 12:00～10/14 三台都沒有外部登入嘗試，不再另外追蹤。
+外部連線已從「直接轉送 PVE 8006」改為「只轉送 WireGuard UDP 51820」：ct:109 的 WireGuard 與 WGDashboard 正常、預設改為 split tunnel、清掉舊 peer、新建兩個只用 `/32` 並啟用 PSK 的 peer，iPhone 從 4G/5G 透過 VPN 打開 PVE，筆電也已連上。8006 轉送於 10/13 停用，關掉 Wi-Fi 從外部確認打不開、VPN 仍可用；10/12 曾誤記為已刪除，當時仍有外部 IP 嘗試登入。VPN 監控已完成：wg0 或 WGDashboard 異常（100150），以及 ct:109 整台停機（100151），都會經 Graylog 寄到 Gmail，10/13 兩種情況都實測收到。10/13 12:00～10/14 三台都沒有外部登入嘗試，不再另外追蹤。10/15 換掉 WGDashboard 的 TOTP key 並啟用雙因素驗證。
 
 ## 相關紀錄
 
