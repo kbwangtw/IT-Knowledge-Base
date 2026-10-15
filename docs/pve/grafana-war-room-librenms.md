@@ -127,7 +127,16 @@ pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./discovery.p
 
 結果：三個容器為 Debian 13.7，三台 PVE 節點為 `Debian 13.7/PVE 9.2.21`（distro 腳本會辨識 PVE）；snmpd 皆 active，原有 `extend proxmox` 不受影響。表格的「發行版」只剩兩台 NAS 空白。修改 snmpd.conf 與新增 distro 會產生 Wazuh 檔案異動紀錄，屬預期。
 
-這 6 台的 `rouser snmpuser` 沒有 `priv`（允許只驗證不加密），以腳本加入的主機為 `rouser snmpuser priv`。LibreNMS 一律以 authPriv 輪詢，實際風險低，列為待辦。
+這 6 台的 `rouser snmpuser` 原本沒有 `priv`（允許只驗證不加密），以腳本加入的主機為 `rouser snmpuser priv`。同日改為一致：
+
+~~~bash
+pct exec <CTID> -- cp -a /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-priv-$(date +%Y%m%d)
+pct exec <CTID> -- sed -i 's/^rouser snmpuser[[:space:]]*$/rouser snmpuser priv/' /etc/snmp/snmpd.conf
+pct exec <CTID> -- systemctl restart snmpd
+pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device:poll <主機名稱> -m core"
+~~~
+
+（PVE 節點在節點上直接執行同樣的 cp／sed／restart。）結果：6 台皆為 `rouser snmpuser priv`、snmpd active；LibreNMS 一律以 authPriv 輪詢，6 台 poll 皆有 `Snmpget` 回應、無逾時。還原：複製 `.bak-priv-日期` 回 snmpd.conf 並重啟 snmpd。
 
 ## 6. 發現：jt-ipam 的 LibreNMS Token 屬於 admin
 
@@ -151,7 +160,7 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 | 「目前告警」面板（`/api/v0/alerts?state=1`） | 可擴充 |
 | 設備清單「系統」欄改為「類型」（`os`）＋「發行版」（`features`） | 完成（2026-10-15） |
 | adguard、pihole、wireguard、node10～12 補 `extend distro` | 完成（2026-10-15） |
-| 上述 6 台的 `rouser snmpuser` 加上 `priv`（強制加密） | 待做 |
+| 上述 6 台的 `rouser snmpuser` 加上 `priv`（強制加密） | 完成（2026-10-15） |
 
 ## 參考資料
 
