@@ -48,9 +48,25 @@ LibreNMS 已完成 API 整合，Device、ARP、鄰居與 online status 等資料
 
 待辦：
 
-- 設定每日備份加密（System settings → Backup encryption）：目前備份同時含資料庫與 backend.env（可解開其中 PVE、LibreNMS、Wazuh 憑證的金鑰）；密碼存於密碼管理器，不放在本機。
 - 觀察數天無異狀後刪除快照 `pre-v1-upgrade`。
 - jt-ipam 使用的 LibreNMS Token 屬於 admin 且不過期，評估改用權限較小的使用者（見戰情中心（二））。
+
+## 每日備份加密（2026-10-15）
+
+jt-ipam 每天 03:30 備份到 `/var/backups/jt-ipam/`（保留 14 天）。未加密時每份備份同時含資料庫與 `backend.env`（解開資料庫中 PVE、LibreNMS、Wazuh 憑證的金鑰）。於 **管理 → 系統設定 → 每日備份加密** 設定密碼（至少 12 字元，存於密碼管理器、不放在本機）後，每日備份改為單一 `jt-ipam-<日期>.jtbak`（AES-256-GCM），明文目錄自動移除。
+
+~~~bash
+systemctl start jt-ipam-backup.service
+cat /var/backups/jt-ipam/last-run          # status=ok、encrypted=1
+/opt/jt-ipam/backend/.venv/bin/python /opt/jt-ipam/backend/app/services/backup_crypt.py decrypt \
+  /var/backups/jt-ipam/jt-ipam-<日期>.jtbak --out /root/restore-test   # 詢問密碼
+ls -lh /root/restore-test/*/               # .dump、backend.env、tls.tar.gz、uploads.tar.gz
+rm -rf /root/restore-test                  # 解出的是明文，測完刪除
+~~~
+
+實測：手動備份 `encrypted=1`、1.3 MB；解密測試成功後，刪除加密前留下的 14 個明文備份目錄（`find /var/backups/jt-ipam -maxdepth 1 -type d -name '2026-*' -exec rm -rf {} +`，只刪日期目錄、不動 `.jtbak`）。
+
+範圍：加密保護的是備份檔被複製到其他地方的情境；取得容器 root 的人仍可直接讀 `/etc/jt-ipam/backend.env`。升級前快照與 PBS 對整個容器的備份仍含 `backend.env`，前者待刪除快照時清除，後者依 PBS 保留規則輪替；PBS 備份本身是否加密另行評估。
 
 ## Graylog 整合（2026-10-15）
 
