@@ -4,7 +4,7 @@ title: "Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程�
 permalink: /docs/pve/ceph-bluestore-slow-op-backup-schedule/
 date: 2026-10-14
 categories: [PVE, Ceph, PBS, Backup, Troubleshooting]
-last_modified_at: 2026-10-14
+last_modified_at: 2026-10-15
 ---
 
 # Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？
@@ -145,6 +145,9 @@ done
 | 10/11 | 29 | 37 | 70 | 136 |
 | 10/12 | 25 | 43 | 76 | 144 |
 | **10/13（錯開後）** | 23 | 47 | 65 | 135 |
+| 10/14 | 30 | 42 | 83 | 155 |
+
+10/14 晚上合計 155，比前幾晚多約一成，主要是 osd.2（83）。當天中午 osd.1 曾因[金鑰輪換](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/)停機約一分鐘，是否相關無法判斷；告警沒有出現，繼續觀察到 10/21 再看趨勢。
 
 推測原因：RBD 磁碟的資料分散在三顆 OSD 上，就算同一時間只有一台 node 在備份，讀取仍會同時打到三顆 OSD，單一台的備份就足以讓佇列短暫滿載。錯開排程降低的是「三台同時」的疊加，而不是單一備份的瞬間讀取量。
 
@@ -159,6 +162,73 @@ done
 - 若告警反覆出現，再評估降低單一備份的並行讀取（例如 vzdump 的頻寬限制或 `performance` 的 max-workers），本次沒有調整。
 
 PBS 每天的忙碌時段因此變成三段：21:00～22:30（接收備份）、00:00 起的 GC、02:00～03:00 的 Verify。重啟 `proxmox-backup-proxy`、升級 PBS 套件或重開 PBS 都要避開。
+
+## 8. 每日快速健康檢查腳本
+
+把觀察項目整理成一支唯讀腳本，放在 node10，想看時手動執行一次（10/15 起使用）。它會 SSH 到另外兩台查詢；SMART 只查 node10 本機的 osd.0。
+
+| 段落 | 正常的樣子 | 基準 |
+| --- | --- | --- |
+| 1. Ceph | `HEALTH_OK`、3 up／3 in、97 active+clean | — |
+| 2. retries | 三顆合計約 135～155 | 10/10～10/14 |
+| 3. osd.0 SMART | Unsafe Shutdowns 15、Media Errors 0、Critical Warning 0x00 | 10/13 |
+| 4. 備份 | 三台 OK，約 21:00／21:30／22:00 開始 | 錯開後的排程 |
+| 5. HA、服務 | `HA 全部正常`，三台沒有 failed 服務 | — |
+
+安裝（在 node10）：
+
+~~~bash
+cat > /usr/local/bin/pve-daily-check.sh <<'EOF'
+#!/bin/bash
+# 每日快速健康檢查（唯讀）。在 node10 執行。
+# 用法：pve-daily-check.sh [日期]，預設檢查昨晚，例如 pve-daily-check.sh 2026-10-13
+set -u
+D=${1:-$(date -d yesterday +%F)}
+D=$(date -d "$D" +%F) || exit 1
+echo "##### $(hostname) $(date '+%F %T')，retries 檢查 $D 晚上 #####"
+
+echo; echo "===== 1. Ceph ====="
+ceph health detail
+ceph -s | grep -E "osd:|pgs:|volumes:"
+
+echo; echo "===== 2. aio_submit retries（$D 20:50～23:00）====="
+total=0
+for n in node10:0 node11:1 node12:2; do
+  h=${n%:*}; o=${n#*:}
+  c=$(ssh root@$h "journalctl -u ceph-osd@$o --since '$D 20:50' --until '$D 23:00' --no-pager | grep -c 'aio_submit retries'")
+  echo -n "osd.$o=$c  "; total=$((total + c))
+done
+echo "合計=$total"
+
+echo; echo "===== 3. osd.0 SMART ====="
+if [ "$(hostname)" = node10 ]; then
+  dev=$(ceph osd metadata 0 | python3 -c 'import json,sys;print(json.load(sys.stdin)["devices"].split(",")[0])')
+  echo "裝置：/dev/$dev"
+  smartctl -a "/dev/$dev" | grep -iE "unsafe shutdowns|media and data integrity|critical warning|percentage used|temperature:"
+else
+  echo "osd.0 在 node10，請在 node10 執行這段"
+fi
+
+echo; echo "===== 4. 最近一次備份 ====="
+for h in node10 node11 node12; do
+  echo -n "$h: "; ssh root@$h "pvenode task list --typefilter vzdump --limit 1 2>/dev/null | grep vzdump | awk -F'│' '{print \$6, \$8}'"
+done
+
+echo; echo "===== 5. HA 與失敗的服務 ====="
+ha-manager status | grep -E "error|starting|disabled|stopped|fence" || echo "HA 全部正常"
+for h in node10 node11 node12; do
+  echo -n "$h: "; ssh root@$h "systemctl --failed --no-legend --plain | awk '{print \$1}' | tr '\n' ' '"; echo
+done
+EOF
+chmod 755 /usr/local/bin/pve-daily-check.sh
+pve-daily-check.sh
+~~~
+
+注意：
+
+- 第 4 段抓的是 `pvenode task list` 表格的第 6、8 欄（開始時間、狀態）；PVE 改版若表格欄位變動，這段可能顯示錯位，改看原始輸出即可。
+- 腳本只讀取，不改任何設定；也沒有排程與通知。觀察一段時間、retries 的正常範圍確定後，再考慮改成「只有異常才通知」。
+- 這支腳本放在 node10 本機，重灌或換機時要重新建立。
 
 ## 相關紀錄
 
