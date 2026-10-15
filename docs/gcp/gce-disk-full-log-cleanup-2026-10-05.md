@@ -600,7 +600,14 @@ gcloud compute snapshots create <DISK>-before-bt-update-$(date +%Y%m%d) \
   --source-disk=<DISK> --source-disk-zone=<ZONE> --storage-location=<REGION>
 ~~~
 
-面板右上角的「更新」顯示「當前已經是最新版本」：穩定版 10.0.2-LTS，發佈於 2025/12/11。Python 3.7 是這個 LTS 版本自己內建的，不是沒更新造成的，所以這項不用處理。另一個選項是改用非 LTS 的正式版，但變動比較大，對一台只能跑 PHP 7.4 的主機不划算。
+面板右上角的「更新」顯示「當前已經是最新版本」：穩定版 10.0.2-LTS，發佈於 2025/12/11。Python 3.7 是這個 LTS 版本自己內建的，不是沒更新造成的，所以這項不用處理。寶塔官網的下載頁另有「穩定版 12.0.0」。面板內的「更新」只檢查同一條版本線，所以不會提供 10 → 12 這種跨大版本的升級。決定維持 10.x LTS，不升級：
+
+- 跨兩個大版本，介面、設定檔與內建元件的變動都可能比較大。
+- 12.0.0 對 Debian 11、PHP 7.4 管理、現有 Apache 設定的相容性未查證。
+- 10.0.2-LTS 在 2025/12 才發佈，應仍在支援期內。
+- 網站能否運作取決於 Apache、PHP、資料庫，不是面板版本；升級的好處有限，出錯的代價高。
+
+如果之後要升，先用快照複製一台測試 VM，在上面升級並驗證網站、計畫任務與 PHP 7.4，再決定正式機。
 
 ## 排查時踩到的坑
 
@@ -630,6 +637,7 @@ gcloud compute snapshots create <DISK>-before-bt-update-$(date +%Y%m%d) \
 | 低 | 10/19 的快照若也接近 0.9 GB，確認是 fstrim 造成 |
 | 中 | 外圍防護：Cloudflare WAF managed rules；`php.ini` 的 `disable_functions` 停用 `exec`、`system` 等（先確認網站沒用到）；寶塔開啟 `open_basedir` |
 | 低 | 寶塔 LTS 內建 Python 3.7.9，等 LTS 新版換掉；可開啟面板的「有更新時提醒我」 |
+| 低 | 查寶塔 10.x LTS 的支援期限；接近結束時，用測試 VM 評估升級到 12.x |
 | 中 | 作業系統與 PHP 分開處理：寶塔的 PHP 自行編譯在 `/www/server/php/74`，不依賴 Debian 套件。Debian 11 升級前先拍 snapshot，並確認寶塔支援新版本 |
 | 低 | 評估長期方案：PHP 7.4 改放 container、主機升級作業系統；或購買 PHP 7.4 付費延長支援；或改寫網站 |
 | 低 | 設定 Cloudflare Authenticated Origin Pulls：防火牆只認 Cloudflare IP，別人透過自己的 Cloudflare 帳號或 Workers 仍可連到主機 |
