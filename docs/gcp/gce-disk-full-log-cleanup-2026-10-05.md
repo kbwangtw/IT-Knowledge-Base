@@ -326,7 +326,7 @@ echo | openssl s_client -connect 127.0.0.1:443 -servername example.com 2>/dev/nu
 | --- | --- | --- |
 | default-allow-rdp（3389） | 0.0.0.0/0 | Linux 用不到 |
 | default-allow-ssh（22） | 0.0.0.0/0 | btmp 有 1.6M 的失敗登入 |
-| 寶塔面板（自訂 port） | 0.0.0.0/0 | 管理後台對外，而且面板很久沒更新 |
+| 寶塔面板（自訂 port） | 0.0.0.0/0 | 管理後台對外（當時以為面板很久沒更新，10/15 查證已是最新 LTS，見「寶塔面板：其實已是最新 LTS」） |
 | default-allow-http/https | 0.0.0.0/0 | 知道主機 IP 就能繞過 Cloudflare |
 
 修改前先確認專案只有這一台 VM，因為 `default-*` 規則會套用到整個 VPC：
@@ -590,6 +590,18 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 
 需要上傳圖片時，到 Cloudflare 把 `kindeditor-block` 改成「已停用」，用完立刻改回「使用中」。10/15 已通知會用後台的同事。
 
+### 寶塔面板：其實已是最新 LTS（10/15 補記）
+
+10/5 看到續簽腳本用 Python 3.7，就推測面板很久沒更新。更新前先記錄現況，並手動拍一份快照（每日快照有 14 天保留，手動快照不會自動刪除）：
+
+~~~bash
+sudo /www/server/panel/pyenv/bin/python3 --version     # Python 3.7.9
+gcloud compute snapshots create <DISK>-before-bt-update-$(date +%Y%m%d) \
+  --source-disk=<DISK> --source-disk-zone=<ZONE> --storage-location=<REGION>
+~~~
+
+面板右上角的「更新」顯示「當前已經是最新版本」：穩定版 10.0.2-LTS，發佈於 2025/12/11。Python 3.7 是這個 LTS 版本自己內建的，不是沒更新造成的，所以這項不用處理。另一個選項是改用非 LTS 的正式版，但變動比較大，對一台只能跑 PHP 7.4 的主機不划算。
+
 ## 排查時踩到的坑
 
 這幾個是指令本身的陷阱，結果看起來合理，其實是錯的：
@@ -615,10 +627,9 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
 | 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它）。7.4 可以正常執行，改完就不必再關掉 `E_DEPRECATED` |
 | 中 | 寶塔資料庫備份設定「失敗時通知」（要先設定通知管道） |
-| 中 | 寶塔面板顯示 Python 3.7 的 deprecation 警告，與更新寶塔面板一起處理 |
 | 低 | 10/19 的快照若也接近 0.9 GB，確認是 fstrim 造成 |
 | 中 | 外圍防護：Cloudflare WAF managed rules；`php.ini` 的 `disable_functions` 停用 `exec`、`system` 等（先確認網站沒用到）；寶塔開啟 `open_basedir` |
-| 中 | 更新寶塔面板（續簽腳本還在用 Python 3.7）；不要因為 PHP 卡住而一起延後 |
+| 低 | 寶塔 LTS 內建 Python 3.7.9，等 LTS 新版換掉；可開啟面板的「有更新時提醒我」 |
 | 中 | 作業系統與 PHP 分開處理：寶塔的 PHP 自行編譯在 `/www/server/php/74`，不依賴 Debian 套件。Debian 11 升級前先拍 snapshot，並確認寶塔支援新版本 |
 | 低 | 評估長期方案：PHP 7.4 改放 container、主機升級作業系統；或購買 PHP 7.4 付費延長支援；或改寫網站 |
 | 低 | 設定 Cloudflare Authenticated Origin Pulls：防火牆只認 Cloudflare IP，別人透過自己的 Cloudflare 帳號或 Workers 仍可連到主機 |
