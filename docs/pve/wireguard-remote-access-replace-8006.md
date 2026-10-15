@@ -478,7 +478,7 @@ pct exec 109 -- grep -E "^(enable_totp|totp_verified)" /etc/wgdashboard/src/wg-d
 pct exec 109 -- shred -u /root/wg-dashboard.ini.bak-20261015    # 確認後刪除含舊 key 的備份
 ~~~
 
-本次結果：`enable_totp = true`、`totp_verified = true`，備份已刪除。
+本次結果：`enable_totp = true`、`totp_verified = true`，備份已刪除；另開無痕視窗登入，確認會要求驗證碼且輸入後可以登入。
 
 ### 10-4 被鎖在外面時
 
@@ -488,7 +488,7 @@ pct exec 109 -- shred -u /root/wg-dashboard.ini.bak-20261015    # 確認後刪�
 pct exec 109 -- bash -c 'cd /etc/wgdashboard/src && sed -i "s/^enable_totp *=.*/enable_totp = false/" wg-dashboard.ini && systemctl restart wg-dashboard && grep ^enable_totp wg-dashboard.ini'
 ~~~
 
-WGDashboard 沒有備用碼可用（本次未看到相關功能），這段指令就是救援方式。換手機時，記得先在新手機綁定再移除舊手機的項目。
+WGDashboard 啟用時沒有提供備用碼（10/15 實際確認），這段指令就是救援方式。換手機時，記得先在新手機綁定再移除舊手機的項目。
 
 ## 本次結論
 
