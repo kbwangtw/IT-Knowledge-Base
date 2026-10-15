@@ -4,7 +4,7 @@ title: "把三台 PVE 的日誌集中到 Graylog"
 date: 2026-09-17
 categories: [PVE, Graylog, Syslog]
 permalink: /docs/pve/proxmox-graylog-syslog-pipeline-sop/
-last_modified_at: 2026-10-08
+last_modified_at: 2026-10-15
 ---
 
 # 把三台 PVE 的日誌集中到 Graylog
@@ -547,6 +547,108 @@ Graylog 訊息的 timestamp 以 UTC 顯示（比台灣時間少 8 小時），�
 - PBS 任務（備份、GC、Verify、Sync）的日誌來自 proxmox-backup-proxy，與 PVE 的 pvedaemon 格式不同，現有「PVE 任務失敗警報」不適用。待排程備份產生真實日誌後，依實際格式建立 PBS 任務分類與失敗告警。
 - PVE - Authentication Events 的描述只涵蓋 PVE 節點，確認 PBS 的登入與 sudo 事件是否需要一併分類。
 
+## 12. 以 jt-ipam 補上主機名稱（2026-10-15）
+
+日誌裡只出現 IP 時（例如 `Failed password ... from <IP>`、`rhost=<IP>`），以 jt-ipam 的 IP → 主機名稱對照表自動補上 `src_ip`、`src_host` 欄位。jt-ipam 需 1.0 以上才有此功能（升級見 [jt-ipam 導入紀錄](https://kbwangtw.github.io/IT-Knowledge-Base/docs/network/jt-ipam-adoption-itbh/)）。
+
+~~~text
+jt-ipam（IP → hostname，HTTPS + Token + 只允許 Graylog）
+  → Graylog 信任 jt-ipam 憑證（/etc/graylog/server/cacerts）
+  → Data Adapter「DSV File from HTTP」（每 5 分鐘重抓）→ Lookup Table ipam_hostname
+  → Pipeline 最後一個 Stage：從 from／rhost= 取出 IP → src_ip、src_host
+~~~
+
+### 12-1 jt-ipam 端
+
+**整合 → Graylog**：
+
+| 項目 | 設定 |
+| --- | --- |
+| 格式 | CSV |
+| 允許的來源位址 | Graylog 主機 `/32`（先設定再產生權杖） |
+| 允許明文 HTTP（8088） | 關閉 |
+| 權杖 | 365 天（所有 DSV 端點共用一把；到期前 14、7、1 天通知） |
+| 對照表 | 「IP → 主機名稱（全域）」啟用，路徑 `ip-fqdn`，取得 HTTPS 網址（含權杖，存入密碼管理器） |
+
+另有預設啟用的「VM 名稱」（vmid → vm name）對照表，日後可用於 PVE 任務日誌補上 VM 名稱。
+
+從 Graylog 容器測試（網址以 `read -s` 輸入；`pct enter` 與 `read -s` 都要單獨貼上，否則後續指令會被吞掉或被當成輸入）：
+
+~~~bash
+read -s -p "jt-ipam lookup URL: " U; echo
+curl -sk "$U" | head -5                                                   # "IP","主機名稱"
+curl -s -o /dev/null -w 'http=%{http_code}\n' "$U" || echo "憑證驗證失敗"
+echo | openssl s_client -connect <jt-ipam IP>:443 2>/dev/null | openssl x509 -noout -subject -ext subjectAltName
+unset U
+~~~
+
+結果：21 筆；jt-ipam 為自簽憑證（SAN 含其 IP 與主機名稱），名稱相符但不受信任，Graylog 會拒絕連線。
+
+### 12-2 讓 Graylog 信任 jt-ipam 憑證
+
+先比對指紋，確認 Graylog 看到的與 jt-ipam 本機相同（相同才匯入）：
+
+~~~bash
+# Graylog 容器
+echo | openssl s_client -connect <jt-ipam IP>:443 2>/dev/null | openssl x509 -noout -enddate -fingerprint -sha256
+# 節點上，從 jt-ipam 容器內部
+pct exec <jt-ipam CTID> -- bash -c "echo | openssl s_client -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -fingerprint -sha256"
+~~~
+
+不改 Graylog 內建的 cacerts（套件更新會覆蓋），複製一份到 `/etc/graylog/server/` 再加入：
+
+~~~bash
+cp -a /etc/default/graylog-server /etc/default/graylog-server.bak-$(date +%Y%m%d)
+echo | openssl s_client -connect <jt-ipam IP>:443 2>/dev/null | openssl x509 > /etc/graylog/server/jt-ipam.crt
+cp /usr/share/graylog-server/jvm/lib/security/cacerts /etc/graylog/server/cacerts
+/usr/share/graylog-server/jvm/bin/keytool -importcert -noprompt -alias jt-ipam \
+  -file /etc/graylog/server/jt-ipam.crt -keystore /etc/graylog/server/cacerts -storepass changeit
+chmod 644 /etc/graylog/server/cacerts
+echo 'GRAYLOG_SERVER_JAVA_OPTS="$GRAYLOG_SERVER_JAVA_OPTS -Djavax.net.ssl.trustStore=/etc/graylog/server/cacerts -Djavax.net.ssl.trustStorePassword=changeit"' >> /etc/default/graylog-server
+systemctl restart graylog-server          # 約 1～2 分鐘，期間 UDP syslog 漏收
+curl -s http://<Graylog IP>:9000/api/system/lbstatus   # ALIVE
+ps -ef | grep -o 'trustStore=[^ ]*' | head -1          # /etc/graylog/server/cacerts
+~~~
+
+- 複製的 cacerts 保留所有公開憑證機構，Gmail SMTP 不受影響。`changeit` 是 Java 信任清單的預設密碼，檔案只含公開憑證。
+- jt-ipam 憑證到期日 2031-09-14；jt-ipam 換憑證後要重新匯入（`keytool -delete -alias jt-ipam` 後再匯入）。
+- 升級 graylog-server 時若 apt 詢問 `/etc/default/graylog-server`，選保留現有版本，否則 trustStore 設定會消失。
+- 還原：把 `.bak-日期` 複製回 `/etc/default/graylog-server` 並重啟。
+
+### 12-3 Graylog 端
+
+| 項目 | 設定 |
+| --- | --- |
+| URL Allowlist | Regex `^https://<jt-ipam IP 跳脫>/api/v1/lookup/.*`（白名單不含權杖，換權杖不必改） |
+| Data Adapter | DSV File from HTTP；File URL 為含權杖網址；Refresh 300；Separator `,`；Line `\n`；Quote `"`；**Key column 0、Value column 1** |
+| Cache | Do not cache values（DSV 轉接器已把整份對照表載入記憶體） |
+| Lookup Table | Name `ipam_hostname` |
+
+jt-ipam 畫面說明寫 key 欄＝1、value 欄＝2，實測 Graylog 從 0 起算，以 0／1 才查得到。Lookup Table 的 Test lookup 輸入 Graylog 的 IP，回傳 `graylog.<網域>`、`has_error: false`；資料轉接器顯示共 21 筆。
+
+含權杖的網址存在 Graylog 設定中，Graylog 管理員看得到；權杖只能讀對照表、只允許 Graylog 來源。
+
+### 12-4 Pipeline 規則
+
+~~~text
+rule "Enrich - Source IP hostname (jt-ipam)"
+when
+    regex("(?:from|rhost=)\\s*(\\d{1,3}(?:\\.\\d{1,3}){3})", to_string($message.message)).matches == true
+then
+    let m = regex("(?:from|rhost=)\\s*(\\d{1,3}(?:\\.\\d{1,3}){3})", to_string($message.message));
+    let ip = to_string(m["0"]);
+    set_field("src_ip", ip);
+    set_field("src_host", to_string(lookup_value("ipam_hostname", ip), "(not in ipam)"));
+end
+~~~
+
+- 規則編輯頁預設是 Rule Builder，按 **Use Source Code Editor** 才能貼原始碼。Rule Simulation（Simple Message）分別以內網 IP 與外部 IP（`rhost=` 寫法）測試，後者應得 `(not in ipam)`。
+- 加在 Infrastructure Syslog **新增的最後一個 Stage**，條件選 None or more rules match。若放進設定為「全部規則符合才繼續」的既有 Stage，只對少數訊息成立的規則會讓後續 Stage 被跳過。
+
+實測：節點上 `logger -t sshd "Failed password for invalid user ipamtest from <jt-ipam IP> port 22 ssh2"`，搜尋 `ipamtest AND _exists_:src_host` 找到訊息，`src_host` 為 jt-ipam 的主機名稱。
+
+搜尋欄位是否存在要用 `_exists_:src_host`；`src_host:*` 會出現 `'*' or '?' not allowed as first character in WildcardQuery`。`src_host:"(not in ipam)"` 可列出所有來自未登記 IP 的訊息，日後可做成告警或戰情中心面板。
+
 ## 目前完成與待辦
 
 截至 2026-09-22，三項核心告警已完成所述測試範圍；其他監控項目與通知明細仍待完善。
@@ -554,7 +656,7 @@ Graylog 訊息的 timestamp 以 UTC 顯示（比台灣時間少 8 小時），�
 | 範圍 | 目前進度／驗證界線 |
 | --- | --- |
 | Syslog／Stream | 三台 PVE 與 PBS31 接收與 Infrastructure Syslog 已驗證（PBS 於 2026-10-08 加入，見第 11 節） |
-| Pipeline | 主機、服務、任務、認證、系統錯誤分類已建立；既有五種服務事件測試與任務欄位紀錄保留 |
+| Pipeline | 主機、服務、任務、認證、系統錯誤分類已建立；既有五種服務事件測試與任務欄位紀錄保留；2026-10-15 加入 jt-ipam 主機名稱查表（`src_ip`／`src_host`，見第 12 節） |
 | PVE 任務失敗警報 | 完整驗證成功：PVE 9.2.20 Rule 修正後，logger → Pipeline → Event → Gmail；未回填歷史索引 |
 | PVE 多次驗證失敗 | 完整驗證成功：Group by source，node10 三筆 → Last Matched → 正式 Gmail |
 | PVE 服務異常 | 維持已完成（9/18 Pipeline、Event、Gmail） |
