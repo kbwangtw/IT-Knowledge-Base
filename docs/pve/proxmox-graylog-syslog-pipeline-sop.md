@@ -692,7 +692,27 @@ Rule Simulation（JSON）：`{"message": "test", "synology_src_ip": "<WireGuard 
 - Stage 0 的條件是 at least one rule：只有登入紀錄會繼續到 Stage 9，正好是有 `synology_src_ip` 的訊息；其他系統事件不受影響。
 - 透過 QuickConnect 連線時日誌記錄的來源 IP（使用者 IP 或 Synology 中繼）尚未觀察到，待有紀錄再確認。
 
-待補：DSM「日誌過濾器」送出的日誌種類（並找出 tokyo16 日誌量大的來源）；評估 NAS 登入失敗多次的告警（`synology_auth_result:failed`）。
+
+**丟棄 PBS 的 SMB 讀取紀錄（2026-10-15）**：tokyo16 是檔案伺服器，使用者的 SMB 讀取紀錄有稽核價值，因此不在 DSM 關閉「讀取」傳輸記錄，改在 Graylog 只丟棄 PBS 帳號的 read。規則加在 Synology Syslog Pipeline 的 **Stage 0**（與兩個 parser 並列，條件仍為 at least one rule）：
+
+~~~text
+rule "Drop - Synology PBS SMB read"
+when
+    contains(to_string($message.message), "WinFileService Event: read") &&
+    contains(to_string($message.message), "User: <PBS 帳號>")
+then
+    drop_message();
+end
+~~~
+
+- 這些訊息不會命中 Stage 0 的 parser，原本停在 Stage 0 但仍寫入 index，所以必須在 Stage 0 丟棄。
+- 其他帳號的 SMB 存取、PBS 的 write／delete 仍保留；DSM 本機的記錄不受影響。
+- `contains()` 區分大小寫，且依賴 DSM 的訊息格式；格式改變時只會讓雜訊回來，不會漏掉其他紀錄。PBS 改用其他帳號時要一併修改。
+- **Rule Simulation 的「Not stored」不代表已丟棄**：模擬的訊息一律不寫入 index，不論是否 drop 都顯示 Not stored。測試時先把 `then` 改成 `set_field("would_drop", "yes");`，確認 PBS 的 read 訊息出現該欄位、其他帳號的訊息沒有，再改回 `drop_message();`。
+- 上線後驗證：PBS 排程執行後搜尋 `source:tokyo16 AND "WinFileService" AND "<PBS 帳號>" AND "read"`，規則上線後應為 0 筆（待確認）。
+- 已存入的紀錄依預設 index set 的保留期（Data Tiering，30～40 天）自然輪替。
+
+待補：DSM「日誌過濾器」送出的日誌種類；確認上述丟棄規則生效；melayu17（快照複寫目的地）登入告警與快照複寫失敗告警；評估 NAS 登入失敗多次的告警（`synology_auth_result:failed`）。
 
 ## 目前完成與待辦
 
