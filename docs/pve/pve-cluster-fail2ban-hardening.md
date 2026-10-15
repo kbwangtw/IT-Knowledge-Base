@@ -224,9 +224,75 @@ pveum user tfa list root@pam
 pveum user tfa delete root@pam --id <TOTP 那一筆的 id>
 ~~~
 
+## 10/15 補記：限縮 SSH root 金鑰
+
+PVE 的 TOTP 管不到 SSH。三台的 `/root/.ssh/authorized_keys` 都是指向 `/etc/pve/priv/authorized_keys` 的 symlink，由 cluster 同步，改一次三台生效；同一個檔案也有節點互連用的金鑰，**只能動目標那幾行，改前先備份**。
+
+### 盤點（唯讀）
+
+~~~bash
+for n in node10 node11 node12; do echo -n "$n: "; ssh root@$n 'readlink -f /root/.ssh/authorized_keys'; done
+ssh-keygen -lf /etc/pve/priv/authorized_keys | awk '{print $2, $3}'
+sshd -T | grep -iE "^(permitrootlogin|passwordauthentication)"
+# 各金鑰（指紋前 4 碼）與密碼登入的使用次數
+for n in node10 node11 node12; do
+  echo "== $n"
+  for fp in <指紋前4碼> ...; do
+    echo -n "  $fp: "; ssh root@$n "journalctl -u ssh -u sshd --since '30 days ago' --no-pager | grep 'Accepted publickey' | grep -c 'SHA256:$fp'"
+  done
+  ssh root@$n "journalctl -u ssh -u sshd --since '30 days ago' --no-pager | grep 'Accepted password' | awk '{print \$9, \$11}' | sort | uniq -c"
+done
+~~~
+
+| 金鑰 | 用途 | 使用紀錄（journal 保留到 2～7 月） | 處理 |
+| --- | --- | --- | --- |
+| 管理者筆電（ED25519） | 人工登入 | 0 | 保留 |
+| `root@node10／11／12` | 節點互連 | — | **不動** |
+| `root@ai`（第一把） | Hermes Agent | 僅今天測試時出現 | 加 `from="<Hermes IP>"` 等限制 |
+| `root@ai`（第二把） | 不明，多半是舊的 | 0 | **刪除** |
+| `root@ProxCenter` | ProxCenter | 0（10/12 滾動更新也沒用到） | 保守起見不刪，加 `from="<ProxCenter IP>"` 限制 |
+
+限制的寫法是在該行最前面加上選項：
+
+~~~text
+from="<來源 IP>",no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-rsa AAAA... root@ai
+~~~
+
+`from=` 讓金鑰外流後在其他主機也用不了；其餘三項關閉通道轉送等用不到的功能，不影響下指令。
+
+### 修改方式
+
+用指紋找出目標行，**確認只找到一行、該行還沒有選項**，產生新檔後比對「行數、變動行數、節點金鑰都還在」，全部通過才寫回；任何一項不符就停止不修改。逐行計算指紋時，註解與空行會讓 `ssh-keygen` 回傳錯誤，在 `set -e` 下要加 `|| true`，否則腳本會中途停止（本次第一次就是這樣停下，未修改）。
+
+~~~bash
+cp -a /etc/pve/priv/authorized_keys /root/authorized_keys.bak-YYYYMMDD; chmod 600 /root/authorized_keys.bak-YYYYMMDD
+# 找行：fp=$(printf '%s\n' "$line" | ssh-keygen -lf - 2>/dev/null | awk '{print $2}' || true)
+# 改行：awk -v L=<行號> 'NR==L{$0="from=\"<IP>\",no-port-forwarding,no-agent-forwarding,no-X11-forwarding " $0}1'
+# 刪行：awk -v D=<行號> 'NR==D{next}1'
+cat <新檔> > /etc/pve/priv/authorized_keys      # 用 cat 寫回，保留 pmxcfs 上的檔案
+~~~
+
+注意：備份要在**第一次**修改前建立。本次第二段修改的指令執行了兩次，第二次因找不到已刪除的金鑰而停止，但開頭的備份已被覆蓋成修改後的版本；幸好第一次修改前的原始備份仍在。
+
+### 驗證
+
+~~~bash
+ssh-keygen -lf /etc/pve/priv/authorized_keys | awk '{print $2, $3}'
+grep -c "^from=" /etc/pve/priv/authorized_keys
+for h in node11 node12; do ssh -o BatchMode=yes -o ConnectTimeout=5 root@$h hostname; done
+# 讓 Hermes 檢查一次三台後
+for n in node10 node11 node12; do ssh root@$n 'journalctl -u ssh -u sshd --since "10 min ago" --no-pager | grep Accepted | grep -c "<Hermes IP>"'; done
+~~~
+
+本次結果：剩 6 把金鑰（第二把 `root@ai` 已移除）、2 行有 `from=`；節點互連正常；Hermes 修改後在三台都能登入。若互連失敗，立刻 `cat <備份> > /etc/pve/priv/authorized_keys` 還原。確認後以 `shred -u` 刪除備份。
+
+### 尚未處理：密碼登入
+
+`PermitRootLogin yes` 加 `PasswordAuthentication yes`，知道 root 密碼即可從內網 SSH，且不受 TOTP 保護。目前密碼登入來源都是人工（WinClient、VPN、家中兩台裝置）。關閉前需先讓這些裝置改用金鑰登入，另排時間處理。
+
 ## 本次結論
 
-已確認 node10 的遞增封鎖與 iptables 命中，三台配置已處理。上游入口已於 10/12 查清（路由器轉送 8006），已改用 WireGuard，8006 轉送已於 10/13 停用並從外部確認。停用後 10/13 12:00～10/14 三台都沒有外部登入嘗試，不再另外追蹤。10/15 起取消三台逐一封包驗證，Fail2Ban 保留運作；PVE Firewall 改為長期可選，`root@pam` 已於 10/15 啟用 TOTP 與復原碼，並清理 `root@pam` 底下兩個 `privsep=0` 的 token（`pdm-admin-pdm` 刪除、`hermesagent` 停用）。待辦：約 10/29 刪除 `hermesagent`；限縮 Hermes Agent 的 SSH root 權限。
+已確認 node10 的遞增封鎖與 iptables 命中，三台配置已處理。上游入口已於 10/12 查清（路由器轉送 8006），已改用 WireGuard，8006 轉送已於 10/13 停用並從外部確認。停用後 10/13 12:00～10/14 三台都沒有外部登入嘗試，不再另外追蹤。10/15 起取消三台逐一封包驗證，Fail2Ban 保留運作；PVE Firewall 改為長期可選，`root@pam` 已於 10/15 啟用 TOTP 與復原碼，並清理 `root@pam` 底下兩個 `privsep=0` 的 token（`pdm-admin-pdm` 刪除、`hermesagent` 停用）。同日限縮 SSH root 金鑰：Hermes 與 ProxCenter 的金鑰加上 `from=` 來源限制，刪除未使用的第二把 `root@ai` 金鑰。待辦：約 10/29 刪除 `hermesagent`；各裝置改用金鑰後關閉 SSH 密碼登入；（可選）Hermes 改用只能執行唯讀指令的帳號。
 
 - [Fail2Ban 1.1.0 設定參考](https://github.com/fail2ban/fail2ban/blob/1.1.0/config/jail.conf)
 - [Proxmox Firewall 文件](https://pve.proxmox.com/pve-docs/chapter-pve-firewall.html)
