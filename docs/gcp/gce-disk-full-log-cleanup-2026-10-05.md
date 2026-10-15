@@ -618,6 +618,8 @@ gcloud compute snapshots create <DISK>-before-bt-update-$(date +%Y%m%d) \
 
 這些都是面板介面本身的漏洞，必須先連得到面板才能利用。這台的面板只對管理者 IP 開放（第 6 節），是目前最主要的防線，所以維持 LTS 的決定不變，但防火牆限制不能放寬。
 
+官方更新日誌完全沒有 10.x 的紀錄，10.0.2-LTS 之後也沒有新版，無法得知 LTS 是否還在維護、是否補上上述修補。短期仍維持 LTS，但把「面板兩步驟驗證」和「用測試 VM 評估升級到 12.0.0 穩定版」提高到中優先。
+
 ## 排查時踩到的坑
 
 這幾個是指令本身的陷阱，結果看起來合理，其實是錯的：
@@ -648,7 +650,7 @@ gcloud compute snapshots create <DISK>-before-bt-update-$(date +%Y%m%d) \
 | 低 | 寶塔 LTS 內建 Python 3.7.9，等 LTS 新版換掉；可開啟面板的「有更新時提醒我」 |
 | 中 | 寶塔面板開啟兩步驟驗證（動態口令），補強只靠來源 IP 限制的面板登入 |
 | 中 | 查 CVE-2025-12914 是否影響 10.0.2-LTS；若影響且 LTS 沒有修補，用測試 VM 評估升級 |
-| 低 | 查寶塔 10.x LTS 的支援期限；接近結束時，用測試 VM 評估升級到 12.x |
+| 中 | 10.x 沒有公開更新紀錄、10 個月沒有新版；用快照建測試 VM，評估升級到 12.0.0 穩定版（驗證網站、計畫任務、PHP 7.4） |
 | 中 | 作業系統與 PHP 分開處理：寶塔的 PHP 自行編譯在 `/www/server/php/74`，不依賴 Debian 套件。Debian 11 升級前先拍 snapshot，並確認寶塔支援新版本 |
 | 低 | 評估長期方案：PHP 7.4 改放 container、主機升級作業系統；或購買 PHP 7.4 付費延長支援；或改寫網站 |
 | 低 | 設定 Cloudflare Authenticated Origin Pulls：防火牆只認 Cloudflare IP，別人透過自己的 Cloudflare 帳號或 Workers 仍可連到主機 |
