@@ -649,13 +649,56 @@ end
 
 搜尋欄位是否存在要用 `_exists_:src_host`；`src_host:*` 會出現 `'*' or '?' not allowed as first character in WildcardQuery`。`src_host:"(not in ipam)"` 可列出所有來自未登記 IP 的訊息，日後可做成告警或戰情中心面板。
 
+## 13. Synology NAS 的日誌（既有設定補記，2026-10-15）
+
+兩台 Synology NAS 的 DSM 日誌約 9 月底已送進 Graylog，當時沒有寫入本文件；10/15 盤點後補記，並接上第 12 節的 jt-ipam 主機名稱查表。
+
+| 位置 | 設定 |
+| --- | --- |
+| DSM 記錄中心 → 記錄傳送 | 傳送至 syslog 伺服器：Graylog 主機名稱、**UDP 1515**、BSD（RFC 3164），無 TLS；有「傳送測試日誌」按鈕 |
+| Graylog Input | **Synology Syslog UDP**（Syslog UDP，0.0.0.0:1515），與 PVE／PBS 的 Syslog UDP 1514 分開 |
+| Stream | **Synology Syslog**，訊息存入預設 index（graylog_*），不在 infra_syslog |
+| Pipeline | **Synology Syslog**（由 Input Setup Wizard 建立）：Stage 0 為「Synology DSM Authentication Failed Parser」與「Synology DSM Authentication Success Parser」，條件為 at least one rule |
+
+Stage 0 從登入紀錄（例如 `Connection: User [帳號] from [IP] signed in to [DSM] successfully via [password].`）解析出 `synology_nas`、`synology_service`、`synology_user`、`synology_src_ip`、`synology_auth_result`（success／failed）、`synology_auth_method`。
+
+確認方式：
+
+~~~bash
+pct exec <Graylog CTID> -- ss -ulnp | grep -E ':151[45] '   # 1514 與 1515 都由 Graylog（java）監聽
+~~~
+
+Graylog 的 **Input Diagnosis**（Inputs → 該 Input）可看最近 15 分鐘收到的筆數、錯誤數與「Received Message count by Stream」，用來判斷訊息進了哪個 stream。
+
+**接上 jt-ipam 主機名稱**：訊息已有 `synology_src_ip`，不必再用正規表示式從訊息擷取，新增規則放在 Synology Syslog Pipeline 的 **Stage 9**（None or more rules match）：
+
+~~~text
+rule "Enrich - Synology src_ip hostname (jt-ipam)"
+when
+    has_field("synology_src_ip")
+then
+    let ip = to_string($message.synology_src_ip);
+    set_field("src_ip", ip);
+    set_field("src_host", to_string(lookup_value("ipam_hostname", ip), "(not in ipam)"));
+end
+~~~
+
+Rule Simulation（JSON）：`{"message": "test", "synology_src_ip": "<WireGuard 容器 IP>"}` → `src_host` 為 WireGuard 容器的主機名稱。實際登入 DSM 後，訊息出現 `src_ip`、`src_host`。
+
+- 經 WireGuard 從外部登入時，NAS 看到的來源是 WireGuard 容器（NAT），`src_host` 因此顯示 WireGuard 主機名稱，可據此辨識 VPN 登入。
+- 欄位名稱與第 12 節相同，`src_host:"<名稱>"` 可同時查 PVE 與 NAS 的紀錄。
+- Stage 0 的條件是 at least one rule：只有登入紀錄會繼續到 Stage 9，正好是有 `synology_src_ip` 的訊息；其他系統事件不受影響。
+- 透過 QuickConnect 連線時日誌記錄的來源 IP（使用者 IP 或 Synology 中繼）尚未觀察到，待有紀錄再確認。
+
+待補：另一台 NAS 的記錄傳送設定、DSM「日誌過濾器」送出的日誌種類；評估 NAS 登入失敗多次的告警（`synology_auth_result:failed`）。
+
 ## 目前完成與待辦
 
 截至 2026-09-22，三項核心告警已完成所述測試範圍；其他監控項目與通知明細仍待完善。
 
 | 範圍 | 目前進度／驗證界線 |
 | --- | --- |
-| Syslog／Stream | 三台 PVE 與 PBS31 接收與 Infrastructure Syslog 已驗證（PBS 於 2026-10-08 加入，見第 11 節） |
+| Syslog／Stream | 三台 PVE 與 PBS31 接收與 Infrastructure Syslog 已驗證（PBS 於 2026-10-08 加入，見第 11 節）；Synology NAS 經 UDP 1515 進 Synology Syslog stream（第 13 節） |
 | Pipeline | 主機、服務、任務、認證、系統錯誤分類已建立；既有五種服務事件測試與任務欄位紀錄保留；2026-10-15 加入 jt-ipam 主機名稱查表（`src_ip`／`src_host`，見第 12 節） |
 | PVE 任務失敗警報 | 完整驗證成功：PVE 9.2.20 Rule 修正後，logger → Pipeline → Event → Gmail；未回填歷史索引 |
 | PVE 多次驗證失敗 | 完整驗證成功：Group by source，node10 三筆 → Last Matched → 正式 Gmail |
@@ -673,7 +716,7 @@ end
 3. **完善 Dashboard**：沿用既有任務看板，核對失敗、警告、啟動數，再加入節點、服務、登入等統計與異常明細。
 4. **後續測試範圍**：現有安全測試鏈路已完成；其他新增告警另行安排安全、可控制的測試事件，逐段記錄原始訊息、分類欄位、Event、實際收件時間，以及 Grace Period 下的重複通知情形。
 
-畫面 0 errors/s 只表示當下沒有顯示處理錯誤，不取代欄位抽查或告警測試。Synology、TP-Link 後續整合仍未列入完成範圍。
+畫面 0 errors/s 只表示當下沒有顯示處理錯誤，不取代欄位抽查或告警測試。Synology NAS 的 DSM 日誌已送入 Graylog（第 13 節）；TP-Link 後續整合仍未列入完成範圍。
 
 ## 可下載文字版
 
