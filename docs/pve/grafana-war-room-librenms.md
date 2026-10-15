@@ -4,7 +4,7 @@ title: "用 Grafana 建立戰情中心（二）：接上 LibreNMS"
 date: 2026-10-14
 categories: [PVE, Grafana, LibreNMS]
 permalink: /docs/pve/grafana-war-room-librenms/
-last_modified_at: 2026-10-14
+last_modified_at: 2026-10-15
 ---
 
 # 用 Grafana 建立戰情中心（二）：接上 LibreNMS
@@ -91,7 +91,7 @@ Connections → Add new connection → Infinity → Install → Add new data sou
 | 面板 | 查詢 | 設定 |
 | --- | --- | --- |
 | 斷線設備（LibreNMS） | JSON／Parser **JSONata**／URL `.../api/v0/devices?type=down`；Columns：selector `count`（Number） | Stat；Calculation Last \*；No value 0；綠、≥1 紅 |
-| 設備清單（LibreNMS） | JSON／JSONata／URL `.../api/v0/devices`；**Rows／Root `devices`**；Columns：`hostname`、`status`（Number）、`uptime`（Number）、`os` | Table；狀態 Value mappings 1→Up 綠、0→Down 紅，Cell type Colored background；上線時間 Unit **duration (s)** |
+| 設備清單（LibreNMS） | JSON／JSONata／URL `.../api/v0/devices`；**Rows／Root `devices`**；Columns：`hostname`、`status`（Number）、`uptime`（Number）、`os`（類型）、`features`（發行版） | Table；狀態 Value mappings 1→Up 綠、0→Down 紅，Cell type Colored background；上線時間 Unit **duration (s)** |
 
 - 新版 Infinity 的 Parser 分成 Backend（JSONata、JQ）與 Frontend 兩類，沒有名為「Backend」的單一選項。
 - 「斷線設備」直接讀 API 的 `count`，沒有斷線時拿到的是真正的 0。驗證方式：暫時把 URL 改成不含 `?type=down`，應顯示 16（紅），改回後為 0。
@@ -107,7 +107,36 @@ Connections → Add new connection → Infinity → Install → Add new data sou
 pct exec 102 -- mysql librenms -e "select hostname, os, version, features, hardware from devices order by hostname;"
 ~~~
 
-以 `snmp-v3-add.sh` 加入的主機有值（如 Ubuntu 24.04、Debian 13.7、Debian 12.15）；adguard、pihole、wireguard 與三台 PVE 節點為空（推測 snmpd 設定沒有 `extend distro`，待確認）；NAS 為 dsm、無此欄。
+以 `snmp-v3-add.sh` 加入的主機有值（如 Ubuntu 24.04、Debian 13.7、Debian 12.15）；adguard、pihole、wireguard 與三台 PVE 節點為空；NAS 為 dsm、無此欄。表格因此改成「類型」（`os`）與「發行版」（`features`）兩欄，Columns 位於查詢區的 **Parsing options & Result fields** 內。
+
+**補上 `extend distro`（2026-10-15）**：檢查確認這 6 台既沒有 `/usr/bin/distro`，snmpd.conf 也沒有 `extend distro`（PVE 節點只有 `extend proxmox`）。從 LibreNMS 容器取出官方 distro 腳本後逐台補上：
+
+~~~bash
+pct pull 102 /usr/bin/distro /root/distro
+# 容器（同節點；其他節點的容器先 scp 到該節點再 pct push）
+pct exec <CTID> -- cp -a /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-distro-$(date +%Y%m%d)
+pct push <CTID> /root/distro /usr/bin/distro --perms 755
+pct exec <CTID> -- bash -c "grep -q '^extend distro' /etc/snmp/snmpd.conf || echo 'extend distro /usr/bin/distro' >> /etc/snmp/snmpd.conf"
+pct exec <CTID> -- systemctl restart snmpd
+# PVE 節點
+scp /root/distro <節點>:/usr/bin/distro
+ssh <節點> "chmod 755 /usr/bin/distro && cp -a /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-distro-\$(date +%Y%m%d) && (grep -q '^extend distro' /etc/snmp/snmpd.conf || echo 'extend distro /usr/bin/distro' >> /etc/snmp/snmpd.conf) && systemctl restart snmpd"
+# 不等每 6 小時的自動偵測，手動重新偵測 os 模組
+pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./discovery.php -h <主機名稱> -m os"
+~~~
+
+結果：三個容器為 Debian 13.7，三台 PVE 節點為 `Debian 13.7/PVE 9.2.21`（distro 腳本會辨識 PVE）；snmpd 皆 active，原有 `extend proxmox` 不受影響。表格的「發行版」只剩兩台 NAS 空白。修改 snmpd.conf 與新增 distro 會產生 Wazuh 檔案異動紀錄，屬預期。
+
+這 6 台的 `rouser snmpuser` 原本沒有 `priv`（允許只驗證不加密），以腳本加入的主機為 `rouser snmpuser priv`。同日改為一致：
+
+~~~bash
+pct exec <CTID> -- cp -a /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-priv-$(date +%Y%m%d)
+pct exec <CTID> -- sed -i 's/^rouser snmpuser[[:space:]]*$/rouser snmpuser priv/' /etc/snmp/snmpd.conf
+pct exec <CTID> -- systemctl restart snmpd
+pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device:poll <主機名稱> -m core"
+~~~
+
+（PVE 節點在節點上直接執行同樣的 cp／sed／restart。）結果：6 台皆為 `rouser snmpuser priv`、snmpd active；LibreNMS 一律以 authPriv 輪詢，6 台 poll 皆有 `Snmpget` 回應、無逾時。還原：複製 `.bak-priv-日期` 回 snmpd.conf 並重啟 snmpd。
 
 ## 6. 發現：jt-ipam 的 LibreNMS Token 屬於 admin
 
@@ -129,8 +158,9 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 | 2027-10-14 前更換 Grafana 用的 LibreNMS Token | 長期追蹤 |
 | 評估 jt-ipam 改用權限較小的 LibreNMS 使用者 | 待評估 |
 | 「目前告警」面板（`/api/v0/alerts?state=1`） | 可擴充 |
-| 設備清單「系統」欄：LXC 與 PVE 節點都顯示 proxmox（見下方說明），改為「類型」（`os`）＋「發行版」（`features`） | 待做 |
-| adguard、pihole、wireguard、node10～12 的 `features` 為空，補 `extend distro` | 待做 |
+| 設備清單「系統」欄改為「類型」（`os`）＋「發行版」（`features`） | 完成（2026-10-15） |
+| adguard、pihole、wireguard、node10～12 補 `extend distro` | 完成（2026-10-15） |
+| 上述 6 台的 `rouser snmpuser` 加上 `priv`（強制加密） | 完成（2026-10-15） |
 
 ## 參考資料
 
