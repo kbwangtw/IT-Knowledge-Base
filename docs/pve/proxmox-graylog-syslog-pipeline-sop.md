@@ -649,13 +649,78 @@ end
 
 搜尋欄位是否存在要用 `_exists_:src_host`；`src_host:*` 會出現 `'*' or '?' not allowed as first character in WildcardQuery`。`src_host:"(not in ipam)"` 可列出所有來自未登記 IP 的訊息，日後可做成告警或戰情中心面板。
 
+## 13. Synology NAS 的日誌（既有設定補記，2026-10-15）
+
+兩台 Synology NAS 的 DSM 日誌約 9 月底已送進 Graylog，當時沒有寫入本文件；10/15 盤點後補記，並接上第 12 節的 jt-ipam 主機名稱查表。
+
+| 位置 | 設定 |
+| --- | --- |
+| DSM 記錄中心 → 記錄傳送 | 傳送至 syslog 伺服器：Graylog 主機名稱、**UDP 1515**、BSD（RFC 3164），無 TLS；有「傳送測試日誌」按鈕 |
+| Graylog Input | **Synology Syslog UDP**（Syslog UDP，0.0.0.0:1515），與 PVE／PBS 的 Syslog UDP 1514 分開 |
+| Stream | **Synology Syslog**，訊息存入預設 index（graylog_*），不在 infra_syslog |
+| Pipeline | **Synology Syslog**（由 Input Setup Wizard 建立）：Stage 0 為「Synology DSM Authentication Failed Parser」與「Synology DSM Authentication Success Parser」，條件為 at least one rule |
+
+Stage 0 從登入紀錄（例如 `Connection: User [帳號] from [IP] signed in to [DSM] successfully via [password].`）解析出 `synology_nas`、`synology_service`、`synology_user`、`synology_src_ip`、`synology_auth_result`（success／failed）、`synology_auth_method`。
+
+確認方式：
+
+~~~bash
+pct exec <Graylog CTID> -- ss -ulnp | grep -E ':151[45] '   # 1514 與 1515 都由 Graylog（java）監聽
+~~~
+
+Graylog 的 **Input Diagnosis**（Inputs → 該 Input）可看最近 15 分鐘收到的筆數、錯誤數與「Received Message count by Stream」，用來判斷訊息進了哪個 stream。
+
+**接上 jt-ipam 主機名稱**：訊息已有 `synology_src_ip`，不必再用正規表示式從訊息擷取，新增規則放在 Synology Syslog Pipeline 的 **Stage 9**（None or more rules match）：
+
+~~~text
+rule "Enrich - Synology src_ip hostname (jt-ipam)"
+when
+    has_field("synology_src_ip")
+then
+    let ip = to_string($message.synology_src_ip);
+    set_field("src_ip", ip);
+    set_field("src_host", to_string(lookup_value("ipam_hostname", ip), "(not in ipam)"));
+end
+~~~
+
+Rule Simulation（JSON）：`{"message": "test", "synology_src_ip": "<WireGuard 容器 IP>"}` → `src_host` 為 WireGuard 容器的主機名稱。實際登入 DSM 後，訊息出現 `src_ip`、`src_host`。
+
+兩台 NAS 的角色：**tokyo16** 是主要檔案伺服器兼備份伺服器（PBS31 的 Tokyo16 datastore 以 SMB 掛載於此）；**melayu17** 是 tokyo16 的快照複寫目的地。兩台的記錄傳送設定相同，都已確認：「傳送測試日誌」進入 Synology Syslog stream；登入後訊息有 `src_ip`、`src_host`。啟用兩步驟驗證的帳號登入時會有兩筆紀錄：先是 `passed the first authentication of 2FA via [password]`，再是 `signed in to [DSM] successfully via [OTP]`，後者解析為 `synology_auth_method: OTP`、`synology_auth_result: success`。tokyo16 每天約 11～12 萬筆，主要是 PBS 以 SMB 讀取 datastore 產生的 `WinFileService Event: read ... User: <PBS 帳號>`（DSM 的 SMB 傳輸記錄），屬正常行為；需留意預設 index set 的保留期與磁碟用量。
+
+- 經 WireGuard 從外部登入時，NAS 看到的來源是 WireGuard 容器（NAT），`src_host` 因此顯示 WireGuard 主機名稱，可據此辨識 VPN 登入。
+- 欄位名稱與第 12 節相同，`src_host:"<名稱>"` 可同時查 PVE 與 NAS 的紀錄。
+- Stage 0 的條件是 at least one rule：只有登入紀錄會繼續到 Stage 9，正好是有 `synology_src_ip` 的訊息；其他系統事件不受影響。
+- 透過 QuickConnect 連線時日誌記錄的來源 IP（使用者 IP 或 Synology 中繼）尚未觀察到，待有紀錄再確認。
+
+
+**丟棄 PBS 的 SMB 讀取紀錄（2026-10-15）**：tokyo16 是檔案伺服器，使用者的 SMB 讀取紀錄有稽核價值，因此不在 DSM 關閉「讀取」傳輸記錄，改在 Graylog 只丟棄 PBS 帳號的 read。規則加在 Synology Syslog Pipeline 的 **Stage 0**（與兩個 parser 並列，條件仍為 at least one rule）：
+
+~~~text
+rule "Drop - Synology PBS SMB read"
+when
+    contains(to_string($message.message), "WinFileService Event: read") &&
+    contains(to_string($message.message), "User: <PBS 帳號>")
+then
+    drop_message();
+end
+~~~
+
+- 這些訊息不會命中 Stage 0 的 parser，原本停在 Stage 0 但仍寫入 index，所以必須在 Stage 0 丟棄。
+- 其他帳號的 SMB 存取、PBS 的 write／delete 仍保留；DSM 本機的記錄不受影響。
+- `contains()` 區分大小寫，且依賴 DSM 的訊息格式；格式改變時只會讓雜訊回來，不會漏掉其他紀錄。PBS 改用其他帳號時要一併修改。
+- **Rule Simulation 的「Not stored」不代表已丟棄**：模擬的訊息一律不寫入 index，不論是否 drop 都顯示 Not stored。測試時先把 `then` 改成 `set_field("would_drop", "yes");`，確認 PBS 的 read 訊息出現該欄位、其他帳號的訊息沒有，再改回 `drop_message();`。
+- 上線後驗證：PBS 排程執行後搜尋 `source:tokyo16 AND "WinFileService" AND "<PBS 帳號>" AND "read"`，規則上線後應為 0 筆（待確認）。
+- 已存入的紀錄依預設 index set 的保留期（Data Tiering，30～40 天）自然輪替。
+
+待補：DSM「日誌過濾器」送出的日誌種類；確認上述丟棄規則生效；melayu17（快照複寫目的地）登入告警與快照複寫失敗告警；評估 NAS 登入失敗多次的告警（`synology_auth_result:failed`）。
+
 ## 目前完成與待辦
 
 截至 2026-09-22，三項核心告警已完成所述測試範圍；其他監控項目與通知明細仍待完善。
 
 | 範圍 | 目前進度／驗證界線 |
 | --- | --- |
-| Syslog／Stream | 三台 PVE 與 PBS31 接收與 Infrastructure Syslog 已驗證（PBS 於 2026-10-08 加入，見第 11 節） |
+| Syslog／Stream | 三台 PVE 與 PBS31 接收與 Infrastructure Syslog 已驗證（PBS 於 2026-10-08 加入，見第 11 節）；Synology NAS 經 UDP 1515 進 Synology Syslog stream（第 13 節） |
 | Pipeline | 主機、服務、任務、認證、系統錯誤分類已建立；既有五種服務事件測試與任務欄位紀錄保留；2026-10-15 加入 jt-ipam 主機名稱查表（`src_ip`／`src_host`，見第 12 節） |
 | PVE 任務失敗警報 | 完整驗證成功：PVE 9.2.20 Rule 修正後，logger → Pipeline → Event → Gmail；未回填歷史索引 |
 | PVE 多次驗證失敗 | 完整驗證成功：Group by source，node10 三筆 → Last Matched → 正式 Gmail |
@@ -673,7 +738,7 @@ end
 3. **完善 Dashboard**：沿用既有任務看板，核對失敗、警告、啟動數，再加入節點、服務、登入等統計與異常明細。
 4. **後續測試範圍**：現有安全測試鏈路已完成；其他新增告警另行安排安全、可控制的測試事件，逐段記錄原始訊息、分類欄位、Event、實際收件時間，以及 Grace Period 下的重複通知情形。
 
-畫面 0 errors/s 只表示當下沒有顯示處理錯誤，不取代欄位抽查或告警測試。Synology、TP-Link 後續整合仍未列入完成範圍。
+畫面 0 errors/s 只表示當下沒有顯示處理錯誤，不取代欄位抽查或告警測試。Synology NAS 的 DSM 日誌已送入 Graylog（第 13 節）；TP-Link 後續整合仍未列入完成範圍。
 
 ## 可下載文字版
 
