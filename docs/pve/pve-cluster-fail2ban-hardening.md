@@ -147,15 +147,86 @@ ss -lntp | grep ':8006'
 | 三台逐一封包驗證 | **取消** | 原本是確認外部暴力登入有被擋；外部來源已消失，node10 已驗證遞增封鎖與 iptables 命中，三台設定相同 |
 | Fail2Ban 本身 | **保留運作** | 對內網的誤試或異常登入仍有保護 |
 | PVE Firewall | **改為長期可選** | 防的是內網威脅（VM 被入侵當跳板、內網設備掃描）；設錯可能鎖住管理連線或擋到 Corosync／Ceph，目前效益不足以抵過風險。內網人員或設備增加、或有稽核需求時再評估 |
-| PVE `root@pam` 啟用 TOTP | **可選，成本較低** | VPN 為 split tunnel，VPN 用戶端可直達 8006；用戶端被入侵時，PVE 登入多一道驗證。啟用前確認沒有服務以 `root@pam` 帳密（而非 API token）登入 |
+| PVE `root@pam` 啟用 TOTP | **10/15 已完成**（見下節） | VPN 為 split tunnel，VPN 用戶端可直達 8006；用戶端被入侵時，PVE 登入多一道驗證。啟用前確認沒有服務以 `root@pam` 帳密（而非 API token）登入 |
 
 若日後要啟用 PVE Firewall，需先保留主控台與管理連線，盤點 Corosync、Ceph、備份和管理所需流量，再逐台測試。
 
 ignoreip 只放必要且確認可信的管理來源。遇到誤封，先核對來源與日誌，再解除那一筆；不要為了讓管理方便，把整個大網段放行。
 
+## 10/15 補記：`root@pam` 啟用 TOTP 與 token 清理
+
+VPN 為 split tunnel，VPN 用戶端可以直達 8006；用戶端被入侵時，PVE 登入多一道驗證。
+
+### 啟用後影響範圍
+
+| 登入方式 | 啟用 TOTP 後 |
+| --- | --- |
+| Web UI 以 `root@pam` 登入 | 要輸入驗證碼 |
+| 程式以 `root@pam` **帳號密碼**取得 ticket | **會失敗**（唯一需要先排查的風險） |
+| API token（ProxCenter、jt-ipam 等） | 不受影響 |
+| SSH、節點本機 `qm`／`pct`／`pvesh` | 不受影響 |
+
+### 事前排查：有沒有程式用 `root@pam` 密碼登入（唯讀）
+
+~~~bash
+pveum user tfa list
+pveum user token list root@pam
+for n in node10 node11 node12; do
+  echo "== $n"
+  ssh root@$n 'zcat -f /var/log/pveproxy/access.log* 2>/dev/null | grep "POST /api2/json/access/ticket" | awk "{print \$1}" | sort | uniq -c | sort -rn | head -10'
+done
+~~~
+
+本次結果：
+
+- 帳密登入的內網來源只有三個：ct:109（VPN 用戶端經 NAT）、WinClient、家中裝置（1 次），都是人工操作。外部 IP 皆為 10/13 停用 8006 轉送前的紀錄。
+- 最近 30 分鐘的 API 呼叫：ProxCenter、jt-ipam 都用 API token；Web UI session 來自 ct:109（VPN）。
+- 結論：沒有程式以 `root@pam` 帳密登入，可以啟用。
+
+### 清理 `root@pam` 底下的 token
+
+兩個 token 都是 `privsep = 0`（權限與 `root@pam` 相同），而且 token 不經過 TOTP，啟用後會成為權限最大、防護最弱的入口：
+
+| token | 用途 | 使用紀錄 | 處理 |
+| --- | --- | --- | --- |
+| `pdm-admin-pdm` | Proxmox Datacenter Manager 自動建立，已不再使用 | — | 刪除 |
+| `hermesagent` | Hermes Agent（AI 機器人） | 三台 access.log 皆 0；實際用 Hermes 檢查三台後仍為 0 | 先停用（`--expire 1`），觀察約兩週後刪除 |
+
+~~~bash
+pveum user token remove root@pam pdm-admin-pdm
+pveum user token modify root@pam hermesagent --expire 1     # 停用；要恢復改回 --expire 0
+pveum user token list root@pam
+~~~
+
+用 Hermes 實際檢查時，三台的 SSH 紀錄出現來自 Hermes 主機的 root 登入（另一把 RSA 金鑰）：**Hermes 是以 SSH root 金鑰操作節點，不是用 API token**。SSH 不受 PVE TOTP 管轄，AI 機器人又可能受提示注入或誤判影響，因此另列待辦：在 `authorized_keys` 以 `from=` 限制來源，進一步改用只能執行唯讀指令的帳號。
+
+### 新增 TOTP 與復原碼
+
+1. Web UI **Datacenter → Permissions → Two Factor → Add → TOTP**：User `root@pam`、填描述、手機 App 掃描 QR code、輸入驗證碼。
+2. 再 **Add → Recovery Keys**（User `root@pam`）：復原碼只顯示一次，**抄在紙上保存**，不存雲端。
+3. 原頁面不登出，另開無痕視窗以 `root`／Linux PAM 登入，確認會要求驗證碼。
+
+設定存在 `/etc/pve/priv/tfa.cfg`，由 cluster 同步，三台一起生效。
+
+~~~bash
+pveum user tfa list root@pam
+tail -500 /var/log/pveproxy/access.log | awk '$3 ~ /token/ {print $3, $9}' | sort | uniq -c
+~~~
+
+本次結果：`totp` 與 `recovery` 各一筆；無痕視窗登入要求驗證碼並成功；ProxCenter token 啟用後 412 次呼叫全為 200。jt-ipam 呼叫頻率較低，未出現在同一段紀錄中，沒有另外確認。
+
+### 被鎖住時
+
+SSH 不受影響，登入任一節點移除 TOTP 即可（也可在登入畫面用復原碼）：
+
+~~~bash
+pveum user tfa list root@pam
+pveum user tfa delete root@pam --id <TOTP 那一筆的 id>
+~~~
+
 ## 本次結論
 
-已確認 node10 的遞增封鎖與 iptables 命中，三台配置已處理。上游入口已於 10/12 查清（路由器轉送 8006），已改用 WireGuard，8006 轉送已於 10/13 停用並從外部確認。停用後 10/13 12:00～10/14 三台都沒有外部登入嘗試，不再另外追蹤。10/15 起取消三台逐一封包驗證，Fail2Ban 保留運作；PVE Firewall 改為長期可選，另列 `root@pam` 啟用 TOTP 為可選項目。
+已確認 node10 的遞增封鎖與 iptables 命中，三台配置已處理。上游入口已於 10/12 查清（路由器轉送 8006），已改用 WireGuard，8006 轉送已於 10/13 停用並從外部確認。停用後 10/13 12:00～10/14 三台都沒有外部登入嘗試，不再另外追蹤。10/15 起取消三台逐一封包驗證，Fail2Ban 保留運作；PVE Firewall 改為長期可選，`root@pam` 已於 10/15 啟用 TOTP 與復原碼，並清理 `root@pam` 底下兩個 `privsep=0` 的 token（`pdm-admin-pdm` 刪除、`hermesagent` 停用）。待辦：約 10/29 刪除 `hermesagent`；限縮 Hermes Agent 的 SSH root 權限。
 
 - [Fail2Ban 1.1.0 設定參考](https://github.com/fail2ban/fail2ban/blob/1.1.0/config/jail.conf)
 - [Proxmox Firewall 文件](https://pve.proxmox.com/pve-docs/chapter-pve-firewall.html)
