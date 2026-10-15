@@ -4,7 +4,7 @@ title: "PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？"
 permalink: /docs/pve/pve-cluster-fail2ban-hardening/
 date: 2026-09-14
 categories: [PVE, Security, Fail2Ban, Network]
-last_modified_at: 2026-10-14
+last_modified_at: 2026-10-15
 ---
 
 # PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？
@@ -140,13 +140,22 @@ ss -lntp | grep ':8006'
 
 ## 接下來該補哪些事？
 
-先查清管理入口，再規劃來源限制或 VPN。若要啟用 PVE Firewall，需先保留主控台與管理連線，盤點 Corosync、Ceph、備份和管理所需流量，再逐台測試。本文沒有執行這一步。
+**10/15 調整：** 管理入口已改為 WireGuard（WGDashboard 也已啟用 2FA），8006 不再對外，因此後續項目重新評估：
+
+| 項目 | 決定 | 理由 |
+| --- | --- | --- |
+| 三台逐一封包驗證 | **取消** | 原本是確認外部暴力登入有被擋；外部來源已消失，node10 已驗證遞增封鎖與 iptables 命中，三台設定相同 |
+| Fail2Ban 本身 | **保留運作** | 對內網的誤試或異常登入仍有保護 |
+| PVE Firewall | **改為長期可選** | 防的是內網威脅（VM 被入侵當跳板、內網設備掃描）；設錯可能鎖住管理連線或擋到 Corosync／Ceph，目前效益不足以抵過風險。內網人員或設備增加、或有稽核需求時再評估 |
+| PVE `root@pam` 啟用 TOTP | **可選，成本較低** | VPN 為 split tunnel，VPN 用戶端可直達 8006；用戶端被入侵時，PVE 登入多一道驗證。啟用前確認沒有服務以 `root@pam` 帳密（而非 API token）登入 |
+
+若日後要啟用 PVE Firewall，需先保留主控台與管理連線，盤點 Corosync、Ceph、備份和管理所需流量，再逐台測試。
 
 ignoreip 只放必要且確認可信的管理來源。遇到誤封，先核對來源與日誌，再解除那一筆；不要為了讓管理方便，把整個大網段放行。
 
 ## 本次結論
 
-已確認 node10 的遞增封鎖與 iptables 命中，三台配置已處理。上游入口已於 10/12 查清（路由器轉送 8006），已改用 WireGuard，8006 轉送已於 10/13 停用並從外部確認。停用後 10/13 12:00～10/14 三台都沒有外部登入嘗試，不再另外追蹤。尚未完成的是三台逐一封包驗證，以及 PVE Firewall 的完整啟用計畫。
+已確認 node10 的遞增封鎖與 iptables 命中，三台配置已處理。上游入口已於 10/12 查清（路由器轉送 8006），已改用 WireGuard，8006 轉送已於 10/13 停用並從外部確認。停用後 10/13 12:00～10/14 三台都沒有外部登入嘗試，不再另外追蹤。10/15 起取消三台逐一封包驗證，Fail2Ban 保留運作；PVE Firewall 改為長期可選，另列 `root@pam` 啟用 TOTP 為可選項目。
 
 - [Fail2Ban 1.1.0 設定參考](https://github.com/fail2ban/fail2ban/blob/1.1.0/config/jail.conf)
 - [Proxmox Firewall 文件](https://pve.proxmox.com/pve-docs/chapter-pve-firewall.html)

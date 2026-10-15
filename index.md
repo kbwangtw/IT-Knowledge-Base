@@ -46,7 +46,7 @@ last_modified_at: 2026-10-14
 | --- | --- |
 | [把三台 PVE 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop/) | 9/22 修正 PVE 9.2.20 Task Failed；安全測試至正式 Gmail 已完成 |
 | [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 9/22 Group by source、Task Failed 修正、三項告警完整驗證 |
-| [PVE 一直被嘗試登入：確認 Fail2Ban 真的有擋](docs/pve/pve-cluster-fail2ban-hardening/) | 逐層核對日誌、封鎖時間與封包命中；10/12 查出入口是 8006 轉送；10/13 改用 WireGuard 並停用轉送 |
+| [PVE 一直被嘗試登入：確認 Fail2Ban 真的有擋](docs/pve/pve-cluster-fail2ban-hardening/) | 逐層核對日誌、封鎖時間與封包命中；10/12 查出入口是 8006 轉送；10/13 改用 WireGuard 並停用轉送；10/15 取消逐台封包驗證、PVE Firewall 改為可選 |
 | [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](docs/pve/wireguard-remote-access-replace-8006/) | 10/12 WGDashboard、split tunnel、伺服器端 Allowed IPs 只放 /32 的踩雷；iPhone 與筆電已從外部連上，10/13 停用 8006 轉送並從外部確認（更正 10/12 的誤判）、加上 VPN 異常 Gmail 告警 |
 | [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop/) | 9/30 主要流程已實測：LXC 規劃、All-in-one 安裝、密碼與 API 收斂、PBS 備份還原、HA、17 台 Agent（PVE 節點、PBS、Linux 容器、Ubuntu／Windows VM、AD 與 CA）|
 | [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh/) | 10/14 第一版完成：Grafana LXC、以 socat 轉送與 nftables 唯讀接上 Wazuh Indexer；告警數、高風險告警、斷線 Agent、Critical 弱點四格數字與告警趨勢 |
