@@ -48,7 +48,6 @@ LibreNMS 已完成 API 整合，Device、ARP、鄰居與 online status 等資料
 
 待辦：
 
-- 觀察數天無異狀後刪除快照 `pre-v1-upgrade`。
 - jt-ipam 使用的 LibreNMS Token 屬於 admin 且不過期，評估改用權限較小的使用者（見戰情中心（二））。
 
 ## 每日備份加密（2026-10-15）
@@ -66,7 +65,7 @@ rm -rf /root/restore-test                  # 解出的是明文，測完刪除
 
 實測：手動備份 `encrypted=1`、1.3 MB；解密測試成功後，刪除加密前留下的 14 個明文備份目錄（`find /var/backups/jt-ipam -maxdepth 1 -type d -name '2026-*' -exec rm -rf {} +`，只刪日期目錄、不動 `.jtbak`）。
 
-範圍：加密保護的是備份檔被複製到其他地方的情境；取得容器 root 的人仍可直接讀 `/etc/jt-ipam/backend.env`。升級前快照與 PBS 對整個容器的備份仍含 `backend.env`，前者待刪除快照時清除，後者依 PBS 保留規則輪替；PBS 備份本身是否加密另行評估。
+範圍：加密保護的是備份檔被複製到其他地方的情境；取得容器 root 的人仍可直接讀 `/etc/jt-ipam/backend.env`。升級前快照已於同日 doctor 全部通過後刪除；PBS 對整個容器的備份仍含 `backend.env`，依 PBS 保留規則輪替；PBS 備份本身是否加密另行評估。
 
 ## Graylog 整合（2026-10-15）
 
