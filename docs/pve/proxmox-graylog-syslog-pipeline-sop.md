@@ -685,7 +685,7 @@ end
 
 Rule Simulation（JSON）：`{"message": "test", "synology_src_ip": "<WireGuard 容器 IP>"}` → `src_host` 為 WireGuard 容器的主機名稱。實際登入 DSM 後，訊息出現 `src_ip`、`src_host`。
 
-兩台 NAS（melayu17、tokyo16）的記錄傳送設定相同，都已確認：「傳送測試日誌」進入 Synology Syslog stream；登入後訊息有 `src_ip`、`src_host`。啟用兩步驟驗證的帳號登入時會有兩筆紀錄：先是 `passed the first authentication of 2FA via [password]`，再是 `signed in to [DSM] successfully via [OTP]`，後者解析為 `synology_auth_method: OTP`、`synology_auth_result: success`。tokyo16 每天的日誌量明顯較多，需留意預設 index set 的保留期與磁碟用量。
+兩台 NAS 的角色：**tokyo16** 是主要檔案伺服器兼備份伺服器（PBS31 的 Tokyo16 datastore 以 SMB 掛載於此）；**melayu17** 是 tokyo16 的快照複寫目的地。兩台的記錄傳送設定相同，都已確認：「傳送測試日誌」進入 Synology Syslog stream；登入後訊息有 `src_ip`、`src_host`。啟用兩步驟驗證的帳號登入時會有兩筆紀錄：先是 `passed the first authentication of 2FA via [password]`，再是 `signed in to [DSM] successfully via [OTP]`，後者解析為 `synology_auth_method: OTP`、`synology_auth_result: success`。tokyo16 每天約 11～12 萬筆，主要是 PBS 以 SMB 讀取 datastore 產生的 `WinFileService Event: read ... User: <PBS 帳號>`（DSM 的 SMB 傳輸記錄），屬正常行為；需留意預設 index set 的保留期與磁碟用量。
 
 - 經 WireGuard 從外部登入時，NAS 看到的來源是 WireGuard 容器（NAT），`src_host` 因此顯示 WireGuard 主機名稱，可據此辨識 VPN 登入。
 - 欄位名稱與第 12 節相同，`src_host:"<名稱>"` 可同時查 PVE 與 NAS 的紀錄。
