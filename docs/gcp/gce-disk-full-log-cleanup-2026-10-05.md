@@ -27,7 +27,7 @@ last_modified_at: 2026-10-14
 | 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | 已確認；10/14 確認 Cloudflare 為「完整（嚴格）」 |
 | 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | 已確認 14 份快照都是 READY |
 | 資料庫備份 | 從來沒有 | 寶塔計畫任務：每天 14:00 UTC、保留 7 份 | 已確認備份檔完整（9 個 table、Dump completed） |
-| access log 暴增 | 每分鐘約 3,500 筆，爬蟲陷阱 | 連結拿掉 `time()`；Cloudflare 只質詢舊格式網址 | 已確認每分鐘 7 筆，真人不被質詢 |
+| access log 暴增 | 每分鐘約 3,500 筆，爬蟲陷阱 | 連結拿掉 `time()`；Cloudflare 只質詢舊格式網址 | 已確認每分鐘 7 筆，真人不被質詢；10/15 磁碟回到 44% |
 | KindEditor 上傳 API | 未登入可瀏覽、上傳 | Cloudflare 封鎖 `/cms/plugin/kindeditor/php/` | 已確認回 403；未發現入侵跡象 |
 | GCP 防火牆 | RDP、SSH、面板、80/443 全部對全世界開放 | RDP 刪除；SSH、面板限定來源；80/443 只允許 Cloudflare | 直連逾時、經 Cloudflare 回 200；10/14 確認面板與新 SSH 連線可登入 |
 
@@ -530,6 +530,22 @@ ls -l $F
 
 規則上線後約擋下 8.4 萬次請求，通過質詢的比例（CSR）為 0%，代表被擋下的都是機器人。
 
+### 隔天確認（10/15）
+
+~~~bash
+df -h /
+sudo sh -c 'ls -lh --time-style=long-iso /www/wwwlogs/' | grep example.com
+~~~
+
+| 項目 | 結果 |
+| --- | --- |
+| 磁碟使用率 | 48% → 44%（已用 6.1G，剩 7.8G） |
+| 10/13 的 access log | 571M 壓縮後 36M |
+| 10/14 的 access log | 85M，幾乎都是 01:45 UTC 規則生效前寫的 |
+| 10/15 的 access log | 2 小時 275K，約每天 3M，回到 10/6 以前的水準 |
+| logrotate | 每天 00:00 輪替，保留份數與壓縮都正常 |
+
+
 ## 9. KindEditor：上傳 API 不用登入就能用（2026-10-14 補記）
 
 查爬蟲時順便搜尋了讀取 `$_GET` 的程式，看到 CMS 裡附帶的 KindEditor 編輯器：`cms/plugin/kindeditor/php/upload_json.php` 和 `file_manager_json.php`。KindEditor 官方範例的 PHP 不檢查登入，舊版也有公開的上傳繞過手法。
@@ -572,7 +588,7 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 | `file_manager_json.php`、`upload_json.php` | 都是 HTTP 403 |
 | 主機 log 裡的 kindeditor | 維持部署前的 2 筆，部署後的請求沒有到達主機 |
 
-需要上傳圖片時，到 Cloudflare 把 `kindeditor-block` 改成「已停用」，用完立刻改回「使用中」。
+需要上傳圖片時，到 Cloudflare 把 `kindeditor-block` 改成「已停用」，用完立刻改回「使用中」。10/15 已通知會用後台的同事。
 
 ## 排查時踩到的坑
 
@@ -594,9 +610,7 @@ Apache 看不到訪客真實 IP，沒辦法只放行管理者；前台圖片放�
 
 | 優先 | 項目 |
 | --- | --- |
-| 高 | 隔天確認 logrotate 第一次輪替、磁碟維持在 43% 左右 |
 | 低 | 同一筆 syslog 在 Cloud Logging 出現兩次，確認是否為 `/var/log/syslog` 與 `/var/log/messages` 重複收集 |
-| 中 | 通知會用 CMS 後台的人：編輯器上傳已關閉，需要時聯絡管理者暫時開啟 |
 | 中 | 檢查 `$_GET['pid']`、`$_GET['news']`、`$_GET['n']` 是否直接放進 SQL（SQL injection） |
 | 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
 | 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它）。7.4 可以正常執行，改完就不必再關掉 `E_DEPRECATED` |
