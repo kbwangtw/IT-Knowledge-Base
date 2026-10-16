@@ -4,7 +4,7 @@ title: "Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程�
 permalink: /docs/pve/ceph-bluestore-slow-op-backup-schedule/
 date: 2026-10-14
 categories: [PVE, Ceph, PBS, Backup, Troubleshooting]
-last_modified_at: 2026-10-15
+last_modified_at: 2026-10-16
 ---
 
 # Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？
@@ -229,6 +229,37 @@ pve-daily-check.sh
 - 第 4 段抓的是 `pvenode task list` 表格的第 6、8 欄（開始時間、狀態）；PVE 改版若表格欄位變動，這段可能顯示錯位，改看原始輸出即可。
 - 腳本只讀取，不改任何設定；也沒有排程與通知。觀察一段時間、retries 的正常範圍確定後，再考慮改成「只有異常才通知」。
 - 這支腳本放在 node10 本機，重灌或換機時要重新建立。
+
+## 9. slow ops 歷史（2026-10-16 回查）
+
+為判斷慢操作是長期現象還是偶發，從三台的 journal 回查 OSD 回報 `slow ops` 的日子（單一操作超過 30 秒未完成才會回報）：
+
+~~~bash
+# node10 本機
+journalctl -u ceph-osd@0 --no-pager | grep 'slow ops' | awk '{print $1, $2}' | uniq -c | tail -20
+# 另外兩台
+for n in node11:1 node12:2; do
+  h=${n%:*}; o=${n#*:}
+  echo "== osd.$o ($h) =="
+  ssh root@$h "journalctl -u ceph-osd@$o --no-pager | grep 'slow ops' | awk '{print \$1, \$2}' | uniq -c | tail -20"
+done
+~~~
+
+| 日期 | osd.0（node10） | osd.1（node11） | osd.2（node12） | 判讀 |
+| --- | --- | --- | --- | --- |
+| 2～3 月、5/29、6/17、8 月 | 無紀錄* | 零星（22～35） | 零星（1～81） | 偶發 |
+| **5/4～5/5** | 無紀錄* | 31,971＋336 | 30,802＋373 | 整個 cluster 的事件 |
+| **7/21** | **65,215** | 0 | 0 | 只有 osd.0，規模最大 |
+| **9/24** | 207 | 31 | 41 | 三顆都有，osd.0 最多 |
+| 10 月至 10/16 | 0 | 0 | 0 | 無 |
+
+\* node10 的 journal（4 GB，systemd 預設上限）最早只到 7/21，更早的紀錄已被輪替，無法比對；node11、node12 保留到 2～3 月。
+
+- 10 月的 `BLUESTORE_SLOW_OP_ALERT` 與每晚的 `aio_submit retries` 都沒有伴隨 `slow ops` 回報，代表重試後在 30 秒內完成，比 5/4、7/21 輕微得多。
+- 7/21 只有 osd.0 回報，其他 OSD 沒有因等待 osd.0 而回報，可能是 node10 當時與其他節點斷線或 osd.0 很快被標為 down（推測，未確認）。該日第一筆紀錄的 ceph-osd 程序編號很小，像是剛開機不久；是否與 SMART 的 Unsafe Shutdowns（15 次）有關無法確認。
+- 9/24 接近 [9/20～9/22 重開與 OSD 金鑰修復](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/)，是否相關未確認。
+- 5/4、7/21、9/24 當天的事件（停電、網路、維護）目前沒有紀錄可對照。日後若有停電或重開，記下日期，方便與 log 比對。
+- 要追 7/21 時可在 node10 查 `journalctl --list-boots --no-pager | head` 與 `last -x reboot shutdown | head -20`，看當時是否有重開或異常關機。
 
 ## 相關紀錄
 
