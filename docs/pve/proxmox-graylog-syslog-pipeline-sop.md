@@ -941,7 +941,7 @@ ssh root@node11 "systemctl list-timers --no-pager | grep -E 'pve-(node|storage)'
 
 結果：複製後兩台 storage 腳本 `diff` 相同；三台皆 `online`；兩個 oneshot 服務為 `inactive`（執行完畢、沒有 failed）；node11 有 `pve-node-monitor.timer`（每分鐘）與 `pve-storage-monitor.timer`（每 5 分鐘）。在 node11 執行 `logger -t PVE-NODE-MONITOR "PVE_NODE_MONITOR_ERROR manual-test-node11"`，收到「PVE Node 狀態離線」通知，Backlog 的 `source` 為 node11。
 
-node12 以相同步驟部署（安裝 jq、備份、複製兩支腳本與兩個單元、啟用 timer）。部署前 node12 的 storage 腳本與 node11 改版前的備份 `diff` 無差異。驗證結果與 node11 相同：三台皆 `online`、兩個 oneshot 服務 `inactive`、兩個 timer 已排程。完成後三台 md5 一致：
+node12 以相同步驟部署（安裝 jq、備份、複製兩支腳本與兩個單元、啟用 timer）。部署前 node12 的 storage 腳本與 node11 改版前的備份 `diff` 無差異。驗證結果與 node11 相同：三台皆 `online`、兩個 oneshot 服務 `inactive`、兩個 timer 已排程；`logger` 測試（`manual-test-node12`）收到通知信。完成後三台 md5 一致：
 
 ~~~bash
 for h in node10 node11 node12; do echo "== $h"; ssh root@$h "md5sum /usr/local/sbin/pve-*-monitor.sh"; done
