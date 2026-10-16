@@ -793,8 +793,8 @@ Node 離線與三個儲存告警的訊息不是 PVE 原生 log，由節點上的
 
 | 腳本 | 節點 | 排程（systemd timer） | 內容 |
 | --- | --- | --- | --- |
-| `/usr/local/sbin/pve-node-monitor.sh` | node10、node11（10/16 加入 node11） | 每 1 分鐘 | `pvesh get /cluster/resources --type node`，狀態不是 online 的節點寫出 `PVE_NODE_OFFLINE node=<節點> status=<狀態>`；查詢失敗寫 `PVE_NODE_MONITOR_ERROR` |
-| `/usr/local/sbin/pve-storage-monitor.sh` | 三台（node10、node11 含共用儲存段落，node12 沒有） | 每 5 分鐘 | 本機 `/` 與 `pve/data`（LVM Thin 的 data、metadata）用量 ≥ 80% 寫 `STORAGE_WARNING`、≥ 90% 寫 `STORAGE_CRITICAL`；node10、node11 另外檢查共用儲存 PBS31、VM_Pool、cephfs（`pvesm status`），狀態不是 active 寫 `STORAGE_UNAVAILABLE` |
+| `/usr/local/sbin/pve-node-monitor.sh` | 三台（10/16 加入 node11、node12） | 每 1 分鐘 | `pvesh get /cluster/resources --type node`，狀態不是 online 的節點寫出 `PVE_NODE_OFFLINE node=<節點> status=<狀態>`；查詢失敗寫 `PVE_NODE_MONITOR_ERROR` |
+| `/usr/local/sbin/pve-storage-monitor.sh` | 三台，內容相同 | 每 5 分鐘 | 本機 `/` 與 `pve/data`（LVM Thin 的 data、metadata）用量 ≥ 80% 寫 `STORAGE_WARNING`、≥ 90% 寫 `STORAGE_CRITICAL`；另外檢查共用儲存 PBS31、VM_Pool、cephfs（`pvesm status`），狀態不是 active 寫 `STORAGE_UNAVAILABLE` |
 
 `pve-node-monitor.sh`（需要 `jq`）：
 
@@ -813,7 +813,7 @@ while IFS='|' read -r NODE STATUS; do
 done
 ~~~
 
-`pve-storage-monitor.sh`（node10、node11 版本；node12 沒有最後的共用儲存段落）：
+`pve-storage-monitor.sh`（三台相同）：
 
 ~~~bash
 #!/bin/bash
@@ -841,7 +841,7 @@ for M in data metadata; do
     fi
 done
 
-# Shared Storage：由 node10、node11 監控，重複訊息由 Graylog 合併
+# Shared Storage：由三台節點監控，重複訊息由 Graylog 合併
 for STORAGE in PBS31 VM_Pool cephfs; do
     LINE=$(pvesm status 2>/dev/null | awk -v s="$STORAGE" '$1 == s {print}')
     [ -z "$LINE" ] && continue
@@ -867,7 +867,7 @@ done
 
 | 發現 | 影響 | 建議 |
 | --- | --- | --- |
-| Node 離線檢查與共用儲存檢查**只在 node10** | node10 本身離線時不會有 `PVE_NODE_OFFLINE`，共用儲存也無人檢查；node10 離線仍會由 node11、node12 的 corosync 觸發「Corosync 成員離線」 | **已處理（10/16）**：node11 部署相同腳本與 timer（見 15-5） |
+| Node 離線檢查與共用儲存檢查**只在 node10** | node10 本身離線時不會有 `PVE_NODE_OFFLINE`，共用儲存也無人檢查；node10 離線仍會由 node11、node12 的 corosync 觸發「Corosync 成員離線」 | **已處理（10/16）**：node11、node12 部署相同腳本與 timer，三台一致（見 15-5） |
 | `PVE_NODE_MONITOR_ERROR` 沒有告警 | node10 查不到叢集狀態（例如失去 quorum）時只寫 log | **已處理（10/16）**：Node 離線告警條件加入 `OR "PVE_NODE_MONITOR_ERROR"`。以 `logger -t PVE-NODE-MONITOR "PVE_NODE_MONITOR_ERROR manual-test-20261016"` 測試，已收到通知信。node10 重開機時若 timer 早於叢集服務執行，可能多寄一封，屬預期 |
 | 共用儲存在 `pvesm status` 找不到時直接略過 | 儲存被移除或改名時不會告警 | 留意；改名時同步修改腳本 |
 | 儲存空間警告 Grace 5 分鐘 | 超過 80% 後每 5 分鐘寄一封，可能持續數天 | **已處理（10/16）**：警告改為 24 小時；嚴重維持 5 分鐘 |
@@ -876,9 +876,9 @@ done
 
 node10 的 `/root/graylog-alert-test-all.sh`、`graylog-alert-test-remaining.sh` 是建立告警時的測試腳本，日後驗證告警仍有效時可參考。
 
-### 15-5 node11 加入節點與共用儲存檢查（2026-10-16）
+### 15-5 三台都執行節點與共用儲存檢查（2026-10-16）
 
-兩台互相監控：node10 離線由 node11 回報，node11 離線由 node10 回報；node12 離線時兩台都會寫 `PVE_NODE_OFFLINE`，由「PVE Node 狀態離線」的 5 分鐘 Grace 合併成一封。三個儲存告警是「5 分鐘內 count > 0」，兩台各送一筆仍只產生一次事件。
+先加入 node11，讓 node10 離線時也有人回報；再加入 node12，讓三台設定一致（node12 對監控的額外效益只在 node10、node11 同時離線時，此時 node12 失去 quorum，多半寫出 `PVE_NODE_MONITOR_ERROR`）。任一台離線時其他兩台都會寫 `PVE_NODE_OFFLINE`，由「PVE Node 狀態離線」的 5 分鐘 Grace 合併成一封。三個儲存告警是「5 分鐘內 count > 0」，兩台各送一筆仍只產生一次事件。
 
 systemd 單元（node10 原有，複製到 node11）：
 
@@ -941,7 +941,13 @@ ssh root@node11 "systemctl list-timers --no-pager | grep -E 'pve-(node|storage)'
 
 結果：複製後兩台 storage 腳本 `diff` 相同；三台皆 `online`；兩個 oneshot 服務為 `inactive`（執行完畢、沒有 failed）；node11 有 `pve-node-monitor.timer`（每分鐘）與 `pve-storage-monitor.timer`（每 5 分鐘）。在 node11 執行 `logger -t PVE-NODE-MONITOR "PVE_NODE_MONITOR_ERROR manual-test-node11"`，收到「PVE Node 狀態離線」通知，Backlog 的 `source` 為 node11。
 
-還原：`systemctl disable --now pve-node-monitor.timer`，刪除 node11 的 node-monitor 腳本與兩個單元後 `daemon-reload`；storage 腳本以 `.bak-日期` 還原。
+node12 以相同步驟部署（安裝 jq、備份、複製兩支腳本與兩個單元、啟用 timer）。部署前 node12 的 storage 腳本與 node11 改版前的備份 `diff` 無差異。驗證結果與 node11 相同：三台皆 `online`、兩個 oneshot 服務 `inactive`、兩個 timer 已排程；`logger` 測試（`manual-test-node12`）收到通知信。完成後三台 md5 一致：
+
+~~~bash
+for h in node10 node11 node12; do echo "== $h"; ssh root@$h "md5sum /usr/local/sbin/pve-*-monitor.sh"; done
+~~~
+
+還原（node11、node12）：`systemctl disable --now pve-node-monitor.timer`，刪除 node-monitor 腳本與兩個單元後 `daemon-reload`；storage 腳本以 `.bak-日期` 還原。
 
 ## 目前完成與待辦
 
