@@ -4,7 +4,7 @@ title: "在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）"
 date: 2026-09-29
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-sop/
-last_modified_at: 2026-10-14
+last_modified_at: 2026-10-16
 ---
 
 # 在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）
@@ -1805,7 +1805,9 @@ rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿
 | 5402／5501／5502 sudo | 約 3,900 | 只剩 ProxCenter 與人員 | 子規則 100110～100112（11-5） |
 | 510 rootcheck | 1,440 | 0 | 子規則 100120（11-6） |
 
-**尚未處理**：31101／31301（librenms 的 Web 400 與 Nginx 錯誤）、61104（Windows 服務啟動類型變更）、750（登錄檔 FIM）、550（檔案 FIM）。
+**尚未處理**（當時狀態）：31101／31301（librenms 的 Web 400 與 Nginx 錯誤）、61104（Windows 服務啟動類型變更）、750（登錄檔 FIM）、550（檔案 FIM）。
+
+> 後續：61104、750、550 見 11-8；31101 見 11-9；31301 仍在觀察，見 11-9 末的觀察項目。
 
 **維護提醒**：
 
@@ -2024,7 +2026,9 @@ pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:poll 13 -m core" 2>&1
 
 還原：`cp -a $(ls -t /etc/snmp/snmpd.conf.bak-* | head -1) /etc/snmp/snmpd.conf && systemctl restart snmpd`。
 
-待改善：Graylog 目前以 v2c 輪詢（community 明文傳送），其他設備為 v3，之後可改為 v3 一致。
+待改善（當時狀態）：Graylog 目前以 v2c 輪詢（community 明文傳送），其他設備為 v3，之後可改為 v3 一致。
+
+> 後續：已於 11-11 改為 v3（device 17）。
 
 ### 11-11 延伸：未監控的 LXC 加入 LibreNMS（SNMPv3 SHA／AES）
 
@@ -2106,7 +2110,7 @@ chmod 700 /root/snmp-v3-lnms.sh
 - 加入前先確認主機名稱解析得到：`pct exec 102 -- getent hosts <主機名稱>`；兩台 DNS 伺服器都要加紀錄。
 - 安裝時的 `perl: warning: Setting locale failed` 是容器內沒有 `en_US.UTF-8` 語系，不影響功能。
 - jt-ipam 下一次同步時會自動帶入新設備，`devices_seen` 隨之增加。
-- 待改善：原有 9 台由 MD5／DES 升級為 SHA／AES，並移除設定中殘留的 v2c community（LibreNMS 已不使用）。
+- 待改善（當時狀態）：原有 9 台由 MD5／DES 升級為 SHA／AES，並移除設定中殘留的 v2c community（LibreNMS 已不使用）。後續：已於 11-12 完成。
 
 **Graylog 由 v2c 改為 v3**（device 17）：先備份設定，再以 `snmp-v3-add.sh 105 Node10` 覆蓋為只有 v3 的設定，接著直接修改 LibreNMS 資料庫，帳號密碼從既有 v3 設備複製（不經過畫面）：
 
