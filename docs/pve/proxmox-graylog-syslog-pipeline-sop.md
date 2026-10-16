@@ -771,10 +771,10 @@ rm /root/event-defs.json
 | --- | --- | --- | --- | --- |
 | Ceph 健康警告 | `message:"Health check failed:" AND NOT message:"cmd=" AND NOT message:"dispatch" AND NOT message:"finished"` | 5／5 | count > 0 | 5／10 |
 | PVE Corosync 成員離線 | `message:corosync AND message:"Members left:"` | 5／5 | count > 0 | 5／10 |
-| PVE Node 狀態離線 | `"PVE_NODE_OFFLINE"`（15-3 腳本產生） | 1／1 | 每筆 | 5／10 |
-| PVE 任務失敗警報 | `pve_event_type:task_failed` | 5／5 | 每筆 | 5／**0** |
+| PVE Node 狀態離線 | `"PVE_NODE_OFFLINE" OR "PVE_NODE_MONITOR_ERROR"`（15-3 腳本產生；10/16 加入後者） | 1／1 | 每筆 | 5／10 |
+| PVE 任務失敗警報 | `pve_event_type:task_failed` | 5／5 | 每筆 | 5／5（10/16 由 0 改為 5） |
 | PVE 儲存空間嚴重 | `message:"STORAGE_CRITICAL"`（15-3） | 5／5 | count > 0 | 5／10 |
-| PVE 儲存空間警告 | `message:"STORAGE_WARNING"`（15-3） | 5／5 | count > 0 | 5／10 |
+| PVE 儲存空間警告 | `message:"STORAGE_WARNING"`（15-3） | 5／5 | count > 0 | **24 小時**／10（10/16 由 5 分鐘改為 24 小時） |
 | PVE 儲存設備離線 | `message:"STORAGE_UNAVAILABLE"`（15-3） | 5／5 | count > 0 | 5／10 |
 | PVE 多次驗證失敗 | `device_type:"pve" AND event_category:"authentication" AND (message:failure OR message:failed)` | 5／5 | 依 `source`，≥ 3 | 5／50 |
 | PVE 服務異常 | `device_type:"pve" AND event_category:"system_error" AND message:"Failed with result"` | 5／5 | 每筆 | 5／50 |
@@ -868,10 +868,10 @@ done
 | 發現 | 影響 | 建議 |
 | --- | --- | --- |
 | Node 離線檢查與共用儲存檢查**只在 node10** | node10 本身離線時不會有 `PVE_NODE_OFFLINE`，共用儲存也無人檢查；node10 離線仍會由 node11、node12 的 corosync 觸發「Corosync 成員離線」 | 在 node11 也部署相同腳本與 timer，重複訊息由 5 分鐘 Grace 合併（待評估） |
-| `PVE_NODE_MONITOR_ERROR` 沒有告警 | node10 查不到叢集狀態（例如失去 quorum）時只寫 log | Node 離線告警條件改為 `"PVE_NODE_OFFLINE" OR "PVE_NODE_MONITOR_ERROR"`（待評估） |
+| `PVE_NODE_MONITOR_ERROR` 沒有告警 | node10 查不到叢集狀態（例如失去 quorum）時只寫 log | **已處理（10/16）**：Node 離線告警條件加入 `OR "PVE_NODE_MONITOR_ERROR"`。node10 重開機時若 timer 早於叢集服務執行，可能多寄一封，屬預期 |
 | 共用儲存在 `pvesm status` 找不到時直接略過 | 儲存被移除或改名時不會告警 | 留意；改名時同步修改腳本 |
-| 儲存空間警告 Grace 5 分鐘 | 超過 80% 後每 5 分鐘寄一封，可能持續數天 | 警告的 Grace 可拉長（例如 24 小時），嚴重維持較短（待評估） |
-| PVE 任務失敗警報 Backlog 0 | 通知信不附原始訊息，看不出是哪個任務 | 改為 5 |
+| 儲存空間警告 Grace 5 分鐘 | 超過 80% 後每 5 分鐘寄一封，可能持續數天 | **已處理（10/16）**：警告改為 24 小時；嚴重維持 5 分鐘 |
+| PVE 任務失敗警報 Backlog 0 | 通知信不附原始訊息，看不出是哪個任務 | **已處理（10/16）**：改為 5 |
 | 腳本與 timer 只存在節點上 | 重灌或換節點時容易遺漏 | 本節保存腳本內容；timer／service 單元內容待補（`systemctl cat pve-node-monitor.timer pve-storage-monitor.timer`） |
 
 node10 的 `/root/graylog-alert-test-all.sh`、`graylog-alert-test-remaining.sh` 是建立告警時的測試腳本，日後驗證告警仍有效時可參考。
