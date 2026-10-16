@@ -2257,6 +2257,47 @@ systemctl restart wazuh-manager
 - `full_log` 含 ANSI 顏色碼（`\u001b[31m`），從 `alerts.json` 以 Python 解析 JSON 取出，才是 logtest 能用的原始字串。
 - 根治方式是 LibreNMS 修正 `api_functions.inc.php` 對空參數的處理，或 jt-ipam 不再呼叫無資料的 `links`；任一方修正後可移除 100141 與 100140 的 `links` 條件。
 
+### 11-14 LibreNMS 裝置群組改為動態（2026-10-16）
+
+LibreNMS 原有三個 static 群組，由人工維護成員。改為 dynamic，讓新加入的設備依欄位自動歸類。
+
+**盤點**（LibreNMS 容器，唯讀；容器不在本機時 `pct exec` 會顯示 `Configuration file ... does not exist`，先以 `ls /etc/pve/nodes/*/lxc/<CTID>.conf` 找所在節點）：
+
+~~~bash
+pct exec 102 -- mysql librenms -e "SELECT device_id, hostname, os, hardware, features, sysDescr FROM devices ORDER BY device_id;"
+pct exec 102 -- mysql librenms -e "SELECT id, name, type, rules FROM device_groups\G"
+pct exec 102 -- mysql librenms -e "SELECT g.name, d.hostname FROM device_group_device gd JOIN device_groups g ON g.id=gd.device_group_id JOIN devices d ON d.device_id=gd.device_id ORDER BY g.name, d.hostname;"
+~~~
+
+| 類型 | `os` | `features` | `sysDescr` 的 kernel |
+| --- | --- | --- | --- |
+| PVE 節點（3） | proxmox | `Debian 13.7/PVE 9.2.21` | `-pve` |
+| LXC（10） | proxmox | 只有發行版（Debian／Ubuntu） | `-pve`（共用主機 kernel） |
+| pbs31（NAS 上的 VM） | proxmox | `Debian 13.7` | `-pve`（PBS 使用 Proxmox kernel） |
+| Synology NAS（2） | dsm | NULL | `4.4.302+` |
+
+- `hardware` 全部是 `Generic x86 64-bit`，無法區分實體與虛擬。
+- `os` 對 LXC 也顯示 proxmox（偵測到 `-pve` kernel），不能用來排除 PVE 節點。
+- 可區分的特徵：kernel 是 `-pve` 而 `features` 沒有 `PVE` 者為 LXC 或 pbs31；`features` 有 `PVE`（distro 腳本辨識出 PVE）者為節點。
+- 目前未加入 Windows；UBClient、WinClient 刻意不納入 LibreNMS（監控訊息過多）。
+
+**規則**（Devices → Manage Groups → Edit → Type 改為 Dynamic）：
+
+| 群組 | 規則 | 成員 |
+| --- | --- | --- |
+| Virtual_Group | `devices.sysDescr` contains `-pve` AND `devices.features` not contains `PVE` | 10 台 LXC、pbs31 |
+| Physical_Group | `devices.features` contains `PVE` | node10、node11、node12 |
+| Storage_Group | `devices.os` equal `dsm` | tokyo16、melayu17 |
+
+**結果**：三個群組 `type` 皆為 dynamic、`valid: true`；成員與修改前的 static 群組完全相同（Physical 3、Storage 2、Virtual 11）。
+
+注意事項：
+
+- 規則依賴 `features`（`extend distro`）。新 LXC 以 `snmp-v3-add.sh` 加入會一併安裝 distro 並自動進入 Virtual_Group；手動設定 SNMP 未裝 distro 時 `features` 為 NULL，不會進任何群組。新 PVE 節點同理，要有 distro 才會進 Physical_Group。
+- 日後加入 DC01、DC02 時，Virtual_Group 加上 `OR devices.os equal windows`（環境中納管的 Windows 只有 DC，皆為 VM）。Windows Server 內建 SNMP 服務已列為淘汰，屆時評估是否改以既有 Wazuh Agent 監控即可。
+- 有自己 kernel 的 VM（例如 QEMU 的 Linux VM）不符合 Virtual_Group 規則，若日後納管需另加條件（例如 hostname）。
+- 檢查是否有 LibreNMS 告警規則綁定群組：`SELECT r.name, g.name FROM alert_group_map m JOIN alert_rules r ON r.id=m.rule_id JOIN device_groups g ON g.id=m.group_id;`
+
 ## 12. 弱點偵測結果與修補（2026-10-03）
 
 ### 12-1 查詢目前的弱點
