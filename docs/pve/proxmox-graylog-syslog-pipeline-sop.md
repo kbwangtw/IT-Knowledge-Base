@@ -4,7 +4,7 @@ title: "把三台 PVE 的日誌集中到 Graylog"
 date: 2026-09-17
 categories: [PVE, Graylog, Syslog]
 permalink: /docs/pve/proxmox-graylog-syslog-pipeline-sop/
-last_modified_at: 2026-10-15
+last_modified_at: 2026-10-16
 ---
 
 # 把三台 PVE 的日誌集中到 Graylog
@@ -709,10 +709,34 @@ end
 - 其他帳號的 SMB 存取、PBS 的 write／delete 仍保留；DSM 本機的記錄不受影響。
 - `contains()` 區分大小寫，且依賴 DSM 的訊息格式；格式改變時只會讓雜訊回來，不會漏掉其他紀錄。PBS 改用其他帳號時要一併修改。
 - **Rule Simulation 的「Not stored」不代表已丟棄**：模擬的訊息一律不寫入 index，不論是否 drop 都顯示 Not stored。測試時先把 `then` 改成 `set_field("would_drop", "yes");`，確認 PBS 的 read 訊息出現該欄位、其他帳號的訊息沒有，再改回 `drop_message();`。
-- 上線後驗證：PBS 排程執行後搜尋 `source:tokyo16 AND "WinFileService" AND "<PBS 帳號>" AND "read"`，規則上線後應為 0 筆（待確認）。
+- 上線後驗證：PBS 排程執行後搜尋 `source:tokyo16 AND "WinFileService" AND "<PBS 帳號>" AND "read"`，規則上線後應為 0 筆（待確認）。PBS 的讀取每天約在台灣時間 14:00 出現一批（讀取各備份點的 `index.json.blob`），晚上的備份時段沒有，因此要等規則上線後經過一次 14:00 批次才能判斷。
 - 已存入的紀錄依預設 index set 的保留期（Data Tiering，30～40 天）自然輪替。
 
 待補：DSM「日誌過濾器」送出的日誌種類；確認上述丟棄規則生效；melayu17（快照複寫目的地）登入告警與快照複寫失敗告警；評估 NAS 登入失敗多次的告警（`synology_auth_result:failed`）。
+
+## 14. 顯示時區改為台灣時間（2026-10-16）
+
+內建的 admin 帳號（root user）由 `server.conf` 設定，網頁的 User Details → Preferences 無法修改，預設 Timezone 為 UTC，搜尋時間與訊息時間都要自行加 8 小時，容易判讀錯誤。在 Graylog 容器內修改：
+
+~~~bash
+cp -a /etc/graylog/server/server.conf /etc/graylog/server/server.conf.bak-$(date +%Y%m%d)
+if grep -qE '^#?\s*root_timezone' /etc/graylog/server/server.conf; then
+  sed -i -E 's|^#?\s*root_timezone.*|root_timezone = Asia/Taipei|' /etc/graylog/server/server.conf
+else
+  echo 'root_timezone = Asia/Taipei' >> /etc/graylog/server/server.conf
+fi
+grep -n 'root_timezone' /etc/graylog/server/server.conf          # 只剩 root_timezone = Asia/Taipei
+grep -n 'ROOT_TIMEZONE' /etc/default/graylog-server              # 應無輸出，否則環境變數會蓋過 server.conf
+systemctl restart graylog-server                                 # 約 1～2 分鐘，期間 UDP syslog 漏收
+curl -s http://127.0.0.1:9000/api/system/lbstatus; echo          # ALIVE
+~~~
+
+- 只改變 admin 帳號的顯示時區；資料與 Graylog 內部時間仍為 UTC。
+- 重新登入後，Preferences 的 Timezone 與搜尋時間範圍下方的「All timezones using」都顯示 Asia/Taipei，Absolute 時間範圍可直接填台灣時間。
+- 先前以 UTC 填寫的時間範圍 preset 要改成台灣時間。
+- 另一種做法是建立個人管理帳號（Admin 角色、時區 Asia/Taipei）供日常使用，不必重啟，admin 留作緊急備用。
+- 升級 graylog-server 時若 apt 詢問 `server.conf`，選保留現有版本。
+- 還原：把 `.bak-日期` 複製回 `server.conf` 並重啟。
 
 ## 目前完成與待辦
 
