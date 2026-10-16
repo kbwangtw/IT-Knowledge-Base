@@ -956,14 +956,14 @@ ssh root@node11 "systemctl list-timers --no-pager | grep -E 'pve-(node|storage)'
 | PVE 服務異常 | 維持已完成（9/18 Pipeline、Event、Gmail） |
 | Event Definition | PVE 任務失敗警報已啟用，每 5 分鐘查最近 5 分鐘，High |
 | Email | Gmail AUTH、測試信及上述三項正式告警均已確認 |
-| 通知綁定 | 已儲存，Grace Period 5 minutes、Message Backlog 0 |
+| 通知綁定 | 已儲存，Grace Period 5 minutes、Message Backlog 0（2026-10-16 Backlog 改為 5；全部告警設定見第 15 節） |
 | Dashboard | 既有任務看板八個 Widget 的紀錄保留；整體 Infrastructure Dashboard 待完善 |
 | 端到端測試 | 9/22 logger 安全測試經 Syslog、Pipeline、Event 到正式 Gmail 已完成；不等同真實 VM／CT 故障操作 |
 
 後續依序處理：
 
-1. **其他重要 PVE alerts**：接續評估 Ceph、Cluster／Corosync、儲存空間、節點異常等事件；不用把每個分類都變成 Email。
-2. **改善 Email event details**：驗證 Summary Template，補齊 node、task、VM／CT ID、UPID 與錯誤內容；評估 Custom Fields、Backlog 與模板後再實測。
+1. **其他重要 PVE alerts**：接續評估 Ceph、Cluster／Corosync、儲存空間、節點異常等事件；不用把每個分類都變成 Email。（後續：已建立，2026-10-16 盤點見第 15 節）
+2. **改善 Email event details**：驗證 Summary Template，補齊 node、task、VM／CT ID、UPID 與錯誤內容；評估 Custom Fields、Backlog 與模板後再實測。2026-10-16 待辦：預設信件把 Backlog 整筆欄位倒出、`Source` 顯示 Graylog 本身，看不出哪台出問題。改為中文自訂範本（Subject、Body Template、HTML Body Template，以 `${foreach backlog message}` 列出 `${message.source}` 與 `${message.message}`），先用 Execute Test Notification 測試；注意 `${message.timestamp}` 可能為 UTC。先確認 Alerts → Notifications 有幾個通知、各告警共用哪一個。
 3. **完善 Dashboard**：沿用既有任務看板，核對失敗、警告、啟動數，再加入節點、服務、登入等統計與異常明細。
 4. **後續測試範圍**：現有安全測試鏈路已完成；其他新增告警另行安排安全、可控制的測試事件，逐段記錄原始訊息、分類欄位、Event、實際收件時間，以及 Grace Period 下的重複通知情形。
 
