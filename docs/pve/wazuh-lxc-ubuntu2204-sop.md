@@ -28,7 +28,7 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 8 | 備份與 HA | 已實測 | 2026-09-30：既有 all 排程已涵蓋；手動備份完成（受保護）；node12→node10 遷移驗證通過；還原測試（CT 114）通過；已加入 HA（ct:112 started） |
 | 9 | 接上 Agent | 已實測 | 2026-09-30：三台 PVE 節點（001～003）與 7 台 Debian 13 容器（004～010）、UBClient（011）、WinClient（012）、ai（013）皆 Active；DC02（014）、DC01（015）、ca（016）、pbs31（017）皆 Active，AD／CA 前後檢查一致；共 17 台 |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
-| 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；剩 31301 PHP 警告觀察中 |
+| 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；10/16 以子規則 100141 處理 31301（11-13） |
 | 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目；10/14 ubclient 套件更新並修正 logrotate 重複設定（12-6） |
 | 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
 | 14 | WireGuard VPN 健康監控 | 完成 | 2026-10-13：ct:109 內部檢查（100150）＋ Manager 外部檢查 ct:109（100151）；`syslog_output` 只把 wireguard 群組送 Graylog；兩種情況的 Gmail 告警都實測收到 |
@@ -1972,8 +1972,8 @@ unset C
 
 | 項目 | 說明 |
 | --- | --- |
-| `devices/17/ports` 404 | Graylog 剛重新加入 LibreNMS，連接埠探索完成前查不到，預期自行消失 |
-| 31301 PHP `ctype_digit(): Argument of type null` | LibreNMS 程式在新版 PHP 的 deprecated 警告（8192），與 `ports?columns=` 請求同時出現；待評估更新 LibreNMS 或以訊息內容降級 |
+| `devices/17/ports` 404 | Graylog 剛重新加入 LibreNMS，連接埠探索完成前查不到，預期自行消失。**10/16 確認**：最近 14 天 0 筆，已結案（11-13） |
+| 31301 PHP `ctype_digit(): Argument of type null` | LibreNMS 程式在新版 PHP 的 deprecated 警告（8192），與 `ports?columns=` 請求同時出現；待評估更新 LibreNMS 或以訊息內容降級。**10/16**：實際來自 `/resources/links` 請求，已以子規則 100141 降級（11-13） |
 | jt-ipam 網頁 401 | 瀏覽器開著登入已過期的 jt-ipam 頁面持續輪詢通知；401 屬認證失敗，保留告警 |
 
 ### 11-10 延伸修正：SNMP 寫入權限（rwuser）
@@ -2189,6 +2189,71 @@ pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo
 pct exec <CTID> -- bash -c 'for f in /etc/snmp/snmpd.conf /var/lib/snmp/snmpd.conf; do cp -a $(ls -t $f.bak-v3upg-* | head -1) $f; done; systemctl restart snmpd'
 pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='MD5', cryptoalgo='DES' WHERE device_id=<ID>;"
 ~~~
+
+### 11-13 LibreNMS PHP 警告（31301）與 ports 404 結案（2026-10-16）
+
+**查詢**（Wazuh 容器內，最近 14 天每天筆數；`devices/17/ports` 的 404 以 `full_log` 片語比對）：
+
+~~~bash
+C=/etc/wazuh-indexer/certs
+curl -sk --cert $C/admin.pem --key $C/admin-key.pem -H 'Content-Type: application/json' \
+  "https://127.0.0.1:9200/wazuh-alerts-*/_search?size=0" -d '{
+  "query":{"bool":{"filter":[{"range":{"timestamp":{"gte":"now-14d"}}}],
+    "should":[{"term":{"rule.id":"31301"}},{"match_phrase":{"full_log":"devices/17/ports"}}],
+    "minimum_should_match":1}},
+  "aggs":{"r":{"terms":{"field":"rule.id"},
+    "aggs":{"d":{"date_histogram":{"field":"timestamp","calendar_interval":"day","min_doc_count":1}}}}}}' \
+  | python3 -m json.tool | grep -E '"key_as_string"|"key"|"doc_count"'
+~~~
+
+| 項目 | 10/02～10/16 | 判斷 |
+| --- | --- | --- |
+| `devices/17/ports` 404 | 0 筆 | Graylog 的連接埠探索完成後已消失，結案 |
+| 31301 | 4,700 筆，平常每天約 259 筆（10/02～03、10/11～12 約 430～525） | 約每 5.5 分鐘一筆，與 jt-ipam 同步週期一致；10/15 jt-ipam 升級到 v1.0.11 後沒有變化 |
+
+**樣本**（最近 3 筆，取 `full_log`）全部相同：
+
+~~~text
+[error] ... FastCGI sent in stderr: "PHP message: PHP Error(8192): ctype_digit(): Argument of type null will be interpreted as string in the future in /opt/librenms/includes/html/api_functions.inc.php:3229" while reading response header from upstream, client: <jt-ipam IP>, server: <LibreNMS 主機名稱>, request: "GET /api/v0/resources/links HTTP/1.1", ...
+~~~
+
+觸發的請求是 `/api/v0/resources/links`，不是 11-9 當時記錄的 `ports?columns=`。這個路徑在環境沒有 LLDP／CDP 鄰居資料時回 404（已由 100140 降級），LibreNMS 處理同一請求時另在 nginx 錯誤 log 留下 PHP deprecated 警告（8192，不是錯誤），由 decoder `nginx-errorlog` 觸發 31301（Nginx error message）。
+
+**子規則**（三項條件都符合才降級；不寫行號，LibreNMS 更新後行號變動時只會讓警告重新出現）：
+
+~~~xml
+<group name="local,web,tuning,">
+  <rule id="100141" level="0">
+    <if_sid>31301</if_sid>
+    <match>ctype_digit(): Argument of type null will be interpreted as string in the future in /opt/librenms/includes/html/api_functions.inc.php</match>
+    <regex type="pcre2">client: 192\.0\.2\.29, server: \S+, request: "GET /api/v0/resources/links HTTP/</regex>
+    <description>LibreNMS PHP deprecation on jt-ipam links sync (suppressed)</description>
+  </rule>
+</group>
+~~~
+
+套用與驗證：
+
+~~~bash
+cp -a /var/ossec/etc/rules/local_rules.xml /var/ossec/etc/rules/local_rules.xml.bak-$(date +%Y%m%d-%H%M)
+grep -c 'id="100141"' /var/ossec/etc/rules/local_rules.xml        # 0，編號未使用
+# 以 cat >> 附加上面的 group 後
+/var/ossec/bin/wazuh-analysisd -t && echo "SYNTAX OK"
+# 取最新一筆 31301 的原始日誌當樣本，再做一筆只改路徑的對照樣本
+grep '"id":"31301"' /var/ossec/logs/alerts/alerts.json | tail -1 | python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["full_log"])' > /root/links-line.txt
+sed 's#/api/v0/resources/links#/api/v0/devices#' /root/links-line.txt > /root/other-line.txt
+systemctl restart wazuh-manager
+/var/ossec/bin/wazuh-logtest < /root/links-line.txt 2>&1 | grep -E "id:|level:" | tail -2
+/var/ossec/bin/wazuh-logtest < /root/other-line.txt 2>&1 | grep -E "id:|level:" | tail -2
+~~~
+
+| 樣本 | 結果 |
+| --- | --- |
+| `/resources/links`（實際日誌） | `id: '100141'`、`level: '0'` |
+| 改成 `/api/v0/devices` | `id: '31301'`、`level: '3'`，仍告警 |
+
+- `full_log` 含 ANSI 顏色碼（`\u001b[31m`），從 `alerts.json` 以 Python 解析 JSON 取出，才是 logtest 能用的原始字串。
+- 根治方式是 LibreNMS 修正 `api_functions.inc.php` 對空參數的處理，或 jt-ipam 不再呼叫無資料的 `links`；任一方修正後可移除 100141 與 100140 的 `links` 條件。
 
 ## 12. 弱點偵測結果與修補（2026-10-03）
 
