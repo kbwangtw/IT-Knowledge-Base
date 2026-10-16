@@ -2252,6 +2252,8 @@ systemctl restart wazuh-manager
 | `/resources/links`（實際日誌） | `id: '100141'`、`level: '0'` |
 | 改成 `/api/v0/devices` | `id: '31301'`、`level: '3'`，仍告警 |
 
+上線後 30 分鐘以 `_count` 查詢 31301（`"range":{"timestamp":{"gte":"now-30m"}}`）為 0 筆（原本每 30 分鐘約 5～6 筆）。
+
 - `full_log` 含 ANSI 顏色碼（`\u001b[31m`），從 `alerts.json` 以 Python 解析 JSON 取出，才是 logtest 能用的原始字串。
 - 根治方式是 LibreNMS 修正 `api_functions.inc.php` 對空參數的處理，或 jt-ipam 不再呼叫無資料的 `links`；任一方修正後可移除 100141 與 100140 的 `links` 條件。
 
