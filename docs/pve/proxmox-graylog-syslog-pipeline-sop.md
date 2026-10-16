@@ -868,7 +868,7 @@ done
 | 發現 | 影響 | 建議 |
 | --- | --- | --- |
 | Node 離線檢查與共用儲存檢查**只在 node10** | node10 本身離線時不會有 `PVE_NODE_OFFLINE`，共用儲存也無人檢查；node10 離線仍會由 node11、node12 的 corosync 觸發「Corosync 成員離線」 | 在 node11 也部署相同腳本與 timer，重複訊息由 5 分鐘 Grace 合併（待評估） |
-| `PVE_NODE_MONITOR_ERROR` 沒有告警 | node10 查不到叢集狀態（例如失去 quorum）時只寫 log | **已處理（10/16）**：Node 離線告警條件加入 `OR "PVE_NODE_MONITOR_ERROR"`。node10 重開機時若 timer 早於叢集服務執行，可能多寄一封，屬預期 |
+| `PVE_NODE_MONITOR_ERROR` 沒有告警 | node10 查不到叢集狀態（例如失去 quorum）時只寫 log | **已處理（10/16）**：Node 離線告警條件加入 `OR "PVE_NODE_MONITOR_ERROR"`。以 `logger -t PVE-NODE-MONITOR "PVE_NODE_MONITOR_ERROR manual-test-20261016"` 測試，已收到通知信。node10 重開機時若 timer 早於叢集服務執行，可能多寄一封，屬預期 |
 | 共用儲存在 `pvesm status` 找不到時直接略過 | 儲存被移除或改名時不會告警 | 留意；改名時同步修改腳本 |
 | 儲存空間警告 Grace 5 分鐘 | 超過 80% 後每 5 分鐘寄一封，可能持續數天 | **已處理（10/16）**：警告改為 24 小時；嚴重維持 5 分鐘 |
 | PVE 任務失敗警報 Backlog 0 | 通知信不附原始訊息，看不出是哪個任務 | **已處理（10/16）**：改為 5 |
