@@ -1,0 +1,30 @@
+PBS 垃圾資料回收執行結果
+========================
+
+執行狀態：成功
+資料儲存區：{{datastore}}
+工作 ID：
+{{upid}}
+
+空間回收結果
+------------
+索引檔案數：{{index-file-count}}
+已回收空間：{{human-bytes removed-bytes}}
+已移除區塊：{{removed-chunks}}
+已移除損壞區塊：{{removed-bad}}
+
+剩餘損壞區塊：{{still-bad}}
+等待移除空間：{{human-bytes pending-bytes}}（{{pending-chunks}} 個區塊）
+
+儲存空間統計
+------------
+原始資料使用量：{{human-bytes index-data-bytes}}
+實際磁碟使用量：{{human-bytes disk-bytes}}（{{relative-percentage disk-bytes index-data-bytes}}）
+磁碟區塊數：{{disk-chunks}}
+
+重複資料刪除倍率：{{deduplication-factor}}
+
+垃圾資料回收已成功完成。
+
+詳細資訊：
+<{{base-url}}/#DataStore:{{datastore}}>

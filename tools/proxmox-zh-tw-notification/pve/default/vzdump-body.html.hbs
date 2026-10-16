@@ -1,0 +1,31 @@
+<html>
+    <body>
+        {{error}}
+        <h1 style="font-size: 1.2em">備份詳細資料</h1>
+        <table style="border: 1px solid;border-collapse: collapse;">
+            <tr>
+                <th style="border: 1px solid;border-collapse: collapse;">VMID</th>
+                <th style="border: 1px solid;border-collapse: collapse;">名稱</th>
+                <th style="border: 1px solid;border-collapse: collapse;">狀態</th>
+                <th style="border: 1px solid;border-collapse: collapse;">時間</th>
+                <th style="border: 1px solid;border-collapse: collapse;">大小</th>
+                <th style="border: 1px solid;border-collapse: collapse;">檔案名稱</th>
+            </tr>
+        {{#each guest-table.data}}
+            <tr>
+                <td style="border: 1px solid;border-collapse: collapse;">{{this.vmid}}</td>
+                <td style="border: 1px solid;border-collapse: collapse;">{{this.name}}</td>
+                <td style="border: 1px solid;border-collapse: collapse;">{{this.status}}</td>
+                <td style="border: 1px solid;border-collapse: collapse;">{{duration this.time}}</td>
+                <td style="border: 1px solid;border-collapse: collapse;">{{human-bytes this.size}}</td>
+                <td style="border: 1px solid;border-collapse: collapse;">{{this.filename}}</td>
+            </tr>
+        {{/each}}
+        </table>
+        <br>
+        總執行時間：{{duration total-time}}<br>
+        總備份大小：{{human-bytes total-size}}<br>
+        <h1 style="font-size: 1.2em">執行記錄</h1>
+        <pre>{{logs}}</pre>
+    </body>
+</html>
