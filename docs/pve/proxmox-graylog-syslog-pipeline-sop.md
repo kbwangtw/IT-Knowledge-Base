@@ -738,6 +738,144 @@ curl -s http://127.0.0.1:9000/api/system/lbstatus; echo          # ALIVE
 - 升級 graylog-server 時若 apt 詢問 `server.conf`，選保留現有版本。
 - 還原：把 `.bak-日期` 複製回 `server.conf` 並重啟。
 
+## 15. 告警清單（Event Definitions，2026-10-16 盤點）
+
+這些告警多數在本文件之前就已建立，只有「PVE 任務失敗警報」「PVE 多次驗證失敗」「PVE 服務異常」（第 6～8 節）與「WireGuard VPN 異常」（WireGuard 文件第 9 節）有建置紀錄。10/16 以 REST API 匯出全部設定補記於此。
+
+### 15-1 匯出方式
+
+在 Graylog 容器內執行（Graylog 監聽容器 IP，不是 127.0.0.1；`-u admin` 會詢問 admin 密碼）：
+
+~~~bash
+GL=$(hostname -I | awk '{print $1}')
+curl -s -o /root/event-defs.json -w 'http=%{http_code}\n' -u admin "http://$GL:9000/api/events/definitions?per_page=100"
+python3 -c '
+import json
+d=json.load(open("/root/event-defs.json"))
+for e in d["event_definitions"]:
+    c=e["config"]; n=e.get("notification_settings") or {}
+    print("==", e["title"], "| priority", e["priority"])
+    print("  query:", c.get("query"))
+    print("  every/within(min):", c.get("execute_every_ms",0)//60000, "/", c.get("search_within_ms",0)//60000)
+    print("  group_by:", c.get("group_by"), "| conditions:", json.dumps(c.get("conditions"), ensure_ascii=False))
+    print("  grace(min):", (n.get("grace_period_ms") or 0)//60000, "| backlog:", n.get("backlog_size"), "| notifications:", len(e.get("notifications") or []))
+'
+rm /root/event-defs.json
+~~~
+
+回傳 `http=401` 是帳號或密碼錯誤；忘記密碼時也可在網頁 System → Users and Teams → Administrator → Edit Tokens 建立暫時 token，以 `-u "<token>:token"` 取代 `-u admin`，用完即刪除。
+
+### 15-2 清單
+
+| 告警 | 條件 | 每／範圍（分） | 分組、門檻 | Grace／Backlog |
+| --- | --- | --- | --- | --- |
+| Ceph 健康警告 | `message:"Health check failed:" AND NOT message:"cmd=" AND NOT message:"dispatch" AND NOT message:"finished"` | 5／5 | count > 0 | 5／10 |
+| PVE Corosync 成員離線 | `message:corosync AND message:"Members left:"` | 5／5 | count > 0 | 5／10 |
+| PVE Node 狀態離線 | `"PVE_NODE_OFFLINE"`（15-3 腳本產生） | 1／1 | 每筆 | 5／10 |
+| PVE 任務失敗警報 | `pve_event_type:task_failed` | 5／5 | 每筆 | 5／**0** |
+| PVE 儲存空間嚴重 | `message:"STORAGE_CRITICAL"`（15-3） | 5／5 | count > 0 | 5／10 |
+| PVE 儲存空間警告 | `message:"STORAGE_WARNING"`（15-3） | 5／5 | count > 0 | 5／10 |
+| PVE 儲存設備離線 | `message:"STORAGE_UNAVAILABLE"`（15-3） | 5／5 | count > 0 | 5／10 |
+| PVE 多次驗證失敗 | `device_type:"pve" AND event_category:"authentication" AND (message:failure OR message:failed)` | 5／5 | 依 `source`，≥ 3 | 5／50 |
+| PVE 服務異常 | `device_type:"pve" AND event_category:"system_error" AND message:"Failed with result"` | 5／5 | 每筆 | 5／50 |
+| Synology DSM 登入失敗 | `synology_auth_result:failed AND synology_service:DSM` | 5／5 | 依 `synology_nas`、`synology_src_ip`，≥ 3 | 5／10 |
+| Synology DSM 管理員登入 | `message:"User [<NAS 管理員帳號>]" AND message:"signed in to [DSM] successfully"` | 5／5 | 每筆 | 5／10 |
+| WireGuard VPN 異常 | `source:wazuh AND "WireGuard ct:109"` | 1／5 | 每筆 | 30／5 |
+| System notification events | Graylog 內建 | — | — | — |
+
+- 每個告警都掛一個 Email 通知（Gmail SMTP，見第 7 節）。Grace 5 分鐘代表同一告警 5 分鐘內最多寄一封；狀態持續時（例如節點離線、儲存空間超過門檻）會每 5 分鐘再寄一封，直到恢復。
+- NAS 登入失敗是「同一台 NAS、同一來源 IP、5 分鐘內 ≥ 3 次」才通知；較慢的嘗試由 DSM 自動封鎖處理。管理員登入啟用兩步驟驗證時，只有最後的 `signed in ... successfully via [OTP]` 符合條件，一次登入寄一封；只涵蓋該管理員帳號。
+- WireGuard 告警的範圍（5 分鐘）大於間隔（1 分鐘），同一筆訊息會被抓到多次，由 30 分鐘 Grace 避免重複寄信。
+
+### 15-3 依賴的監控腳本（PVE 節點）
+
+Node 離線與三個儲存告警的訊息不是 PVE 原生 log，由節點上的腳本定期檢查，以 `logger` 寫入 syslog 再轉送 Graylog：
+
+| 腳本 | 節點 | 排程（systemd timer） | 內容 |
+| --- | --- | --- | --- |
+| `/usr/local/sbin/pve-node-monitor.sh` | **只有 node10** | 每 1 分鐘 | `pvesh get /cluster/resources --type node`，狀態不是 online 的節點寫出 `PVE_NODE_OFFLINE node=<節點> status=<狀態>`；查詢失敗寫 `PVE_NODE_MONITOR_ERROR` |
+| `/usr/local/sbin/pve-storage-monitor.sh` | 三台（node10 版本不同） | 每 5 分鐘 | 本機 `/` 與 `pve/data`（LVM Thin 的 data、metadata）用量 ≥ 80% 寫 `STORAGE_WARNING`、≥ 90% 寫 `STORAGE_CRITICAL`；**node10 另外檢查共用儲存** PBS31、VM_Pool、cephfs（`pvesm status`），狀態不是 active 寫 `STORAGE_UNAVAILABLE` |
+
+node10 的 `pve-node-monitor.sh`：
+
+~~~bash
+#!/bin/bash
+TAG="PVE-NODE-MONITOR"
+NODES_JSON=$(pvesh get /cluster/resources --type node --output-format json 2>/dev/null)
+if [ $? -ne 0 ] || [ -z "$NODES_JSON" ]; then
+    logger -t "$TAG" "PVE_NODE_MONITOR_ERROR unable_to_query_cluster_resources"
+    exit 1
+fi
+echo "$NODES_JSON" | jq -r '.[] | select(.status != "online") | "\(.node)|\(.status)"' |
+while IFS='|' read -r NODE STATUS; do
+    [ -z "$NODE" ] && continue
+    logger -t "$TAG" "PVE_NODE_OFFLINE node=$NODE status=$STATUS"
+done
+~~~
+
+`pve-storage-monitor.sh`（node10 版本；node11、node12 沒有最後的共用儲存段落）：
+
+~~~bash
+#!/bin/bash
+WARN=80
+CRIT=90
+HOST=$(hostname -s)
+
+# local：PVE root filesystem
+ROOT_USAGE=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+if [ "$ROOT_USAGE" -ge "$CRIT" ]; then
+    logger -t pve-storage-monitor "STORAGE_CRITICAL host=$HOST storage=local type=filesystem usage=${ROOT_USAGE}% threshold=${CRIT}%"
+elif [ "$ROOT_USAGE" -ge "$WARN" ]; then
+    logger -t pve-storage-monitor "STORAGE_WARNING host=$HOST storage=local type=filesystem usage=${ROOT_USAGE}% threshold=${WARN}%"
+fi
+
+# local-lvm：LVM Thin Pool Data% 與 Metadata%
+for M in data metadata; do
+    V=$(lvs --noheadings --nosuffix -o ${M}_percent pve/data 2>/dev/null | xargs)
+    [ -z "$V" ] && continue
+    I=${V%.*}
+    if [ "$I" -ge "$CRIT" ]; then
+        logger -t pve-storage-monitor "STORAGE_CRITICAL host=$HOST storage=local-lvm metric=$M usage=${V}% threshold=${CRIT}%"
+    elif [ "$I" -ge "$WARN" ]; then
+        logger -t pve-storage-monitor "STORAGE_WARNING host=$HOST storage=local-lvm metric=$M usage=${V}% threshold=${WARN}%"
+    fi
+done
+
+# Shared Storage：只由 node10 監控，避免三個 PVE Node 重複告警
+for STORAGE in PBS31 VM_Pool cephfs; do
+    LINE=$(pvesm status 2>/dev/null | awk -v s="$STORAGE" '$1 == s {print}')
+    [ -z "$LINE" ] && continue
+    STATUS=$(echo "$LINE" | awk '{print $3}')
+    USAGE=$(echo "$LINE" | awk '{print $7}' | tr -d '%')
+    if [ "$STATUS" != "active" ]; then
+        logger -t pve-storage-monitor "STORAGE_UNAVAILABLE host=$HOST storage=$STORAGE type=shared status=$STATUS"
+        continue
+    fi
+    [ -z "$USAGE" ] && continue
+    U=${USAGE%.*}
+    if [ "$U" -ge "$CRIT" ]; then
+        logger -t pve-storage-monitor "STORAGE_CRITICAL host=$HOST storage=$STORAGE type=shared usage=${USAGE}% threshold=${CRIT}%"
+    elif [ "$U" -ge "$WARN" ]; then
+        logger -t pve-storage-monitor "STORAGE_WARNING host=$HOST storage=$STORAGE type=shared usage=${USAGE}% threshold=${WARN}%"
+    fi
+done
+~~~
+
+（上面 data／metadata 兩段在原腳本中是分開寫的，邏輯相同，此處合併以便閱讀。）
+
+### 15-4 盤點發現
+
+| 發現 | 影響 | 建議 |
+| --- | --- | --- |
+| Node 離線檢查與共用儲存檢查**只在 node10** | node10 本身離線時不會有 `PVE_NODE_OFFLINE`，共用儲存也無人檢查；node10 離線仍會由 node11、node12 的 corosync 觸發「Corosync 成員離線」 | 在 node11 也部署相同腳本與 timer，重複訊息由 5 分鐘 Grace 合併（待評估） |
+| `PVE_NODE_MONITOR_ERROR` 沒有告警 | node10 查不到叢集狀態（例如失去 quorum）時只寫 log | Node 離線告警條件改為 `"PVE_NODE_OFFLINE" OR "PVE_NODE_MONITOR_ERROR"`（待評估） |
+| 共用儲存在 `pvesm status` 找不到時直接略過 | 儲存被移除或改名時不會告警 | 留意；改名時同步修改腳本 |
+| 儲存空間警告 Grace 5 分鐘 | 超過 80% 後每 5 分鐘寄一封，可能持續數天 | 警告的 Grace 可拉長（例如 24 小時），嚴重維持較短（待評估） |
+| PVE 任務失敗警報 Backlog 0 | 通知信不附原始訊息，看不出是哪個任務 | 改為 5 |
+| 腳本與 timer 只存在節點上 | 重灌或換節點時容易遺漏 | 本節保存腳本內容；timer／service 單元內容待補（`systemctl cat pve-node-monitor.timer pve-storage-monitor.timer`） |
+
+node10 的 `/root/graylog-alert-test-all.sh`、`graylog-alert-test-remaining.sh` 是建立告警時的測試腳本，日後驗證告警仍有效時可參考。
+
 ## 目前完成與待辦
 
 截至 2026-09-22，三項核心告警已完成所述測試範圍；其他監控項目與通知明細仍待完善。
