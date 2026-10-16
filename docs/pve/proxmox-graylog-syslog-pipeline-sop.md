@@ -709,10 +709,10 @@ end
 - 其他帳號的 SMB 存取、PBS 的 write／delete 仍保留；DSM 本機的記錄不受影響。
 - `contains()` 區分大小寫，且依賴 DSM 的訊息格式；格式改變時只會讓雜訊回來，不會漏掉其他紀錄。PBS 改用其他帳號時要一併修改。
 - **Rule Simulation 的「Not stored」不代表已丟棄**：模擬的訊息一律不寫入 index，不論是否 drop 都顯示 Not stored。測試時先把 `then` 改成 `set_field("would_drop", "yes");`，確認 PBS 的 read 訊息出現該欄位、其他帳號的訊息沒有，再改回 `drop_message();`。
-- 上線後驗證：PBS 排程執行後搜尋 `source:tokyo16 AND "WinFileService" AND "<PBS 帳號>" AND "read"`，規則上線後應為 0 筆（待確認）。PBS 的讀取每天約在台灣時間 14:00 出現一批（讀取各備份點的 `index.json.blob`），晚上的備份時段沒有，因此要等規則上線後經過一次 14:00 批次才能判斷。
+- 上線後驗證：PBS 排程執行後搜尋 `source:tokyo16 AND "WinFileService" AND "<PBS 帳號>" AND "read"`，規則上線後應為 0 筆。**已驗證（2026-10-16）**：上線前每天的大量 read 出現在 PBS Verify（02:00～03:00）與 GC 時段，另有約台灣時間 14:00 的小批次（約 300 筆）；10/16 凌晨 Verify 照常執行（同時段仍有 PBS 更新 `index.json.blob` 的 create／write／rename 紀錄），但 read 為 0 筆。tokyo16 的 `WinFileService` 紀錄由每天約 12 萬筆降為約 1 萬筆，剩下的是 PBS 的寫入類事件。搜尋時間範圍要注意時區（見第 14 節），改時區後原本以 UTC 填的 Absolute 範圍會被平移 8 小時。
 - 已存入的紀錄依預設 index set 的保留期（Data Tiering，30～40 天）自然輪替。
 
-待補：DSM「日誌過濾器」送出的日誌種類；確認上述丟棄規則生效；melayu17（快照複寫目的地）登入告警與快照複寫失敗告警；評估 NAS 登入失敗多次的告警（`synology_auth_result:failed`）。
+待補：DSM「日誌過濾器」送出的日誌種類；melayu17（快照複寫目的地）登入告警與快照複寫失敗告警；評估 NAS 登入失敗多次的告警（`synology_auth_result:failed`）。
 
 ## 14. 顯示時區改為台灣時間（2026-10-16）
 
