@@ -793,10 +793,10 @@ Node 離線與三個儲存告警的訊息不是 PVE 原生 log，由節點上的
 
 | 腳本 | 節點 | 排程（systemd timer） | 內容 |
 | --- | --- | --- | --- |
-| `/usr/local/sbin/pve-node-monitor.sh` | **只有 node10** | 每 1 分鐘 | `pvesh get /cluster/resources --type node`，狀態不是 online 的節點寫出 `PVE_NODE_OFFLINE node=<節點> status=<狀態>`；查詢失敗寫 `PVE_NODE_MONITOR_ERROR` |
-| `/usr/local/sbin/pve-storage-monitor.sh` | 三台（node10 版本不同） | 每 5 分鐘 | 本機 `/` 與 `pve/data`（LVM Thin 的 data、metadata）用量 ≥ 80% 寫 `STORAGE_WARNING`、≥ 90% 寫 `STORAGE_CRITICAL`；**node10 另外檢查共用儲存** PBS31、VM_Pool、cephfs（`pvesm status`），狀態不是 active 寫 `STORAGE_UNAVAILABLE` |
+| `/usr/local/sbin/pve-node-monitor.sh` | node10、node11（10/16 加入 node11） | 每 1 分鐘 | `pvesh get /cluster/resources --type node`，狀態不是 online 的節點寫出 `PVE_NODE_OFFLINE node=<節點> status=<狀態>`；查詢失敗寫 `PVE_NODE_MONITOR_ERROR` |
+| `/usr/local/sbin/pve-storage-monitor.sh` | 三台（node10、node11 含共用儲存段落，node12 沒有） | 每 5 分鐘 | 本機 `/` 與 `pve/data`（LVM Thin 的 data、metadata）用量 ≥ 80% 寫 `STORAGE_WARNING`、≥ 90% 寫 `STORAGE_CRITICAL`；node10、node11 另外檢查共用儲存 PBS31、VM_Pool、cephfs（`pvesm status`），狀態不是 active 寫 `STORAGE_UNAVAILABLE` |
 
-node10 的 `pve-node-monitor.sh`：
+`pve-node-monitor.sh`（需要 `jq`）：
 
 ~~~bash
 #!/bin/bash
@@ -813,7 +813,7 @@ while IFS='|' read -r NODE STATUS; do
 done
 ~~~
 
-`pve-storage-monitor.sh`（node10 版本；node11、node12 沒有最後的共用儲存段落）：
+`pve-storage-monitor.sh`（node10、node11 版本；node12 沒有最後的共用儲存段落）：
 
 ~~~bash
 #!/bin/bash
@@ -841,7 +841,7 @@ for M in data metadata; do
     fi
 done
 
-# Shared Storage：只由 node10 監控，避免三個 PVE Node 重複告警
+# Shared Storage：由 node10、node11 監控，重複訊息由 Graylog 合併
 for STORAGE in PBS31 VM_Pool cephfs; do
     LINE=$(pvesm status 2>/dev/null | awk -v s="$STORAGE" '$1 == s {print}')
     [ -z "$LINE" ] && continue
@@ -867,14 +867,81 @@ done
 
 | 發現 | 影響 | 建議 |
 | --- | --- | --- |
-| Node 離線檢查與共用儲存檢查**只在 node10** | node10 本身離線時不會有 `PVE_NODE_OFFLINE`，共用儲存也無人檢查；node10 離線仍會由 node11、node12 的 corosync 觸發「Corosync 成員離線」 | 在 node11 也部署相同腳本與 timer，重複訊息由 5 分鐘 Grace 合併（待評估） |
+| Node 離線檢查與共用儲存檢查**只在 node10** | node10 本身離線時不會有 `PVE_NODE_OFFLINE`，共用儲存也無人檢查；node10 離線仍會由 node11、node12 的 corosync 觸發「Corosync 成員離線」 | **已處理（10/16）**：node11 部署相同腳本與 timer（見 15-5） |
 | `PVE_NODE_MONITOR_ERROR` 沒有告警 | node10 查不到叢集狀態（例如失去 quorum）時只寫 log | **已處理（10/16）**：Node 離線告警條件加入 `OR "PVE_NODE_MONITOR_ERROR"`。以 `logger -t PVE-NODE-MONITOR "PVE_NODE_MONITOR_ERROR manual-test-20261016"` 測試，已收到通知信。node10 重開機時若 timer 早於叢集服務執行，可能多寄一封，屬預期 |
 | 共用儲存在 `pvesm status` 找不到時直接略過 | 儲存被移除或改名時不會告警 | 留意；改名時同步修改腳本 |
 | 儲存空間警告 Grace 5 分鐘 | 超過 80% 後每 5 分鐘寄一封，可能持續數天 | **已處理（10/16）**：警告改為 24 小時；嚴重維持 5 分鐘 |
 | PVE 任務失敗警報 Backlog 0 | 通知信不附原始訊息，看不出是哪個任務 | **已處理（10/16）**：改為 5 |
-| 腳本與 timer 只存在節點上 | 重灌或換節點時容易遺漏 | 本節保存腳本內容；timer／service 單元內容待補（`systemctl cat pve-node-monitor.timer pve-storage-monitor.timer`） |
+| 腳本與 timer 只存在節點上 | 重灌或換節點時容易遺漏 | 本節保存腳本與 systemd 單元內容（15-5） |
 
 node10 的 `/root/graylog-alert-test-all.sh`、`graylog-alert-test-remaining.sh` 是建立告警時的測試腳本，日後驗證告警仍有效時可參考。
+
+### 15-5 node11 加入節點與共用儲存檢查（2026-10-16）
+
+兩台互相監控：node10 離線由 node11 回報，node11 離線由 node10 回報；node12 離線時兩台都會寫 `PVE_NODE_OFFLINE`，由「PVE Node 狀態離線」的 5 分鐘 Grace 合併成一封。三個儲存告警是「5 分鐘內 count > 0」，兩台各送一筆仍只產生一次事件。
+
+systemd 單元（node10 原有，複製到 node11）：
+
+~~~ini
+# /etc/systemd/system/pve-node-monitor.service
+[Unit]
+Description=PVE Cluster Node Status Monitor
+After=pve-cluster.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pve-node-monitor.sh
+
+# /etc/systemd/system/pve-node-monitor.timer
+[Unit]
+Description=Run PVE Cluster Node Status Monitor every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=pve-node-monitor.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
+# /etc/systemd/system/pve-storage-monitor.timer（三台皆有；service 為同名 oneshot）
+[Unit]
+Description=Run PVE Storage Capacity Monitor every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+~~~
+
+部署（node10 執行）：
+
+~~~bash
+# 比對：兩台 storage 腳本只差共用儲存段落
+diff <(ssh root@node11 cat /usr/local/sbin/pve-storage-monitor.sh) /usr/local/sbin/pve-storage-monitor.sh
+ssh root@node11 "apt-get install -y jq"                      # node11 原本沒有 jq，腳本會失敗
+ssh root@node11 "cp -a /usr/local/sbin/pve-storage-monitor.sh /usr/local/sbin/pve-storage-monitor.sh.bak-$(date +%Y%m%d)"
+scp -p /usr/local/sbin/pve-storage-monitor.sh root@node11:/usr/local/sbin/pve-storage-monitor.sh
+scp -p /usr/local/sbin/pve-node-monitor.sh root@node11:/usr/local/sbin/
+scp -p /etc/systemd/system/pve-node-monitor.service /etc/systemd/system/pve-node-monitor.timer root@node11:/etc/systemd/system/
+ssh root@node11 "chmod 755 /usr/local/sbin/pve-node-monitor.sh && systemctl daemon-reload && systemctl enable --now pve-node-monitor.timer"
+~~~
+
+驗證：
+
+~~~bash
+ssh root@node11 "pvesh get /cluster/resources --type node --output-format json | jq -r '.[] | \"\(.node) \(.status)\"'"
+ssh root@node11 "systemctl start pve-node-monitor.service pve-storage-monitor.service; systemctl is-failed pve-node-monitor.service pve-storage-monitor.service"
+ssh root@node11 "systemctl list-timers --no-pager | grep -E 'pve-(node|storage)'"
+~~~
+
+結果：三台皆 `online`；兩個 oneshot 服務為 `inactive`（執行完畢、沒有 failed）；node11 有 `pve-node-monitor.timer`（每分鐘）與 `pve-storage-monitor.timer`（每 5 分鐘）。
+
+還原：`systemctl disable --now pve-node-monitor.timer`，刪除 node11 的 node-monitor 腳本與兩個單元後 `daemon-reload`；storage 腳本以 `.bak-日期` 還原。
 
 ## 目前完成與待辦
 
