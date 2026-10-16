@@ -939,7 +939,7 @@ ssh root@node11 "systemctl start pve-node-monitor.service pve-storage-monitor.se
 ssh root@node11 "systemctl list-timers --no-pager | grep -E 'pve-(node|storage)'"
 ~~~
 
-結果：三台皆 `online`；兩個 oneshot 服務為 `inactive`（執行完畢、沒有 failed）；node11 有 `pve-node-monitor.timer`（每分鐘）與 `pve-storage-monitor.timer`（每 5 分鐘）。
+結果：複製後兩台 storage 腳本 `diff` 相同；三台皆 `online`；兩個 oneshot 服務為 `inactive`（執行完畢、沒有 failed）；node11 有 `pve-node-monitor.timer`（每分鐘）與 `pve-storage-monitor.timer`（每 5 分鐘）。在 node11 執行 `logger -t PVE-NODE-MONITOR "PVE_NODE_MONITOR_ERROR manual-test-node11"`，收到「PVE Node 狀態離線」通知，Backlog 的 `source` 為 node11。
 
 還原：`systemctl disable --now pve-node-monitor.timer`，刪除 node11 的 node-monitor 腳本與兩個單元後 `daemon-reload`；storage 腳本以 `.bak-日期` 還原。
 
