@@ -2296,7 +2296,7 @@ pct exec 102 -- mysql librenms -e "SELECT g.name, d.hostname FROM device_group_d
 - 規則依賴 `features`（`extend distro`）。新 LXC 以 `snmp-v3-add.sh` 加入會一併安裝 distro 並自動進入 Virtual_Group；手動設定 SNMP 未裝 distro 時 `features` 為 NULL，不會進任何群組。新 PVE 節點同理，要有 distro 才會進 Physical_Group。
 - 日後加入 DC01、DC02 時，Virtual_Group 加上 `OR devices.os equal windows`（環境中納管的 Windows 只有 DC，皆為 VM）。Windows Server 內建 SNMP 服務已列為淘汰，屆時評估是否改以既有 Wazuh Agent 監控即可。
 - 有自己 kernel 的 VM（例如 QEMU 的 Linux VM）不符合 Virtual_Group 規則，若日後納管需另加條件（例如 hostname）。
-- 檢查是否有 LibreNMS 告警規則綁定群組：`SELECT r.name, g.name FROM alert_group_map m JOIN alert_rules r ON r.id=m.rule_id JOIN device_groups g ON g.id=m.group_id;`
+- 檢查是否有 LibreNMS 告警規則綁定群組：`SELECT r.name, g.name FROM alert_group_map m JOIN alert_rules r ON r.id=m.rule_id JOIN device_groups g ON g.id=m.group_id;`。2026-10-16 查詢無輸出，沒有告警規則綁定群組，所有告警套用全部設備。
 
 ## 12. 弱點偵測結果與修補（2026-10-03）
 
