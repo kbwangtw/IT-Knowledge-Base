@@ -205,7 +205,14 @@ Proxmox 更新時，官方範本偶爾會**新增或改名變數**（`{{...}}` �
 
 **升級後的檢查**：手動執行一次備份，確認備份信內容完整。有問題時先移除中文範本（第 7 節）恢復正常寄信，再比對新版官方範本（PVE：`/usr/share/pve-manager/templates/default/`；PBS：`/usr/share/proxmox-backup/templates/default/`）更新翻譯。
 
-## 12. 延伸閱讀
+## 12. 待辦
+
+| 項目 | 說明 |
+| --- | --- |
+| 封存原本的獨立 repository | 在 `kbwangtw/proxmox-zh-tw-notification` 的 README 最上方加註「已併入 IT-Knowledge-Base `tools/proxmox-zh-tw-notification/`，不再維護」，再到 Settings → Danger Zone → **Archive this repository**。封存後舊網址仍可下載，已寫在別處的舊指令不會失效 |
+| PBS 中文通知實測 | 在 PBS31 依第 6 節安裝 → 等 GC、Verify、Prune 等工作執行，確認收到中文信、資料正確 → 依第 7 節移除並確認還原 → 結果補進第 9 節。可與「PBS 任務失敗通知」一起規劃（PBS 本身能在工作失敗時寄信） |
+
+## 13. 延伸閱讀
 
 - [Proxmox VE 官方文件：Notifications](https://pve.proxmox.com/pve-docs/chapter-notifications.html)：通知的目標（Target）、比對規則（Matcher）與範本
 - [Proxmox Backup Server 官方文件：Notifications](https://pbs.proxmox.com/docs/notifications.html)
