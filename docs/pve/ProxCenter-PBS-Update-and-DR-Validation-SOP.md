@@ -4,108 +4,134 @@ title: "PBS 更新後，怎麼確認備份還能用？"
 date: 2026-09-11
 categories: [PVE, PBS, ProxCenter, DR]
 permalink: /docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/
-last_modified_at: 2026-10-14
+last_modified_at: 2026-10-17
 ---
 
 # PBS 更新後，怎麼確認備份還能用？
 
-這篇記錄 ProxCenter 1.4.9 搭配 PBS 4.2.5 的一次維護。更新已完成，PBS 重開後可正常提供服務，PVE 也能讀到備份清單。另一段 CT110 還原成 CT210 的紀錄，則用來說明如何檢查備份裡的系統能不能開起來。
+> **一句話**：更新 PBS 要分三段確認：**更新前**能停、能回來、找得到資料；**重開後**從主機一路查到 PVE 讀得到備份；**還原演練**證明備份真的開得起來。三段的證據要分開看，不能混為一談。
 
-> 文中 IP 皆為文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24），並非實際環境位址；照做前請換成自己的位址。
+| 項目 | 內容 |
+| --- | --- |
+| 適合誰看 | 第一次更新 PBS、不確定更新完要查什麼的人 |
+| 環境 | ProxCenter 1.4.9；PBS31（PBS 4.2.5 → 4.2.8）；PVE 三節點 |
+| 日期 | 2026-09-11 首次；2026-10-13 kernel 更新；2026-10-14 清理舊 kernel |
+| 結論 | ✅ 更新與重開後服務正常、PVE 讀得到 141 份備份；✅ CT110 還原成 CT210 可開機；✅ 四台 kernel 一致為 -23、舊 kernel 清理完成；⏳ 業務功能與完整 RTO／RPO 未驗證 |
 
-兩件事要分開看：**更新成功，不代表已重新測過所有備份；備份顯示 Verify OK，也不等於應用程式已成功還原。**
+> 文中 IP 都是文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24）；照做前請換成自己的位址。
 
-> 紀錄日期：2026-09-11；白話整理：2026-09-18。以下版本、位址與結果都是本案例資料。位址和 ID 是對照用，操作前請換成自己的環境。
+> **兩件事要分開看**：更新成功，不代表重新測過所有備份；備份顯示 Verify OK，也不等於應用程式已成功還原。
 
-<a id="environment"></a>
-## 先認識本次環境
+## 1. 先認識幾個名詞
+
+| 名詞 | 白話解釋 |
+| --- | --- |
+| **PBS（Proxmox Backup Server）** | 專門存 PVE 備份的伺服器 |
+| **Datastore** | PBS 上存放備份的空間；本案叫 Tokyo16 |
+| **CIFS 掛載** | 把 NAS 的網路資料夾掛成本機目錄；本案 Tokyo16 實際在 NAS 上 |
+| **Verify** | PBS 檢查備份資料有沒有損壞，不等於實際還原 |
+| **API token** | 給程式（ProxCenter）用的登入憑證 |
+| **ACL** | 權限設定：誰對哪個路徑有什麼權限 |
+| **`apt -s`** | 模擬執行（simulate），只顯示會做什麼，不真的做 |
+| **RTO／RPO** | 多久能恢復服務／最多會遺失多久的資料 |
+
+## 2. 本次環境
 
 | 元件 | 本次用途 |
 | --- | --- |
-| ProxCenter 1.4.9／CT110 | 管理介面，原管理位址為 192.0.2.30 |
-| PBS31／PBS 4.2.5 | 備份伺服器，管理網與資料網各有一張網卡 |
-| Tokyo16 | PBS datastore；資料來自 CIFS 掛載 /mnt/tokyo16 |
+| ProxCenter 1.4.9／CT110 | 管理介面，原管理位址 192.0.2.30 |
+| PBS31／PBS 4.2.5 | 備份伺服器；管理網 192.0.2.31、資料網 198.51.100.31 |
+| Tokyo16 | PBS datastore；資料來自 CIFS 掛載 `/mnt/tokyo16`，來源 `//198.51.100.16/PBS_BK_Folder` |
 | PVE node12 | 還原演練的目標節點 |
 | CT210／VM_Pool | 新的測試容器與儲存位置 |
 | 192.0.2.210:3000 | 測試容器的網頁入口 |
 
-PBS31 管理位址是 192.0.2.31，資料位址是 198.51.100.31。CIFS 來源為 //198.51.100.16/PBS_BK_Folder。**資料夾存在不代表網路磁碟已掛上**，必須查實際掛載來源。
+> ⚠️ **資料夾存在不代表網路磁碟已掛上**。沒掛上時，備份會寫進本機的空目錄，必須查實際掛載來源。
 
-<a id="evidence"></a>
-## 本次到底確認了哪些事？
+## 3. 本次到底確認了哪些事
 
 | 項目 | 已有證據 | 還不能推論 |
 | --- | --- | --- |
 | PBS 更新 | 9 個套件更新、1 個新增、0 個移除 | 其他版本也會得到同樣結果 |
-| 重開後服務 | kernel 已換、沒有 failed unit、PBS 服務正常 | 所有外部工作都已逐筆測完 |
-| 備份清單 | PVE 可讀；UI 顯示 141 份快照，61 VM／80 CT | 更新後重新驗證了全部 141 份 |
-| Verify | 畫面顯示 141／141 已驗證 | 每一份都已開機還原 |
-| CT210 演練 | 四個 Docker 容器 healthy，網頁入口可用 | 所有正式業務功能都完成驗收 |
+| 重開後服務 | kernel 已換、沒有 failed unit、PBS 服務正常 | 所有外部工作都逐筆測完 |
+| 備份清單 | PVE 讀得到；UI 顯示 141 份快照，61 VM／80 CT | 更新後重新驗證了全部 141 份 |
+| Verify | 畫面顯示 141／141 已驗證 | 每一份都開機還原過 |
+| CT210 演練 | 四個 Docker 容器 healthy，網頁可用 | 所有正式業務功能都驗收完 |
 
-<a id="precheck"></a>
-## 更新前：先確認「能停、能回來、找得到資料」
+## 4. 步驟一：更新前檢查
 
-先等備份、還原、驗證等工作結束，保留管理主控台，備份 PBS 設定並保護其中的憑證。檢查 /boot 與根磁碟空間，也確認 CIFS 現在真的掛載成功。本次沒有順便移除舊 kernel 或升級 ZFS pool 格式。
+**做什麼**：確認「能停、能回來、找得到資料」。
 
-在 **PBS31** 查：
+- 等備份、還原、驗證等工作都結束。
+- 保留管理主控台（萬一網路斷了還能操作）。
+- 備份 PBS 設定，並保護其中的憑證。
+- 本次**沒有**順便移除舊 kernel 或升級 ZFS pool 格式。
 
-~~~bash
-proxmox-backup-manager versions
-uname -r
-systemctl --failed --no-pager
+**在 PBS31 執行**：
+
+```bash
+proxmox-backup-manager versions                               # PBS 各元件版本
+uname -r                                                      # 目前執行中的 kernel
+systemctl --failed --no-pager                                 # 有沒有失敗的服務
 systemctl status proxmox-backup proxmox-backup-proxy --no-pager
 ip -br addr
 ip route
-findmnt --mountpoint /mnt/tokyo16
-df -h / /boot /mnt/tokyo16
-dpkg --audit
-apt-mark showhold
-~~~
+findmnt --mountpoint /mnt/tokyo16                             # CIFS 真的有掛上嗎
+df -h / /boot /mnt/tokyo16                                    # 空間夠不夠
+dpkg --audit                                                  # 有沒有裝到一半的套件
+apt-mark showhold                                             # 有沒有被鎖住不更新的套件
+```
 
-在 **PVE 節點** 查：
+**在 PVE 節點執行**：
 
-~~~bash
+```bash
 pvesm status --storage PBS31
 pvesm list PBS31
-~~~
+```
 
-清單可讀是「連得上、列得出」的證據；還原能力要靠後面的演練確認。
+> 清單列得出來是「連得上」的證據；「還原得了」要靠第 8 節的演練確認。
 
-<a id="token"></a>
-## 遇到 403：這是權限問題，不是套件壞掉
+## 5. 踩雷：ProxCenter 出現 403
 
-本次 ProxCenter 更新套件清單時出現：
+**錯誤訊息**：
 
-~~~text
+```text
 PBS 403 /nodes/localhost/apt/update: permission check failed
-~~~
+```
 
-處理時重新建立 API token、設定使用者與 token 在 / 的 Admin ACL，並重新填入 ProxCenter 憑證，之後功能恢復。
+**處理**：重新建立 API token、設定使用者與 token 在 `/` 的 Admin ACL，再把憑證重新填進 ProxCenter，功能就恢復了。
 
-由於同時改了多個地方，**無法只歸因於其中一個設定**。這是本案採用的高權限解法，不是已驗證的最小權限配置。若要縮小權限，應依實際 API 操作另行測試。
+- 因為同時改了好幾個地方，**無法斷定**是哪一個設定解決的。
+- 這是本案採用的**高權限**解法，不是驗證過的最小權限配置。要縮小權限，得依實際 API 操作另外測試。
 
-<a id="update"></a>
-## 更新：先看預計會改什麼，再安裝
+## 6. 步驟二：先模擬，再更新
 
-本案例使用 Debian Trixie、security、updates 與 pbs-no-subscription 來源，停用 enterprise 來源。這是當時的訂閱與環境選擇，不代表所有 PBS 都應照改。
+**做什麼**：本案用 Debian Trixie、security、updates 和 pbs-no-subscription 來源，停用 enterprise 來源（這是當時的訂閱選擇，不代表所有 PBS 都要這樣改）。
 
-先核對來源與模擬更新：
+**先核對來源並模擬**：
 
-~~~bash
+```bash
 grep -R -n -E '^(deb |Types:|URIs:|Suites:|Components:|Enabled:|Signed-By:)' /etc/apt/sources.list /etc/apt/sources.list.d/
 apt-cache policy
 apt update
 apt list --upgradable
 apt -s dist-upgrade
-~~~
+```
 
-確認清單沒有不預期的移除或相依性問題，才在 PBS31 執行：
+| 指令 | 用途 |
+| --- | --- |
+| `grep -R …` | 列出所有套件來源設定 |
+| `apt-cache policy` | 每個來源的優先順序 |
+| `apt list --upgradable` | 哪些套件有新版 |
+| `apt -s dist-upgrade` | **模擬**更新，看會裝什麼、移除什麼 |
 
-~~~bash
+**確認沒有不預期的移除**，才真正執行：
+
+```bash
 apt dist-upgrade
-~~~
+```
 
-本次結果：
+**本次結果**：
 
 | 元件 | 更新前 | 更新後 |
 | --- | --- | --- |
@@ -113,21 +139,20 @@ apt dist-upgrade
 | ZFS | 2.4.3-pve1 | 2.4.4-pve1 |
 | firmware 套件 | 3.18-5 | 3.18-6 |
 
-在本次 ProxCenter 1.4.9 流程中，刷新更新清單不等於安裝更新，實際安裝是在 PBS shell 完成。不要把這個版本的 UI 行為當成所有未來版本的限制。
+在 ProxCenter 1.4.9 裡，「刷新更新清單」不等於「安裝更新」；實際安裝是在 PBS shell 完成。這只是這個版本的 UI 行為，不代表未來版本也一樣。
 
-<a id="postcheck"></a>
-## 重開後：從主機一路查到 PVE
+## 7. 步驟三：重開後，從主機一路查到 PVE
 
-安裝結束先確認套件狀態、新 kernel 與 initrd 都存在；重開屬維護操作，需先確認工作已停止並有主控台可用。
+**重開前**，確認套件狀態和新 kernel 都在（重開前也要確認工作已停、有主控台可用）：
 
-~~~bash
+```bash
 dpkg --audit
 ls -l /boot/vmlinuz-7.0.14-16-pve /boot/initrd.img-7.0.14-16-pve
-~~~
+```
 
-重開後在 PBS31 重新核對：
+**重開後**，在 PBS31 核對：
 
-~~~bash
+```bash
 uname -r
 systemctl --failed --no-pager
 systemctl status proxmox-backup proxmox-backup-proxy --no-pager
@@ -135,90 +160,79 @@ findmnt --mountpoint /mnt/tokyo16
 df -h /mnt/tokyo16
 ip -br addr
 ip route
-~~~
+```
 
-本次確認 kernel 為 7.0.14-16-pve、failed unit 為 0、雙網卡正常，CIFS 自動掛回；容量顯示約 2.7T，使用 703G，可用 2.0T。PVE 的 PBS31 active，清單可讀，ProxCenter 顯示沒有待更新套件。
+**看到的結果**：
 
-PBS UI 的容量採另一種顯示方式：使用 702.16 GiB、可用 1.92 TiB、總量 2.61 TiB。不要只因顯示單位不同就判定容量遺失。
+- kernel 是 7.0.14-16-pve、failed unit 0、雙網卡正常。
+- CIFS 自動掛回，容量約 2.7T，使用 703G，可用 2.0T。
+- PVE 上 PBS31 是 active、清單讀得到；ProxCenter 顯示沒有待更新套件。
 
-<a id="restore"></a>
-## 還原演練：把 CT110 還原成另一台 CT210
+> PBS UI 顯示的是另一種單位：使用 702.16 GiB、可用 1.92 TiB、總量 2.61 TiB。**單位不同（G vs GiB）不代表容量遺失**。
 
-這段是既有還原紀錄，不能當成「這次更新後又完整重做一次」的證據。
+## 8. 步驟四：還原演練（CT110 → CT210）
 
-### 第一步：對齊 PBS 的連線地址
+這段是既有的還原紀錄，**不能**當成「這次更新後又完整重做一次」的證據。詳細過程見 [從 PBS 還原 ProxCenter](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-pbs-restore-dr-runbook/)。
+
+### 8-1 對齊 PBS 的連線位址
 
 曾出現：
 
-~~~text
+```text
 No PVE storage on node node12 maps to PBS datastore Tokyo16
-~~~
+```
 
-PVE 指向 PBS 資料網，ProxCenter 卻使用管理網地址。本次替 ProxCenter 增加 198.51.100.30/24 網卡、不新增預設閘道，並把 PBS endpoint 對齊到 198.51.100.31:8007 後恢復。
+**原因**：PVE 用 PBS 的**資料網**位址，ProxCenter 卻用**管理網**位址。
 
-這證明調整後可運作；尚未由程式碼確認產品的比對演算法。遇到相同訊息時，仍要核對節點、datastore、storage 設定與連線，不能只看名稱相同。
+**解法**：替 ProxCenter 加一張 198.51.100.30/24 網卡（不設預設閘道），並把 PBS endpoint 對齊到 198.51.100.31:8007，就恢復了。這證明調整後可運作，但沒有從程式碼確認產品怎麼比對。遇到相同訊息，仍要核對節點、datastore、storage 設定與連線，不能只看名稱相同。
 
-### 第二步：先還原，暫時不要自動開機
+### 8-2 先還原，暫時不要開機
 
 | 選項 | 本次值 | 原因 |
 | --- | --- | --- |
 | 新 VMID | 210 | 不覆蓋正式 CT110 |
 | 目標 | node12／VM_Pool | 建立獨立測試副本 |
-| Unique MAC | ON | 避免複製相同網卡位址 |
-| Start after restore | OFF | 先處理 IP 與自動工作 |
-| Override name | OFF | 本版本開啟時出現 LXC schema 400 |
+| Unique MAC | ON | 避免網卡位址重複 |
+| Start after restore | OFF | 先處理 IP 和自動工作 |
+| Override name | OFF | 本版本開啟時出現 `name property is not defined in schema`（400） |
 
-當時的錯誤是 name property is not defined in schema。關閉 Override name 後成功，但未取得完整 request payload，不能把它描述成已定位的原始碼缺陷。
+關閉 Override name 後成功；但沒有完整 request payload，不能說成已定位的程式缺陷。
 
-### 第三步：所有網卡都查完，才啟動
+### 8-3 所有網卡都查完才啟動
 
-~~~bash
+```bash
 pct status 210
 pct config 210
-~~~
+```
 
-測試副本改用 192.0.2.210。若有第二張靜態 IP 網卡，也要避免與正式機重複。修改時保留原有 bridge、VLAN、MTU 與其他必要欄位；不要用一條簡化指令蓋掉整份網路設定。
+- 測試副本改用 192.0.2.210。若有第二張靜態 IP 網卡，也要避免和正式機重複。
+- 修改時保留原本的 bridge、VLAN、MTU 等欄位，**不要**用一條簡化指令蓋掉整份網路設定。
+- ProxCenter 副本還帶著正式的 API token 和排程。**換了新 IP 不等於完全隔離**，啟動前要安排隔離或停用會操作正式環境的自動工作。
 
-ProxCenter 副本還會帶著正式 API token 與排程。**新 IP 不等於完全隔離**；啟動前應安排隔離或停用會操作正式環境的自動工作。
+### 8-4 確認系統和程式都起來
 
-### 第四步：確認系統和程式都起來
+確認隔離後才啟動 CT210，在容器內檢查：
 
-確認隔離安排完成後才啟動 CT210。容器內檢查：
-
-~~~bash
+```bash
 ip -br addr
 ip route
 systemctl --failed --no-pager
 docker ps
 docker ps -a
 ss -lntp
-~~~
+```
 
-本次 proxcenter-orchestrator、frontend、weasyprint、postgres 四個容器皆 healthy。網頁用 3000 埠：
+**看到的結果**：proxcenter-orchestrator、frontend、weasyprint、postgres 四個容器都是 healthy。網頁在 3000 埠：
 
-~~~bash
+```bash
 curl -I http://192.0.2.210:3000
-~~~
+```
 
-這些結果支持系統開機與基本網頁服務恢復；業務操作、資料內容及新備份仍需另測。
+這代表系統開機和基本網頁恢復；業務操作、資料內容和新備份仍要另外測。
 
-<a id="recovery"></a>
-## 出問題時，在哪裡停下來？
+## 9. 2026-10-13：kernel 7.0.14-19 → 7.0.14-23
 
-| 現象 | 先查什麼 |
-| --- | --- |
-| 403 | 使用者、token、ACL 與實際憑證 |
-| CIFS 未掛上 | 掛載來源、網路與認證；不要讓資料寫進空掛載目錄 |
-| PBS active 但還原失敗 | 指定快照、還原工作日誌與目標 storage |
-| CT210 開不起來 | 容器狀態、設定與啟動日誌 |
-| 容器正常但網頁不通 | Docker 狀態、實際監聽埠與網路隔離規則 |
-
-回復方案必須另外準備。從舊 kernel 開機只涵蓋 kernel，不能宣稱整個 PBS、套件與 ZFS 都已回到更新前。本文沒有完成整套回復演練，也沒有量到完整 RTO／RPO。
-
-<a id="acceptance"></a>
-## 2026-10-13：kernel 7.0.14-19 → 7.0.14-23
-
-PBS Web UI 的 Updates 顯示 `proxmox-kernel-7.0` 可從 7.0.14-22 升到 7.0.14-23。照本文「更新前」的檢查：
+PBS Web UI 的 Updates 顯示 `proxmox-kernel-7.0` 可以從 7.0.14-22 升到 7.0.14-23。照第 4 節做更新前檢查：
 
 | 檢查 | 結果 |
 | --- | --- |
@@ -229,7 +243,7 @@ PBS Web UI 的 Updates 顯示 `proxmox-kernel-7.0` 可從 7.0.14-22 升到 7.0.1
 | 根目錄 | 44G，可用 36G（`/boot` 在同一分割區） |
 | `apt -s dist-upgrade` | 只有 2 個 `Inst`，沒有 `Remv` |
 
-**已安裝的是 -22，執行中的卻是 -19**：之前安裝 -22 後一直沒有重開，-22 從未實際使用。PBS 裝完 kernel 更新要記得重開才會生效。
+> **發現：已安裝的是 -22，執行中的卻是 -19**。之前裝了 -22 但一直沒重開，-22 從沒真正用過。**PBS 裝完 kernel 更新要重開才會生效。**
 
 `apt dist-upgrade` 後重開，再核對：
 
@@ -242,75 +256,102 @@ PBS Web UI 的 Updates 顯示 `proxmox-kernel-7.0` 可從 7.0.14-22 升到 7.0.1
 | PVE `pvesm status --storage PBS31` | active，33.72% |
 | PVE `pvesm list PBS31 \| wc -l` | 141（140 筆備份加標題列） |
 
-重開後 `systemctl --failed` 列出 `session-1.scope`。這是 root 的一個登入連線，不是服務；`loginctl list-sessions` 確認後以 `systemctl reset-failed session-1.scope` 清除，failed unit 回到 0。
+重開後 `systemctl --failed` 列出 `session-1.scope`。這是 root 的一個**登入連線**，不是服務；用 `loginctl list-sessions` 確認後，以 `systemctl reset-failed session-1.scope` 清除，failed unit 回到 0。
 
-更新後 PBS31 與三台 PVE 的 kernel 一致。同日也取消了 PBS 的訂閱提示、刪除沒有規則的 Prune Job、把 Verify 改到 02:00，見 [Ceph 慢操作與備份排程](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/) 與 [取消訂閱提示](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve9-subscription-nag-removal/) 第 7 節。
+更新後 PBS31 和三台 PVE 的 kernel 一致。同日也取消了 PBS 的訂閱提示、刪除沒有規則的 Prune Job、把 Verify 改到 02:00，見 [Ceph 慢操作與備份排程](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/) 和 [取消訂閱提示](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve9-subscription-nag-removal/)。
 
-**維護時段：** 本環境每晚 21:00～22:30 接收備份、00:00 起 GC、02:00 起 Verify，更新與重開要避開。
+**維護時段**：本環境每晚 21:00～22:30 接收備份、00:00 起 GC、02:00 起 Verify，更新和重開都要避開。
 
-### 2026-10-14：清理舊 kernel
+## 10. 2026-10-14：清理舊 kernel
 
 四台都在 -23 開機正常後，清掉舊 kernel。**每一步都先用 `-s` 模擬，看清楚會移除什麼再執行。**
 
-~~~bash
+### 10-1 先用 autoremove
+
+```bash
 uname -r
 apt autoremove -s 2>/dev/null | grep -E "^Remv"
-~~~
+```
 
-三台 PVE 與 PBS31 的模擬結果都只有 `proxmox-kernel-7.0.14-20-pve-signed`，沒有 ceph、pve、qemu、corosync、proxmox-backup 等套件，執行中的 -23 也不在清單中。執行 `apt autoremove -y` 後，三台 PVE 剩下：
+三台 PVE 和 PBS31 的模擬結果都只有 `proxmox-kernel-7.0.14-20-pve-signed`，沒有 ceph、pve、qemu、corosync、proxmox-backup 等套件，執行中的 -23 也不在清單裡。執行 `apt autoremove -y` 後，三台 PVE 剩下：
 
-~~~text
+```text
 proxmox-kernel-7.0
 proxmox-kernel-7.0.14-22-pve-signed
 proxmox-kernel-7.0.14-23-pve-signed
-~~~
+```
 
-PBS31 另外還留著 `proxmox-kernel-7.0.0-3-pve-signed` 與 `proxmox-kernel-7.0.14-19-pve-signed`。`autoremove` 只移除「因相依關係自動裝進來、現在沒人需要」的套件；7.0.0-3 很可能是安裝光碟附的原始 kernel，被標記為手動安裝，所以不會被自動清掉。已有 -23（使用中）與 -22（備用），這兩個用 `apt remove` 指定名稱移除：
+### 10-2 PBS31 多兩個要指定移除
 
-~~~bash
+PBS31 還留著 `proxmox-kernel-7.0.0-3-pve-signed` 和 `proxmox-kernel-7.0.14-19-pve-signed`。
+
+**為什麼 autoremove 沒清掉**：`autoremove` 只移除「因相依關係自動裝進來、現在沒人需要」的套件。7.0.0-3 很可能是安裝光碟附的原始 kernel，被標記為「手動安裝」，所以不會被自動清掉。
+
+已有 -23（使用中）和 -22（備用），這兩個用名稱指定移除：
+
+```bash
 apt remove -s proxmox-kernel-7.0.0-3-pve-signed proxmox-kernel-7.0.14-19-pve-signed | grep -E "^(Remv|Inst)"
 apt remove -y proxmox-kernel-7.0.0-3-pve-signed proxmox-kernel-7.0.14-19-pve-signed
-dpkg -l "proxmox-kernel-7*" | awk '/^ii/ {print $2}'
-grep -oE "vmlinuz-[0-9.]+-[0-9]+-pve" /boot/grub/grub.cfg | sort -u
-~~~
+dpkg -l "proxmox-kernel-7*" | awk '/^ii/ {print $2}'               # 剩下哪些 kernel 套件
+grep -oE "vmlinuz-[0-9.]+-[0-9]+-pve" /boot/grub/grub.cfg | sort -u  # 開機選單剩哪些
+```
 
-模擬只列出這兩個 `Remv`、沒有 `Inst`；移除後 PBS31 也只剩 `proxmox-kernel-7.0`、-22、-23，GRUB 開機選單只剩 `vmlinuz-7.0.14-22-pve` 與 `vmlinuz-7.0.14-23-pve`。不需要重開，也不會重啟服務。
+**看到的結果**：模擬只列出這兩個 `Remv`、沒有 `Inst`；移除後 PBS31 也只剩 `proxmox-kernel-7.0`、-22、-23，GRUB 開機選單只剩 `vmlinuz-7.0.14-22-pve` 和 `vmlinuz-7.0.14-23-pve`。不需要重開，也不會重啟服務。
 
-**`proxmox-kernel-7.0` 不能刪。** 它是指標套件，本身幾乎沒有內容，作用是永遠指向最新的 7.0 版 kernel，讓 `apt upgrade` 自動裝上新 kernel。在 node10 模擬刪除：
+### 10-3 `proxmox-kernel-7.0` 不能刪
 
-~~~bash
+它是**指標套件**，本身幾乎沒內容，作用是永遠指向最新的 7.0 版 kernel，讓 `apt upgrade` 自動裝上新 kernel。在 node10 模擬刪除：
+
+```bash
 apt-cache rdepends --installed proxmox-kernel-7.0
 apt remove -s proxmox-kernel-7.0 | grep -E "^Remv"
-~~~
+```
 
-~~~text
+```text
 Reverse Depends:
   proxmox-default-kernel
 
 Remv proxmox-ve [9.2.0]
 Remv proxmox-default-kernel [2.1.0]
 Remv proxmox-kernel-7.0 [7.0.14-23]
-~~~
+```
 
-依賴鏈是 `proxmox-ve` → `proxmox-default-kernel` → `proxmox-kernel-7.0` → 實際 kernel。刪掉指標套件會一路往上把 `proxmox-ve` 一起移除，之後收不到 kernel 更新，升級時也可能缺元件。模擬清單出現 `proxmox-ve` 就要停下來。
+依賴鏈是 `proxmox-ve` → `proxmox-default-kernel` → `proxmox-kernel-7.0` → 實際 kernel。刪掉指標套件會**一路往上把 `proxmox-ve` 一起移除**，之後收不到 kernel 更新，升級時也可能缺元件。
 
-清理 kernel 的原則：
+> ⚠️ 模擬清單出現 `proxmox-ve` 就要停下來。
+
+### 10-4 清理 kernel 的原則
 
 1. 先 `-s` 模擬，確認 `uname -r` 的版本不在移除清單。
-2. 至少保留使用中與上一版，新 kernel 有問題時可以從開機選單選回上一版。
+2. 至少保留**使用中**和**上一版**；新 kernel 有問題時，可以從開機選單選回上一版。
 3. 只清有版本號的 `proxmox-kernel-7.0.14-xx-pve-signed`；`proxmox-ve`、`proxmox-default-kernel`、`proxmox-kernel-7.0` 永遠保留。
 4. 移除後確認開機選單只剩預期的版本。
 
-## 每次維護要留下的結案資料
+## 11. 常見問題：出問題時在哪裡停下來
 
-記錄更新前後版本、重開時間、掛載來源、PBS 服務、PVE storage 狀態與工作日誌。還原演練另外記錄快照時間、還原開始與完成時間、開機時間、應用程式驗收結果。
+| 現象 | 先查什麼 |
+| --- | --- |
+| ProxCenter 出現 403 | 使用者、token、ACL 與實際填入的憑證 |
+| CIFS 沒掛上 | 掛載來源、網路與認證；不要讓資料寫進空的掛載目錄 |
+| PBS active 但還原失敗 | 指定快照、還原工作日誌與目標 storage |
+| CT210 開不起來 | 容器狀態、設定與啟動日誌 |
+| 容器正常但網頁不通 | Docker 狀態、實際監聽埠與網路隔離規則 |
+| 裝了新 kernel 但 `uname -r` 還是舊的 | 還沒重開 |
+| `--failed` 出現 `session-x.scope` | 登入連線不是服務；確認後 `reset-failed` |
+| 容量數字和 PBS UI 不同 | G 和 GiB 單位不同 |
 
-演練完成後應關閉或隔離測試副本，確認不再操作正式資源；這是收尾要求，不代表本紀錄已提供關機完成證據。
+> 回復方案要另外準備。從舊 kernel 開機只涵蓋 kernel，不代表整個 PBS、套件和 ZFS 都回到更新前。本文沒有完成整套回復演練，也沒有量到完整 RTO／RPO。
 
-## 延伸閱讀
+## 12. 每次維護要留下的結案資料
 
-- [LXC 還原的完整案例](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-pbs-restore-dr-runbook/)
-- [Ubuntu VM 還原與時間判讀](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ubuntu-vm112-pbs-disaster-recovery/)
+- **更新**：更新前後版本、重開時間、掛載來源、PBS 服務、PVE storage 狀態與工作日誌。
+- **還原演練**：快照時間、還原開始與完成時間、開機時間、應用程式驗收結果。
+- 演練完成後要關閉或隔離測試副本，確認不會再操作正式資源（這是收尾要求，本紀錄沒有提供關機完成的證據）。
+
+## 13. 延伸閱讀
+
+- [從 PBS 還原 ProxCenter：先複製一台，再確認能用](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-pbs-restore-dr-runbook/)
+- [Ubuntu VM 從 PBS 還原：6 分 38 秒代表什麼？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ubuntu-vm112-pbs-disaster-recovery/)
 - [PBS 套件來源](https://pbs.proxmox.com/docs/installation.html#package-repositories)
 - [PBS 使用者管理](https://pbs.proxmox.com/docs/user-management.html)
 - [PBS API](https://pbs.proxmox.com/docs/api-viewer/index.html)
