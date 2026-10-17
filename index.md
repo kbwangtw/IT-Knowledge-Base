@@ -1,89 +1,141 @@
 ---
 layout: default
 title: 資訊黑手的 Knowledge Base
-last_modified_at: 2026-10-14
+last_modified_at: 2026-10-17
 ---
 
 # 資訊黑手的 IT 維運筆記
 
-把實際遇到的問題寫清楚：發生什麼事、怎麼查、怎麼處理，以及最後確認到哪裡。文章以白話說明，必要的指令、圖片和影片保留在操作旁邊。
+> **一句話**：這裡記錄的是一個小型機房的真實維運過程：遇到什麼問題、怎麼查、怎麼處理、最後驗證到哪裡。每篇都用剛入行也看得懂的方式寫，指令旁邊會說明它在做什麼。
 
-> 全站文字整理：2026-09-18。「已恢復」不等於每項測試都完成；每篇會分開標示實測結果與待辦。
+| 項目 | 內容 |
+| --- | --- |
+| 適合誰看 | 剛接觸虛擬化、備份、監控的 IT 新鮮人；想找實際案例對照的維運人員 |
+| 文章數 | 27 篇，分 6 類 |
+| 最近更新 | 2026-10-17：全站改寫為新手版 |
 
-## 儲存不能用、PVE 出現問號
+## 1. 這裡記錄的是什麼環境
+
+```text
+                     ┌───────────── PVE 叢集（3 台節點，共用 Ceph 儲存）─────────────┐
+                     │  DNS ×2、網域控制站 ×2、CA、Graylog、Wazuh、LibreNMS、         │
+                     │  Grafana、jt-ipam、WireGuard、ProxCenter …（VM 與容器）        │
+                     └───────────────┬───────────────────────────────────────────┘
+                                     │ 每晚備份
+                                     ▼
+                     PBS（備份伺服器，資料放在 NAS 上）  ── Synology NAS／DP340
+外面連回來 ── WireGuard VPN ──▶ 內網           GCP 雲端主機、Nutanix、HPE 伺服器（另外記錄）
+```
+
+| 類別 | 用到的東西 |
+| --- | --- |
+| 虛擬化 | Proxmox VE（PVE）三節點叢集、Ceph 共用儲存、ProxCenter 管理工具 |
+| 備份 | Proxmox Backup Server（PBS）、Synology NAS、Synology DP340 |
+| 監控與資安 | Graylog（集中日誌）、Wazuh（資安監控）、LibreNMS（設備監控）、Grafana（戰情中心） |
+| 網路 | WireGuard VPN、jt-ipam（IP 位址管理）、DNS |
+| 其他 | GCP 雲端主機、Nutanix、HPE ML30 伺服器 |
+
+## 2. 先認識幾個名詞
+
+| 名詞 | 白話解釋 |
+| --- | --- |
+| **PVE（Proxmox VE）** | 免費的虛擬化平台，一台實體主機上跑很多台虛擬機 |
+| **VM／CT（LXC）** | 虛擬機／輕量容器；容器和主機共用 Linux kernel，比較省資源 |
+| **叢集（Cluster）** | 多台 PVE 一起管理；一台壞了，服務可以搬到別台 |
+| **HA（高可用）** | 主機掛了，PVE 自動把服務在別台重新啟動 |
+| **Ceph** | 把三台主機的硬碟合成一個共用儲存，資料存三份 |
+| **PBS** | 專門存 PVE 備份的伺服器 |
+| **Syslog** | 主機把日誌送到別台的標準方式 |
+| **Agent** | 裝在被監控主機上的小程式 |
+| **SOP** | 標準作業程序，照著做就能完成的步驟 |
+
+## 3. 第一次來，建議這樣讀
+
+| 順序 | 文章 | 讀完會知道 |
+| --- | --- | --- |
+| 1 | [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification/) | 最短、最好上手；看懂 PVE 通知怎麼運作 |
+| 2 | [PVE 更新重開後 HA 服務卡在 error](docs/pve/pve-ha-service-error-after-reboot/) | HA 是什麼、為什麼重開前要進維護模式 |
+| 3 | [從 PBS 還原 ProxCenter](docs/pve/proxcenter-pbs-restore-dr-runbook/) | 備份做完，怎麼確認真的還原得回來 |
+| 4 | [把 PVE、PBS 與 NAS 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop/) | 日誌集中、分類、告警寄信的完整流程 |
+| 5 | [不再把 PVE 8006 開到網際網路：改用 WireGuard](docs/pve/wireguard-remote-access-replace-8006/) | 為什麼管理介面不能直接開到外網 |
+
+## 4. 文章目錄
+
+### 4-1 儲存出問題（Ceph）
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
-| [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/) | 9/22 根因與修復結案：三顆 MON／local／BlueStore 一致、HEALTH_OK；10/12 補記修復後整機重開正常；10/14 完成已曝光 OSD.1 金鑰輪換；附更新與重開 SOP |
-| [Ceph OSD 和 CephFS 金鑰故障，怎麼恢復？](docs/pve/ceph-osd-cephfs-keyring-recovery/) | 9/17～18 服務復原紀錄；BlueStore 根因與修復已於 9/22 補記 |
-| [Ceph 換金鑰，為什麼 HEALTH_OK 還不夠？](docs/pve/ceph-20-2-4-cephx-aes256k-migration/) | 想了解遷移漏項、storage 金鑰副本與舊範例更正 |
+| [PVE 出現問號、儲存變成 0：這次怎麼救回來？](docs/pve/ceph-osd-cephfs-keyring-recovery/) | 主機都在線，但 Ceph 儲存顯示 0、CephFS 掛不上 |
+| [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/) | 修好後一重開又壞；要輪換 OSD 金鑰 |
+| [Ceph 換金鑰：為什麼 HEALTH_OK 還不夠？](docs/pve/ceph-20-2-4-cephx-aes256k-migration/) | 換 Ceph 金鑰時，有哪些地方容易漏掉 |
+| [Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？](docs/pve/ceph-bluestore-slow-op-backup-schedule/) | 看到慢操作警告；要排 PVE／PBS 備份時間 |
 
-## 更新主機與日常管理
-
-| 文章 | 適合什麼時候看 |
-| --- | --- |
-| [PVE HA 放置策略：PVE 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy/) | 10/2 補 DNS 互斥 HA 規則、CRS 改 Static；說明為何不能只靠 ProxCenter；10/13 決定只留 PVE，ProxCenter DRS 停用、不裝 ProxLB |
-| [ProxCenter 逐台更新：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 來源檢查、SSH 網段和 sudo 問題；10/12 ProxCenter 完成兩台、三台驗收通過；沒有更新時不會啟動，ProxCenter 所在 node 改手動 |
-| [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](docs/pve/pve-ha-service-error-after-reboot/) | 10/12 手動重開前沒進維護模式，ct:100、vm:107 進入 error；查因、清除與重新啟動步驟；Shutdown Policy 改 migrate |
-| [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新、重開、網路掛載，以及備份與還原的不同判準；10/13 kernel 升到 7.0.14-23；10/14 清理舊 kernel，`proxmox-kernel-7.0` 不能刪 |
-| [Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？](docs/pve/ceph-bluestore-slow-op-backup-schedule/) | 10/14 硬碟正常、retries 集中在備份時段；三台備份錯開、PBS 刪除空 Prune、Verify 改 02:00 後 GC 由 77 分降到 7 分 |
-| [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification/) | 備份通知信改成中文；10/16 程式併入知識庫 `tools/`，並以新手角度改寫；PVE 已測，PBS 完整流程待測 |
-| [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal/) | 10/12 三台已 patch 並加 APT hook；widget-toolkit 5.2.10 多一個空格的踩雷；三台 Repository 已確認 no-subscription；三台登入驗證完成；10/13 PBS 也已套用 |
-
-## 備份做完，真的還原得回來嗎？
+### 4-2 更新主機與日常管理
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
-| [把 ProxCenter 容器還原成一台測試機](docs/pve/proxcenter-pbs-restore-dr-runbook/) | LXC 還原、IP 衝突與基本應用檢查 |
-| [Ubuntu VM 還原：6 分 38 秒代表什麼？](docs/pve/ubuntu-vm112-pbs-disaster-recovery/) | 有影片的還原實測；完整資料與應用驗收待補 |
-| [DP340 備份 PVE：還原演練怎麼安排？](docs/pve/synology-dp340-pve-cluster-validation/) | 原節點與其他節點測試計畫；結果表待填 |
-| [DP340 備份 Google Workspace：逐項驗證](docs/synology/dp340-google-workspace-apm20-sop/) | 授權、排程、Drive 還原；Gmail 問題未結案 |
-| [DP340 省下 75% 空間，該怎麼看？](docs/synology/dp340-google-workspace-apm20-dedup-test/) | 分清合併容量、節省比例與實際還原能力 |
+| [ProxCenter 逐台更新 PVE：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 想用工具一次一台安全地更新叢集 |
+| [PVE 更新重開後 HA 服務卡在 error](docs/pve/pve-ha-service-error-after-reboot/) | HA 服務顯示 error；要手動重開節點 |
+| [PVE HA 放置策略：PVE 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy/) | 兩台 DNS 不能放同一台，規則要設在哪裡 |
+| [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新 PBS 前後要查什麼；怎麼安全清理舊 kernel |
+| [PVE 9 登入一直跳「No valid subscription」](docs/pve/pve9-subscription-nag-removal/) | 沒買訂閱，想取消登入提示 |
+| [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification/) | 備份通知信看不懂，想改成中文 |
 
-## 看日誌、查登入攻擊
-
-| 文章 | 適合什麼時候看 |
-| --- | --- |
-| [把 PVE、PBS 與 NAS 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop/) | 10/17 以新手角度改寫：名詞、全貌、逐步建置；PBS、NAS、jt-ipam 主機名稱、13 個告警清單與監控腳本 |
-| [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 9/22 Group by source、Task Failed 修正、三項告警完整驗證 |
-| [PVE 一直被嘗試登入：確認 Fail2Ban 真的有擋](docs/pve/pve-cluster-fail2ban-hardening/) | 逐層核對日誌、封鎖時間與封包命中；10/12 查出入口是 8006 轉送；10/13 改用 WireGuard 並停用轉送；10/15 取消逐台封包驗證、PVE Firewall 改為可選、root@pam 啟用 TOTP、限縮 SSH root 金鑰 |
-| [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](docs/pve/wireguard-remote-access-replace-8006/) | 10/12 WGDashboard、split tunnel、伺服器端 Allowed IPs 只放 /32 的踩雷；iPhone 與筆電已從外部連上，10/13 停用 8006 轉送並從外部確認（更正 10/12 的誤判）、加上 VPN 異常 Gmail 告警 |
-| [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop/) | 9/30 主要流程已實測：LXC 規劃、All-in-one 安裝、密碼與 API 收斂、PBS 備份還原、HA、17 台 Agent（PVE 節點、PBS、Linux 容器、Ubuntu／Windows VM、AD 與 CA）|
-| [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh/) | 10/14 第一版完成：Grafana LXC、以 socat 轉送與 nftables 唯讀接上 Wazuh Indexer；告警數、高風險告警、斷線 Agent、Critical 弱點四格數字與告警趨勢 |
-| [用 Grafana 建立戰情中心（二）：接上 LibreNMS](docs/pve/grafana-war-room-librenms/) | 10/14 以 Global Read 使用者的 API Token 接上 LibreNMS（Sanctum `createToken()` 讓 Token 屬於唯讀帳號）；斷線設備數字與設備清單 |
-
-## 雲端主機（GCP）
+### 4-3 備份與還原
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
-| [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05/) | 10/5 PHP 警告灌爆 log、Ops Agent 403、主機憑證過期、防火牆收斂；部分項目待確認 |
+| [從 PBS 還原 ProxCenter：先複製一台，再確認能用](docs/pve/proxcenter-pbs-restore-dr-runbook/) | 第一次做容器還原演練 |
+| [Ubuntu VM 從 PBS 還原：6 分 38 秒代表什麼？](docs/pve/ubuntu-vm112-pbs-disaster-recovery/) | 有影片的 VM 還原實測；怎麼解讀還原時間 |
+| [用 DP340 備份 PVE：先把還原測試安排好](docs/pve/synology-dp340-pve-cluster-validation/) | 用 Synology 備份 PVE，要怎麼規劃驗證 |
+| [用 DP340 備份 Google Workspace](docs/synology/dp340-google-workspace-apm20-sop/) | 備份公司 Gmail、Drive；授權與還原測試 |
+| [DP340 顯示省下 75% 空間，該怎麼看？](docs/synology/dp340-google-workspace-apm20-dedup-test/) | 看懂重複資料刪除的數字 |
 
-## 超融合（Nutanix）
-
-| 文章 | 適合什麼時候看 |
-| --- | --- |
-| [Nutanix 收到高風險安全警示：要等歲修嗎？VM 要關機嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide/) | 10/6 規劃參考（未實測）：判斷急迫度、何時開 case、LCM rolling upgrade 不需關機的前提、各階段預估時間 |
-
-## 網路與 DNS
+### 4-4 日誌、監控與資安
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
-| [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | 10/7 已確認：ping 得到 8.8.8.8 但網址解析失敗；不能用一般常用 DNS，須指定 210.69.1.1（目前已知只有這一組） |
+| [把 PVE、PBS 與 NAS 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop/) | 想把各主機日誌集中查詢、出事寄信 |
+| [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 告警設好了，怎麼證明它真的會寄信 |
+| [在 PVE Cluster 用 LXC 架設 Wazuh](docs/pve/wazuh-lxc-ubuntu2204-sop/) | 自建資安監控：安裝、接 Agent、調校告警、看弱點 |
+| [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh/) | 把資安數據放進一頁儀表板 |
+| [用 Grafana 建立戰情中心（二）：接上 LibreNMS](docs/pve/grafana-war-room-librenms/) | 把設備上下線狀態放進同一頁 |
+| [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](docs/pve/pve-cluster-fail2ban-hardening/) | 有人一直猜密碼；加上兩步驟驗證 |
+| [不再把 PVE 8006 開到網際網路：改用 WireGuard](docs/pve/wireguard-remote-access-replace-8006/) | 在外面要管理家裡或公司的主機 |
 
-## IPAM 與網路資產管理
+### 4-5 網路與 IP 管理
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
-| [jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理](docs/network/jt-ipam-adoption-itbh/) | 10/7 依官方 Adoption Roadmap 整理：Subnet、Scan Agent、PVE、LibreNMS 已完成；Rack U 位待機櫃到貨後確認 |
+| [jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理](docs/network/jt-ipam-adoption-itbh/) | 想用工具管理 IP 位址，不再用 Excel |
+| [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | ping 得到外網，網址卻打不開 |
 
-## 硬體擴充與安裝
+### 4-6 雲端、超融合與硬體
 
-[ML30 Gen11：光碟機、M.2、iLO 與 Windows Server 2025](docs/hardware/hpe/ml30-gen11/)記錄實機組裝和辨識結果，也列出官方相容性與長時間測試的限制。
+| 文章 | 適合什麼時候看 |
+| --- | --- |
+| [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05/) | 雲端主機磁碟滿了，不知道從哪裡查 |
+| [Nutanix 收到高風險安全警示：要等歲修嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide/) | 收到廠商安全公告，判斷要多急（規劃參考，未實測） |
+| [ML30 Gen11 擴充紀錄](docs/hardware/hpe/ml30-gen11/) | 伺服器加裝光碟機、M.2、設定 iLO |
 
-## 如何使用這些筆記
+## 5. 怎麼讀每一篇文章
 
-先看文章開頭的版本、日期和驗證範圍，再核對自己的節點、位址、VMID 與儲存名稱。指令是案例的一部分，執行前要知道它會查詢、改設定，還是停止服務。
+每篇的結構都一樣：
 
-文章不公開密碼、私鑰或 token。原始版本與修改紀錄保留在 [GitHub 倉庫](https://github.com/kbwangtw/IT-Knowledge-Base)。
+| 段落 | 內容 |
+| --- | --- |
+| 一句話 | 這篇在講什麼、結論是什麼 |
+| 總覽表 | 適合誰、環境、日期、結論（✅ 已完成／⏳ 待辦） |
+| 先認識幾個名詞 | 文中會用到的術語白話解釋 |
+| 步驟 | **做什麼 → 怎麼做（指令） → 應該看到什麼** |
+| 常見問題 | 遇到某個現象時該怎麼辦 |
+| 待辦、延伸閱讀 | 還沒做完的事，以及相關文章 |
 
-2026-09-22 Graylog／PVE 更新：多次驗證失敗加入 Group by source，各節點獨立計數；Task Failed 改以非 : OK 的任務結束訊息判定。兩項均經安全測試確認 Event 與正式 Gmail；服務異常維持已完成。真實 log 證據與 logger 測試分開記錄。
+**照做前請注意**：
+
+- 文中的主機名稱、IP、VM 編號都是本環境的例子，先換成自己的。
+- 每行指令執行前，先弄懂它是「只讀取」、「改設定」還是「停止服務」。
+- 「已恢復」不等於每項測試都做完，實測結果和待辦會分開寫。
+- IP 使用示範位址（`192.0.2.x`、`198.51.100.x`）或 `<Graylog IP>` 這類代稱；**密碼、token、金鑰一律不放進來**。
+
+原始檔與修改紀錄都在 [GitHub 倉庫](https://github.com/kbwangtw/IT-Knowledge-Base)。
