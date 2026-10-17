@@ -69,7 +69,7 @@ rm -rf /root/restore-test                  # 解出的是明文，測完刪除
 
 ## Graylog 整合（2026-10-15）
 
-以「IP → 主機名稱（全域）」DSV 對照表供 Graylog Lookup Table 使用，日誌中的 IP 自動補上主機名稱。設定、憑證信任與 Pipeline 規則見 [把三台 PVE 的日誌集中到 Graylog](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-graylog-syslog-pipeline-sop/) 第 12 節。權杖 365 天到期（2027-10-15），到期前需重新產生並更新 Graylog 資料轉接器的網址。
+以「IP → 主機名稱（全域）」DSV 對照表供 Graylog Lookup Table 使用，日誌中的 IP 自動補上主機名稱。設定、憑證信任與 Pipeline 規則見 [把 PVE、PBS 與 NAS 的日誌集中到 Graylog](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-graylog-syslog-pipeline-sop/) 第 6 節。權杖 365 天到期（2027-10-15），到期前需重新產生並更新 Graylog 資料轉接器的網址。
 
 ## 機房與機櫃
 
