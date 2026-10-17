@@ -711,7 +711,7 @@ rm /root/event-defs.json
 - **Grace 5 分鐘**：同一告警 5 分鐘內最多寄一封。狀態持續時（節點一直離線、儲存一直超標）會每 5 分鐘再寄一封，直到恢復。
 - **NAS 登入失敗**：要「同一台 NAS、同一個 IP、5 分鐘內 ≥ 3 次」才通知；比較慢的嘗試由 DSM 的自動封鎖處理。
 - **NAS 管理員登入**：只涵蓋那一個管理員帳號。兩步驟驗證時只有最後的 `signed in ... successfully via [OTP]` 符合，一次登入只寄一封。
-- **WireGuard**：檢查範圍 5 分鐘比間隔 1 分鐘長，同一筆訊息會被抓到好幾次，靠 30 分鐘的 Grace 避免重複寄信（建置過程見 [WireGuard 文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)第 9 節）。
+- **WireGuard**：檢查範圍 5 分鐘比間隔 1 分鐘長，同一筆訊息會被抓到好幾次，靠 30 分鐘的 Grace 避免重複寄信（建置過程見 [WireGuard 文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)第 12 節）。
 
 ### 11-3 告警背後的監控腳本（PVE 三台）
 

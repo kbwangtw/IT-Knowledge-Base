@@ -292,7 +292,7 @@ unset PW
 
 | 面板 | 顯示 | 對照 |
 | --- | --- | --- |
-| 24 小時告警數 | 3,981～4,350（綠） | 與 Wazuh SOP §10-5 的每日 1,300～5,300 筆一致 |
+| 24 小時告警數 | 3,981～4,350（綠） | 與 [Wazuh 維運篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-operations/) §10-5 的每日 1,300～5,300 筆一致 |
 | 高風險告警 | 0（綠） | Explore 查 24 小時為 0 |
 | 斷線 Agent | 0（綠） | Explore 驗證 `id`、`status` 欄位 |
 | Critical 弱點 | 205（橘） | 命令列 `_count?q=vulnerability.severity:Critical` 為 205（10/06 修補後 292） |
@@ -306,7 +306,7 @@ unset PW
 | 項目 | 做法 | 結果 |
 | --- | --- | --- |
 | DNS | AdGuard 和 Pi-hole 兩台都加 `grafana` | 兩台都解析到 .33；LibreNMS 容器 `getent hosts` 解析得到 |
-| Wazuh Agent | Wazuh SOP §9-6：節點下載 .deb → `pct push` → `env WAZUH_MANAGER=... dpkg -i` → 確認 `<address>` 後才啟動 | Manager 顯示 `grafana`、Active |
+| Wazuh Agent | [Wazuh 安裝篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-sop/) §9-6：節點下載 .deb → `pct push` → `env WAZUH_MANAGER=... dpkg -i` → 確認 `<address>` 後才啟動 | Manager 顯示 `grafana`、Active |
 | LibreNMS | `/root/snmp-v3-add.sh 114 Node10`（`snmpd=active usmUser=1 createUser=0 udp161=1`）→ `/root/snmp-v3-lnms.sh grafana.<網域>` → `lnms device:poll` | v3／authPriv／SHA／AES |
 | PBS 備份 | `pvesh get /cluster/backup`：三台各有 `all: 1`、無排除的備份工作（21:00／21:30／22:00） | 不需調整，HA 搬到哪台都會被備份 |
 | HA | `ha-manager add ct:114` | started |
@@ -346,7 +346,7 @@ nftables 備份要選**建立 `wazuh_indexer` 之前**的那一份；如果之�
 
 ## 12. 日後維運注意
 
-- **Wazuh 升級後**檢查：`indexer-proxy` 是 active、9201 仍只允許 Grafana、`grafana` 帳號能登入，以及原有的 `api.yaml` host 與 55000 規則（見 Wazuh SOP §13）。
+- **Wazuh 升級後**檢查：`indexer-proxy` 是 active、9201 仍只允許 Grafana、`grafana` 帳號能登入，以及原有的 `api.yaml` host 與 55000 規則（見 [Wazuh 維運篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-operations/) §13）。
 - 如果用 `wazuh-passwords-tool` 重設 Indexer 密碼，工具可能用設定檔覆蓋目前的帳號清單，`grafana` 帳號可能消失（未實測）；重新執行 `/root/grafana-indexer-user.sh` 補回，並更新 Grafana 三個資料來源的密碼。
 - Skip TLS Verify：只有 Grafana 能連 9201、帳號唯讀，風險有限；待改善為匯入 Wazuh CA（同 jt-ipam）。
 - 資料來源顯示 compatibility mode：Wazuh Indexer 對外回報相容版本，目前查詢正常；日後出現查詢錯誤再回頭檢查。

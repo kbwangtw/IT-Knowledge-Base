@@ -26,7 +26,8 @@
 
 - [把 PVE、PBS 與 NAS 的日誌集中到 Graylog](docs/pve/proxmox-graylog-syslog-pipeline-sop.md)：收集、分類、主機名稱查表、13 個 Email 告警（2026-10-17 以新手角度改寫）
 - [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18.md)
-- [在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）](docs/pve/wazuh-lxc-ubuntu2204-sop.md)：主要流程已實測，Agent 上線、告警調校、LibreNMS 動態群組
+- [在 PVE Cluster 用 LXC 架設 Wazuh（一）：安裝與接上 Agent](docs/pve/wazuh-lxc-ubuntu2204-sop.md)
+- [Wazuh 維運（二）：資料保留、告警調校、弱點修補與整合](docs/pve/wazuh-lxc-ubuntu2204-operations.md)：告警調校、弱點修補、LibreNMS 動態群組、jt-ipam／Grafana 整合
 - [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh.md)
 - [用 Grafana 建立戰情中心（二）：接上 LibreNMS](docs/pve/grafana-war-room-librenms.md)
 - [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](docs/pve/pve-cluster-fail2ban-hardening.md)
@@ -85,7 +86,8 @@ IT-Knowledge-Base/
 | 照實記錄 | 「做了什麼」「看到什麼結果」「哪些還沒驗證」分開寫；推測的地方要標明 |
 | 不放機密 | 不放真實 IP、網域、密碼、token、私鑰、完整憑證；改用示範位址或代稱 |
 | SOP 只留可照做的步驟 | 失敗或做到一半的清理步驟不寫進 SOP；踩過的雷整理成「常見問題」 |
-| 新手看得懂 | 開頭一句話說明、名詞解釋、每一步寫「應該看到什麼」 |
+| 新手看得懂 | 依固定版型撰寫（見 [`CLAUDE.md`](CLAUDE.md)）：一句話 → 總覽表 → 名詞 → 步驟（做什麼／怎麼做／應該看到什麼）→ 常見問題 → 待辦 → 延伸閱讀 |
+| 太長就拆篇 | 超過約 1,500 行或讀者目的不同（例如安裝 vs. 維運）時拆成上下篇，互相連結 |
 | 修改走 PR | 在分支上修改 → 開 Pull Request → 合併到 `main` → 網站自動更新；所有修改都能從 Git 歷史追查 |
 
 ## 附件
