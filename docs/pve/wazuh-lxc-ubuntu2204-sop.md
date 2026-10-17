@@ -4,14 +4,59 @@ title: "在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）"
 date: 2026-09-29
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-sop/
-last_modified_at: 2026-10-16
+last_modified_at: 2026-10-17
 ---
+{% raw %}
 
 # 在 PVE Cluster 用 LXC 架設 Wazuh（Ubuntu 22.04）
 
-Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「安全判讀」：主機完整性檢查（FIM）、弱點偵測、設定稽核與入侵告警。本文記錄在 PVE Cluster 上建立一台 Ubuntu 22.04 LXC，以 All-in-one（Indexer + Server + Dashboard 同一台）方式安裝 Wazuh 的步驟。
+> **一句話**：Graylog 負責「把日誌收集起來、查得到」；Wazuh 再多做一層「安全判讀」，會告訴你哪台主機被改了檔案、有哪些弱點、有沒有可疑登入。本文從建一台 LXC 開始，到 17 台主機裝好 Agent、調校告警、修補弱點，全部照實測紀錄整理。
 
-> 文件狀態：**主要流程已實測**（2026-09-29～09-30）。Step 0～8 完成驗證；Agent 已涵蓋 PVE 節點、Debian 13 與 Ubuntu 容器、Ubuntu VM、Windows 用戶端、網域控制站、CA 與 PBS，共 17 台 Active。7-3 的 PVE 資料中心防火牆屬另案規劃，本文未啟用。
+| 項目 | 內容 |
+| --- | --- |
+| 適合誰看 | 想在 PVE 上自建資安監控（SIEM）的人；第一次接觸 Wazuh 的人 |
+| 環境 | PVE 9.2.20 三節點 + Ceph；CT 112（Ubuntu 22.04 LXC）；Wazuh 4.14.8 All-in-one |
+| 日期 | 2026-09-29 開始建置；持續更新到 2026-10-16 |
+| 結論 | ✅ 安裝、備份、HA、17 台 Agent 全部 Active；✅ 資料保留 30 天；✅ 告警兩輪調校；✅ Critical 弱點 998 → 292；✅ 已接 jt-ipam、Graylog、Grafana |
+
+> 文中 IP 都是文件示範位址（192.0.2.0/24），指令執行前請替換。PVE 資料中心防火牆（7-3）屬另案規劃，本文未啟用。
+
+## 這篇很長，怎麼讀？
+
+| 你想做的事 | 看哪幾節 |
+| --- | --- |
+| 從零安裝一台 Wazuh | 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 |
+| 幫新主機裝 Agent | 9（依作業系統選 9-2、9-6、9-7、9-8、9-9、9-10） |
+| 磁碟越來越滿 | 10 |
+| 告警太多、想降噪 | 11 |
+| 看弱點、決定要不要修 | 12 |
+| 和其他系統整合 | 13（jt-ipam）、14（WireGuard 告警）、15（Grafana） |
+| 遇到問題 | 文末「常見問題」 |
+
+每一節都分成**做什麼 → 怎麼做（指令） → 本案實測**。「本案實測」是當天的真實結果，照做時可以拿來對照。
+
+## 先認識幾個名詞
+
+| 名詞 | 白話解釋 | 預設 Port |
+| --- | --- | --- |
+| **Wazuh Indexer** | 存資料、給人搜尋的資料庫（以 OpenSearch 為基礎） | 9200/tcp（只給本機用） |
+| **Wazuh Server（Manager）** | 接收 Agent 資料、套規則、產生告警 | 1514/tcp（Agent 連線）、1515/tcp（Agent 註冊）、55000/tcp（API） |
+| **Wazuh Dashboard** | 網頁介面 | 443/tcp |
+| **Wazuh Agent** | 裝在被監控主機上的小程式，主動往 Server 連線 | — |
+| **All-in-one** | Indexer、Server、Dashboard 三個裝在同一台 | — |
+| **規則（rule）／level** | 每種事件對應一條規則，level 0～15 表示嚴重程度，數字越大越嚴重 | — |
+| **FIM** | 檔案完整性監控：重要檔案被改了就告警 | — |
+| **rootcheck／SCA** | 檢查可疑檔案、設定是否符合安全基準（例如 CIS） | — |
+| **ISM** | Index State Management：自動刪除太舊的資料 | — |
+| **LXC／CT** | 輕量容器，和 PVE 主機共用 Linux kernel | — |
+
+```text
+被監控主機（Agent）──1514/1515 tcp──▶ Wazuh Server ──▶ Wazuh Indexer
+                                                          ▲
+                                   管理者瀏覽器 ──443──▶ Wazuh Dashboard
+```
+
+> Graylog 在本環境用的是 **UDP** 1514，Wazuh Agent 用的是 **TCP** 1514。兩者在不同容器、不同 IP 時互不影響；若將來想讓 Wazuh 也收 syslog，要另外規劃 Port，避免混淆。
 
 ## 進度表
 
@@ -33,23 +78,6 @@ Graylog 負責「把日誌收集起來、查得到」；Wazuh 則多做一層「
 | 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
 | 14 | WireGuard VPN 健康監控 | 完成 | 2026-10-13：ct:109 內部檢查（100150）＋ Manager 外部檢查 ct:109（100151）；`syslog_output` 只把 wireguard 群組送 Graylog；兩種情況的 Gmail 告警都實測收到 |
 | 15 | Grafana 唯讀存取 | 完成 | 2026-10-14：socat 轉送 9201 → Indexer（Indexer 設定不動）、nftables 只允許 Grafana；Indexer 唯讀角色 `grafana_wazuh_read`；戰情中心第一版完成 |
-
-## 先認識四個名詞
-
-| 元件 | 白話意思 | 預設 Port |
-| --- | --- | --- |
-| Wazuh Indexer | 存資料、給人搜尋的資料庫（以 OpenSearch 為基礎） | 9200/tcp（只給本機或叢集內用） |
-| Wazuh Server（Manager） | 接收 Agent 資料、套規則、產生告警 | 1514/tcp（Agent 連線）、1515/tcp（Agent 註冊）、55000/tcp（API） |
-| Wazuh Dashboard | 網頁介面 | 443/tcp |
-| Wazuh Agent | 裝在被監控主機上的小程式 | 主動往 Server 連線 |
-
-~~~text
-被監控主機（Agent）──1514/1515 tcp──▶ Wazuh Server ──▶ Wazuh Indexer
-                                                          ▲
-                                   管理者瀏覽器 ──443──▶ Wazuh Dashboard
-~~~
-
-注意：Graylog 在本環境用的是 **UDP** 1514，Wazuh Agent 用的是 **TCP** 1514。兩者在不同容器、不同 IP 時互不影響；若將來想讓 Wazuh 也收 syslog，要另外規劃 Port，避免混淆。
 
 ## 0. 規劃資源與網路
 
@@ -78,25 +106,25 @@ All-in-one 的 Indexer 是 Java 程式，吃記憶體與磁碟 I/O。以下是�
 
 在任一 PVE 節點執行，確認 CT ID 未被使用、共用儲存存在且有空間：
 
-~~~bash
+```bash
 pvesh get /cluster/nextid          # 叢集建議的下一個可用 ID
 pvesm status                       # 看儲存名稱、類型、剩餘空間
 pvecm status                       # 確認叢集 Quorate: Yes
-~~~
+```
 
 **CT ID 一定要用叢集查詢確認，不能憑印象。** `nextid` 回傳的是「最小的可用 ID」；例如回傳 114，代表 100～113 可能都已被占用。想用別的號碼時，先查叢集全部資源：
 
-~~~bash
+```bash
 pvesh get /cluster/resources --type vm --output-format json \
   | grep -o '"vmid":[0-9]*' | sort -t: -k2 -n
-~~~
+```
 
 **確認 rootfs 儲存允許放容器。** RBD 儲存要在 Content 勾選 `Container`（rootdir）才能放 CT：
 
-~~~bash
+```bash
 pvesm status --content rootdir     # 有列出 VM_Pool 才能選它當 rootfs
 grep -A6 '^rbd: VM_Pool' /etc/pve/storage.cfg
-~~~
+```
 
 ### 0-3 本案實測（2026-09-29）
 
@@ -118,7 +146,7 @@ grep -A6 '^rbd: VM_Pool' /etc/pve/storage.cfg
 
 **先檢查，不夠才設定。** 在 **每一台** PVE 節點執行：
 
-~~~bash
+```bash
 # 1. 看目前值，以及是哪個設定檔給的
 sysctl vm.max_map_count
 grep -rs max_map_count /etc/sysctl.conf /etc/sysctl.d /run/sysctl.d /usr/lib/sysctl.d
@@ -132,7 +160,7 @@ fi
 
 # 3. 確認
 sysctl vm.max_map_count
-~~~
+```
 
 預期結果：值 ≥ 262144。**原本就更大時什麼都不用做，千萬不要調小。**
 
@@ -144,13 +172,13 @@ sysctl vm.max_map_count
 
 在任一節點執行（範本存在 `local` 這類儲存，若是節點本機儲存，建立 CT 時要選同一節點）：
 
-~~~bash
+```bash
 pveam update
 pveam available --section system | grep ubuntu-22.04
 # 以上一行列出的實際檔名為準，例如：
 pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
 pveam list local
-~~~
+```
 
 ## 3. 建立 LXC
 
@@ -160,7 +188,7 @@ pveam list local
 
 先把自己的公鑰放在節點上（例：`/root/.ssh/wazuh_admin.pub`），用金鑰登入，避免在指令歷史留下密碼：
 
-~~~bash
+```bash
 pct create <CTID> local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
   --hostname wazuh \
   --cores 4 \
@@ -175,7 +203,7 @@ pct create <CTID> local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
   --onboot 1 \
   --timezone Asia/Taipei \
   --ssh-public-keys /root/.ssh/wazuh_admin.pub
-~~~
+```
 
 需要 VLAN 時在 `--net0` 後加 `,tag=<VLAN ID>`。
 
@@ -208,12 +236,12 @@ pct create <CTID> local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
 | `net0: ...ip=.../24,gw=...` | 固定 IP | `pct set <CTID> --net0 ...` |
 | `onboot: 1` | 1 | `pct set <CTID> --onboot 1` |
 
-~~~bash
+```bash
 pct config <CTID>      # 核對 cores、memory、swap、rootfs、net0、unprivileged、features
 pct start <CTID>
 pct status <CTID>
 pct enter <CTID>       # 進入容器
-~~~
+```
 
 ### 3-4 本案核對結果（2026-09-29，CT 112 位於 node12）
 
@@ -229,12 +257,12 @@ pct enter <CTID>       # 進入容器
 
 修正指令（在 node12 執行）：
 
-~~~bash
+```bash
 pct set 112 --features nesting=1 --onboot 1
 pct resize 112 rootfs 80G        # 只能加大；可在開機狀態執行
 pct reboot 112                   # nesting 需重開才生效；未開機則用 pct start 112
 pct config 112 | grep -E 'features|onboot|rootfs'
-~~~
+```
 
 本案實測：CT 為 running、未鎖定。`pct set` 無輸出（成功）；`pct resize` 先擴大 RBD 映像，再由 resize2fs 線上擴充檔案系統至 20971520 個 4k 區塊（= 80 GiB）。訊息中的 `is mounted on /tmp` 是 PVE 為了線上擴充而暫時掛載，屬正常現象。修正後 `features: nesting=1`、`onboot: 1`、`size=80G`；nesting 需重開 CT 才生效。
 
@@ -242,7 +270,7 @@ pct config 112 | grep -E 'features|onboot|rootfs'
 
 以下在容器內執行：
 
-~~~bash
+```bash
 # 網路與 DNS
 ip -4 addr show eth0
 ping -c 3 192.0.2.1
@@ -262,7 +290,7 @@ apt -y install curl gnupg apt-transport-https ca-certificates
 
 # 時區與時間（告警時間要正確）
 timedatectl
-~~~
+```
 
 若 `packages.wazuh.com` 解析不到，先處理 DNS 或對外防火牆，後續安裝需要連線到此網址。
 
@@ -279,13 +307,13 @@ timedatectl
 
 `getent hosts` 會優先顯示 IPv6（AAAA）結果。CT 的 net0 設定 `ip6=auto`，若自動取得了 IPv6 位址、卻沒有真正通往外部的 IPv6 路由，curl 與 apt 會先嘗試 IPv6，造成下載緩慢、逾時或失敗。安裝前分別測試 IPv4 與 IPv6：
 
-~~~bash
+```bash
 getent ahostsv4 packages.wazuh.com | head -3      # 有沒有 IPv4 位址
 ip -6 addr show eth0 scope global                 # 有沒有取得全域 IPv6
 ip -6 route show default                          # 有沒有 IPv6 預設路由
 curl -4 -sS -o /dev/null -w 'IPv4: %{http_code} %{time_total}s\n' https://packages.wazuh.com/4.14/wazuh-install.sh
 curl -6 -sS -m 10 -o /dev/null -w 'IPv6: %{http_code} %{time_total}s\n' https://packages.wazuh.com/4.14/wazuh-install.sh
-~~~
+```
 
 判讀：兩者都是 200 代表正常；IPv4 200、IPv6 失敗或逾時時，擇一處理：
 
@@ -305,17 +333,17 @@ curl -6 -sS -m 10 -o /dev/null -w 'IPv6: %{http_code} %{time_total}s\n' https://
 
 LXC 沒有自己的系統時鐘，時間直接來自 PVE 主機的 kernel，所以容器內 NTP 顯示 inactive 是正常的，**也不要在容器內安裝 chrony／ntpd**（非特權容器沒有權限調整時鐘）。時間準不準取決於主機，要在 PVE 節點上確認：
 
-~~~bash
+```bash
 # 在 PVE 節點（本案 node12，也建議三台都查）
 chronyc tracking | grep -E 'Reference|System time|Leap'
-~~~
+```
 
 容器內設定時區（只影響顯示與日誌時間格式，不影響時鐘本身）：
 
-~~~bash
+```bash
 timedatectl set-timezone Asia/Taipei
 timedatectl | grep 'Time zone'
-~~~
+```
 
 本案結果：`Time zone: Asia/Taipei (CST, +0800)`。
 
@@ -327,25 +355,25 @@ Wazuh Indexer 內部以 UTC 儲存時間，Dashboard 依瀏覽器時區顯示；
 
 **(1) 更新系統並安裝工具**
 
-~~~bash
+```bash
 apt update && apt -y full-upgrade
 apt -y install curl gnupg apt-transport-https ca-certificates tmux
-~~~
+```
 
 **(2) 在 tmux 裡執行安裝**：安裝要 10～20 分鐘，若 SSH／Console 中途斷線，前景程式會被中斷、留下裝到一半的元件。tmux 讓程式在斷線後繼續執行：
 
-~~~bash
+```bash
 tmux new -s wazuh          # 開一個名為 wazuh 的工作階段
 # 斷線後重新連回：pct enter 112 → tmux attach -t wazuh
-~~~
+```
 
 **(3) 下載並執行安裝助手**
 
-~~~bash
+```bash
 cd /root
 curl -sO https://packages.wazuh.com/4.14/wazuh-install.sh
 bash ./wazuh-install.sh -a
-~~~
+```
 
 注意兩點：
 
@@ -354,11 +382,11 @@ bash ./wazuh-install.sh -a
 
 **(4) 安裝失敗時**：先看 `/var/log/wazuh-install.log` 最後幾十行找原因，修正後用安裝助手的移除選項清掉半套元件再重裝：
 
-~~~bash
+```bash
 tail -50 /var/log/wazuh-install.log
 bash ./wazuh-install.sh -u      # 移除本機已安裝的 Wazuh 元件
 bash ./wazuh-install.sh -a
-~~~
+```
 
 - `-a` 代表 All-in-one：同時安裝 Indexer、Server、Dashboard。
 - 安裝約需 10～20 分鐘，視網路與儲存速度而定。
@@ -389,11 +417,11 @@ bash ./wazuh-install.sh -a
 
 ## 6. 驗證服務與登入 Dashboard
 
-~~~bash
+```bash
 systemctl status wazuh-indexer wazuh-manager wazuh-dashboard --no-pager
 /var/ossec/bin/wazuh-control status
 ss -tlnp | grep -E ':443|:1514|:1515|:9200|:55000'
-~~~
+```
 
 從管理電腦瀏覽 `https://192.0.2.32`，以 `admin` 登入。憑證是自簽，瀏覽器會出現警告，確認網址無誤後繼續。
 
@@ -421,11 +449,11 @@ Agents Summary 只計算外部 Agent，Manager 本身（ID 000）不列入，所
 2. **密碼曾經外流時才更換**（例如出現在截圖、共用畫面、聊天紀錄）。
 3. **妥善處理 `/root/wazuh-install-files.tar`**：它包含所有內部帳號密碼與 TLS 憑證私鑰。日後新增 Wazuh 節點或重建憑證會用到，不建議直接刪除。
 
-~~~bash
+```bash
 # 只讓 root 可讀
 chmod 600 /root/wazuh-install-files.tar
 ls -l /root/wazuh-install-files.tar
-~~~
+```
 
 建議另存一份到離線、受控的位置（例如內部加密儲存），不要放到雲端或本倉庫。注意：CT 112 的 PBS 備份也會包含這個檔案，備份的存取權限要一併管控。
 
@@ -437,43 +465,43 @@ ls -l /root/wazuh-install-files.tar
 
 `read` 引號內的文字只是**提示字**，照抄即可；按 Enter 後，在「新的 admin 密碼:」後面輸入密碼（畫面不會顯示），再按 Enter。**不要把密碼寫進引號裡**，否則密碼會顯示在畫面上並留在 history。執行工具前先用 `echo "長度：${#NEWPW}"` 確認不是 0。
 
-~~~bash
+```bash
 read -rsp '新的 admin 密碼: ' NEWPW; echo
 bash /usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh -u admin -p "$NEWPW"
 unset NEWPW
-~~~
+```
 
 改完驗證：
 
-~~~bash
+```bash
 filebeat test output          # 最後要出現 talk to server... OK
 systemctl is-active filebeat wazuh-dashboard
-~~~
+```
 
 再用新密碼登入 Dashboard（本案 2026-09-30 已確認可登入）。
 
 **為什麼要測 Filebeat？** All-in-one 的 Filebeat 預設用 admin 帳號寫入 Indexer，密碼存在 Filebeat keystore。All-in-one 環境下工具通常會一併更新；若 `talk to server` 失敗，手動更新 keystore：
 
-~~~bash
+```bash
 read -rsp '新的 admin 密碼: ' NEWPW; echo
 echo "$NEWPW" | filebeat keystore add password --stdin --force
 unset NEWPW
 systemctl restart filebeat
 filebeat test output
-~~~
+```
 
 Dashboard 連 Indexer 用的是另一個內部帳號（kibanaserver），改 admin 不影響 Dashboard 服務本身。
 
 **同步更新 Wazuh Server 的 keystore。** 工具最後會出現 WARNING，提醒要更新 Wazuh dashboard、Wazuh server、Filebeat 的密碼並重啟服務。All-in-one 的 Filebeat 已由工具自動更新；Wazuh Server（Manager）的漏洞偵測模組透過 indexer-connector 連線 Indexer，帳號密碼存在 Manager 自己的 keystore，預設也是 admin，需要手動更新：
 
-~~~bash
+```bash
 read -rsp '新的admin密碼:' NEWPW; echo
 echo "$NEWPW" | /var/ossec/bin/wazuh-keystore -f indexer -k password
 unset NEWPW
 systemctl restart wazuh-manager filebeat
 systemctl is-active wazuh-manager filebeat
 grep -iE 'indexer-connector|401|unauthorized' /var/ossec/logs/ossec.log | tail -5
-~~~
+```
 
 `filebeat test output` 會重新讀取 keystore，但執行中的 Filebeat 程序仍使用啟動時載入的舊密碼，所以一起重啟。
 
@@ -497,10 +525,10 @@ Manager keystore 更新：`NEWPW` 長度 13（非 0），`wazuh-manager`、`file
 
 Wazuh 各元件版本要一致才能正常運作，`apt upgrade` 時被單獨升級容易出問題。官方建議安裝後先停用套件庫，升級時再依官方升級程序手動打開：
 
-~~~bash
+```bash
 sed -i "s/^deb /#deb /" /etc/apt/sources.list.d/wazuh.list
 apt update
-~~~
+```
 
 **本案實測（2026-09-30）**：`wazuh.list` 已變成 `#deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main`；`apt update` 只剩 Ubuntu jammy 的三個來源，不再連 packages.wazuh.com。
 
@@ -519,16 +547,16 @@ apt update
 
 **(1) 先確認現況**（在任一節點）：
 
-~~~bash
+```bash
 cat /etc/pve/firewall/cluster.fw 2>/dev/null | head -20   # 資料中心層級：[OPTIONS] 是否 enable: 1
 cat /etc/pve/firewall/112.fw 2>/dev/null                  # CT 層級：是否已有規則
-~~~
+```
 
 PVE 防火牆分三層：資料中心 → 節點 → VM／CT。**資料中心層級沒有啟用時，CT 的規則不會生效**。啟用資料中心防火牆會影響所有節點（包括 8006 管理介面與 SSH），屬於另一項變更，須另行規劃，不在本 SOP 內直接開啟。
 
 **(2) 寫入 CT 規則**（檔案在叢集檔案系統上，任一節點寫入即同步）：
 
-~~~bash
+```bash
 cat > /etc/pve/firewall/112.fw <<'FWEOF'
 [OPTIONS]
 enable: 1
@@ -543,7 +571,7 @@ IN SSH(ACCEPT) -source 192.0.2.0/24 # SSH
 IN Ping(ACCEPT) -source 192.0.2.0/24 # ICMP ping
 FWEOF
 pve-firewall compile > /dev/null && echo "syntax OK"
-~~~
+```
 
 `policy_in: DROP` 表示「沒有明確允許的連入一律丟棄」。網卡需有 `firewall=1`（本案已設定）規則才會套用。
 
@@ -572,32 +600,32 @@ pve-firewall compile > /dev/null && echo "syntax OK"
 
 **(1) 確認現況**
 
-~~~bash
+```bash
 grep -n 'host' /var/ossec/api/configuration/api.yaml
 grep -n 'url:' /usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
-~~~
+```
 
 本案結果：`api.yaml` 沒有未註解的 `host:`，代表使用預設值（所有介面）；Dashboard 的 API 位址是 `url: https://127.0.0.1`，改成只聽本機後 Dashboard 仍連得到。
 
 **(2) 備份並加入設定**
 
-~~~bash
+```bash
 cp -a /var/ossec/api/configuration/api.yaml /var/ossec/api/configuration/api.yaml.bak-$(date +%F)
 tail -c1 /var/ossec/api/configuration/api.yaml | od -c | head -1   # 確認檔尾是 \n
 echo "host: ['127.0.0.1']" >> /var/ossec/api/configuration/api.yaml
 grep -n '^host' /var/ossec/api/configuration/api.yaml              # 只能有一行
-~~~
+```
 
 YAML 最上層不能有重複的 key，所以加入前要確認沒有其他未註解的 `host:`。
 
 **(3) 重啟並驗證**
 
-~~~bash
+```bash
 systemctl restart wazuh-manager
 systemctl is-active wazuh-manager
 ss -tlnp | grep ':55000'                     # 應只剩 127.0.0.1:55000
 tail -5 /var/ossec/logs/api.log
-~~~
+```
 
 再到 Dashboard 開啟 Agents management 或 Server management，頁面能正常載入、沒有 API 連線錯誤。從管理電腦測試 55000 應連不上：`Test-NetConnection <Wazuh IP> -Port 55000`。
 
@@ -618,10 +646,10 @@ tail -5 /var/ossec/logs/api.log
 
 **回復方式**：
 
-~~~bash
+```bash
 cp -a /var/ossec/api/configuration/api.yaml.bak-<日期> /var/ossec/api/configuration/api.yaml
 systemctl restart wazuh-manager
-~~~
+```
 
 **判讀限制**：管理與 Agent 都在同一網段時，這組規則的主要效果是關閉 55000 與其他未列出的 Port，並阻擋其他網段（如 VPN、其他 VLAN）連入；同網段內的主機仍可連 443／1514／1515。
 
@@ -631,10 +659,10 @@ systemctl restart wazuh-manager
 
 安裝與安全設定完成後，先留一個「乾淨狀態」的備份點。在 CT 所在節點：
 
-~~~bash
+```bash
 pvesh get /cluster/backup --output-format yaml     # 看既有的排程備份工作（是否已包含 112 或 all）
 vzdump 112 --storage PBS31 --mode snapshot --protected 1 --notes-template '{{guestname}} Wazuh 4.14 安裝完成'
-~~~
+```
 
 `vzdump` 要在 **CT 目前所在的節點**執行。`--protected 1` 讓這份備份不會被 prune 保留策略自動刪除；不再需要時，到 PBS31 取消保護即可。
 
@@ -675,13 +703,13 @@ Datacenter → Backup：若既有工作是「All」則已自動包含；否則�
 
 還原成**另一個 CT ID**，開機前把網卡設為斷線（`link_down=1`），避免和正式機衝突：
 
-~~~bash
+```bash
 pvesh get /cluster/nextid                                   # 取一個可用的 CT ID
 pvesm list PBS31 --vmid 112                                 # 找到剛才那份備份的 volid
 pct restore <新CTID> <volid> --storage VM_Pool --unique 1   # --unique：產生新的 MAC
 pct set <新CTID> --onboot 0 --net0 name=eth0,bridge=vmbr0,ip=192.0.2.99/24,gw=192.0.2.1,link_down=1
 pct start <新CTID>
-~~~
+```
 
 | 設定 | 目的 |
 | --- | --- |
@@ -691,13 +719,13 @@ pct start <新CTID>
 
 等 1～2 分鐘讓服務啟動後驗證：
 
-~~~bash
+```bash
 pct exec <新CTID> -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
 pct enter <新CTID>
 curl -sk -u admin 'https://127.0.0.1:9200/_cluster/health?pretty'   # 會詢問 admin 密碼；status 應為 green
 curl -sk -u admin 'https://127.0.0.1:9200/_cat/indices/wazuh-alerts-*?v&s=index'   # 告警索引與筆數
 exit
-~~~
+```
 
 **本案實測（2026-09-30，還原到 node11 的 CT 114）**：
 
@@ -720,29 +748,29 @@ exit
 
 驗收後刪除測試 CT：
 
-~~~bash
+```bash
 pct stop <新CTID>
 pct destroy <新CTID> --purge
-~~~
+```
 
 ### 8-4 遷移測試與 HA
 
 LXC 不支援線上遷移，只能「重啟式遷移」，會中斷約 1～2 分鐘加上服務啟動時間：
 
-~~~bash
+```bash
 pct migrate 112 <目標節點> --restart
 # 遷移後在目標節點
 pct exec 112 -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
-~~~
+```
 
 **本案紀錄（2026-09-30）**：CT 112 已由 node12 遷移至 node10（8-1 手動備份即在 node10 執行）。遷移後驗證：
 
-~~~bash
+```bash
 pct status 112
 pct exec 112 -- systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
 pct exec 112 -- sysctl vm.max_map_count
 pct exec 112 -- ss -tlnp | grep -E ':443 |:1514|:1515|:55000'
-~~~
+```
 
 遷移後驗證結果：
 
@@ -760,11 +788,11 @@ pct exec 112 -- ss -tlnp | grep -E ':443 |:1514|:1515|:55000'
 
 **加入前先看 HA 現況**（任一節點）：
 
-~~~bash
+```bash
 ha-manager status          # quorum、master、各節點 lrm 狀態、既有 HA 資源
 ha-manager config          # 既有 HA 資源清單
 ha-manager rules config 2>/dev/null   # PVE 9 的 HA 規則（取代舊版 HA groups）
-~~~
+```
 
 **盲點：HA 會啟用節點的 watchdog 自我隔離（fencing）。** 節點上一旦有 HA 資源，該節點的 LRM 會變成 active 並啟動 watchdog；之後若這台節點失去 quorum（例如叢集網路中斷），它會**自動重開機**以保護資料。如果叢集原本已經有 HA 資源，這是既有行為；如果 CT 112 是第一個 HA 資源，等於替叢集新增了這項機制，需要先確認叢集網路穩定。
 
@@ -781,10 +809,10 @@ CT 112 目前在 node10，而 node10 的 LRM 本來就是 active，加入 HA 不
 
 加入 HA：
 
-~~~bash
+```bash
 ha-manager add ct:112 --state started --max_restart 1 --max_relocate 1
 ha-manager status | grep -E 'ct:112|lrm'
-~~~
+```
 
 | 參數 | 意思 |
 | --- | --- |
@@ -818,7 +846,7 @@ Agent 版本不可高於 Manager（本案 4.14.8）。安裝時指定版本號�
 
 PVE 節點或其他重要主機建議用這個方式：直接安裝 .deb，不在主機上新增 Wazuh 套件庫，日後 `apt upgrade` 不會連帶升級 Agent。
 
-~~~bash
+```bash
 apt-get install -y lsb-release        # Agent 的相依套件；PVE 9（Debian 13）預設沒有安裝
 cd /tmp
 wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.8-1_amd64.deb
@@ -826,18 +854,18 @@ WAZUH_MANAGER='192.0.2.32' WAZUH_AGENT_NAME='<主機名稱>' dpkg -i ./wazuh-age
 systemctl daemon-reload
 systemctl enable --now wazuh-agent
 systemctl is-active wazuh-agent
-~~~
+```
 
 也可在 Dashboard 的 **Deploy new agent** 精靈選擇作業系統與 Manager 位址，產生對應指令後核對版本再執行。
 
 ### 9-2a PVE 節點安裝前檢查
 
-~~~bash
+```bash
 cat /etc/debian_version                        # PVE 9 為 Debian 13（trixie）
 dpkg -l | grep -i wazuh                        # 應無輸出
 timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && echo "1514 OK"
 timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "1515 OK"
-~~~
+```
 
 本案結果（2026-09-30）：node10、node11、node12 皆為 Debian 13.7，沒有 Wazuh 套件，1514／1515 皆 OK。安裝順序：先 node11 驗證成功，再依序安裝 node10、node12。
 
@@ -847,26 +875,26 @@ timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "1515 OK"
 
 第一次 `dpkg -i` 出現：
 
-~~~text
+```text
 dpkg: dependency problems prevent configuration of wazuh-agent:
  wazuh-agent depends on lsb-release; however:
   Package lsb-release is not installed.
-~~~
+```
 
 `dpkg -i` 只安裝指定的檔案，不會自動下載相依套件，所以套件被解開但停在「未設定」狀態。處理方式：
 
-~~~bash
+```bash
 apt-get install -s lsb-release          # 模擬：確認只會新增 lsb-release
 apt-get install -y lsb-release          # 從 Debian 官方套件庫安裝；apt 會順便完成 wazuh-agent 的設定
 grep -A2 '<server>' /var/ossec/etc/ossec.conf    # 檢查 Manager 位址
-~~~
+```
 
 apt 在完成 wazuh-agent 設定時沒有帶 `WAZUH_MANAGER` 環境變數，設定檔中的位址停在佔位字 `MANAGER_IP`。本案實測：帶環境變數重跑 `dpkg -i`（同版本覆蓋安裝）**不會**改寫位址，仍是 `MANAGER_IP`；環境變數只在全新安裝時套用。因此手動修正：
 
-~~~bash
+```bash
 sed -i 's|<address>MANAGER_IP</address>|<address>192.0.2.32</address>|' /var/ossec/etc/ossec.conf
 grep -A2 '<server>' /var/ossec/etc/ossec.conf    # <address> 必須是 Manager IP
-~~~
+```
 
 Agent 名稱沒有另外寫入設定檔時，註冊時會使用主機名稱（本案即 node11）。
 
@@ -874,13 +902,13 @@ Agent 名稱沒有另外寫入設定檔時，註冊時會使用主機名稱（�
 
 ### 9-3 驗證
 
-~~~bash
+```bash
 # Agent 端
 grep -iE 'connected|error' /var/ossec/logs/ossec.log | tail -5
 
 # Manager 端（CT 112 內）
 /var/ossec/bin/agent_control -l
-~~~
+```
 
 Dashboard → Agents management → Summary 應看到新 Agent，狀態為 **Active**。
 
@@ -915,7 +943,7 @@ Dashboard 上的「Cluster node: node01」是 Wazuh Manager 叢集的節點名�
 
 ### 9-4 回復方式（要移除 Agent 時）
 
-~~~bash
+```bash
 # Agent 端
 systemctl disable --now wazuh-agent
 apt-get remove --purge -y wazuh-agent
@@ -923,7 +951,7 @@ rm -rf /var/ossec
 
 # Manager 端（CT 112 內），<ID> 由 agent_control -l 查得
 /var/ossec/bin/manage_agents -r <ID>
-~~~
+```
 
 ### 9-5 PVE 節點的告警調校（接上後觀察）
 
@@ -939,9 +967,9 @@ rm -rf /var/ossec
 
 `pct push`／`pct exec` 只能操作**目前在這台節點上**的容器，先確認 CT ID 與所在節點：
 
-~~~bash
+```bash
 pct list        # 在每台節點各執行一次
-~~~
+```
 
 本案清單（2026-09-30 `pct list`）：
 
@@ -959,7 +987,7 @@ node11 目前沒有容器。
 
 以一台容器為例（`<CTID>` 換成實際 ID），在該容器所在的節點執行：
 
-~~~bash
+```bash
 # 1. 節點上準備 .deb（已下載過可略過）
 cd /tmp && [ -f wazuh-agent_4.14.8-1_amd64.deb ] || wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.8-1_amd64.deb
 
@@ -977,7 +1005,7 @@ pct exec <CTID> -- grep -A2 '<server>' /var/ossec/etc/ossec.conf
 # 5. 啟動、驗證、清掉安裝檔
 pct exec <CTID> -- bash -c 'systemctl daemon-reload && systemctl enable --now wazuh-agent && systemctl is-active wazuh-agent'
 pct exec <CTID> -- rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
-~~~
+```
 
 #### 本案實測：ipam（CT 103，2026-09-30）
 
@@ -1003,7 +1031,7 @@ pct exec <CTID> -- rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 
 試裝成功後，用迴圈處理同一節點上的其他容器。位址不正確的容器不會被啟動：
 
-~~~bash
+```bash
 DEB=/tmp/wazuh-agent_4.14.8-1_amd64.deb
 MGR=192.0.2.32
 for id in 102 105 110; do
@@ -1020,7 +1048,7 @@ for id in 102 105 110; do
   fi
   pct exec $id -- rm -f $DEB
 done
-~~~
+```
 
 本案結果：以迴圈安裝 Graylog（105）、ProxCenter（110），Manager 顯示 `ID: 006, Name: Graylog, Active`、`ID: 007, Name: ProxCenter, Active`。
 
@@ -1028,14 +1056,14 @@ done
 
 AdGuard（100）與 Pi-hole（101）是全網路依賴的服務。安裝 Agent 不會重啟 DNS 服務，但保險起見先做快照，出問題可以立即回復：
 
-~~~bash
+```bash
 pct snapshot <CTID> pre-wazuh-agent --description "安裝 Wazuh Agent 前"
 # 安裝完成並確認 DNS 正常後
 pct exec <CTID> -- systemctl is-active AdGuardHome     # AdGuard
 pct exec <CTID> -- systemctl is-active pihole-FTL      # Pi-hole
 # 觀察一段時間沒問題再刪除快照
 pct delsnapshot <CTID> pre-wazuh-agent
-~~~
+```
 
 回復方式：`pct rollback <CTID> pre-wazuh-agent`（會回到快照當下，快照之後的變更全部消失）。
 
@@ -1067,9 +1095,9 @@ WireGuard（109）：開機後先做快照再跑迴圈。輸出顯示 `Unpacking
 
 UBClient 是 VM，不是容器，`pct push`／`pct exec` 不適用，要登入 VM 內安裝（SSH 或 PVE Console）。先在節點確認 VM 狀態：
 
-~~~bash
+```bash
 qm list        # 各節點執行，找 UBClient 的 VMID 與狀態
-~~~
+```
 
 本案 VM 清單（2026-09-30 `qm list`）：
 
@@ -1085,7 +1113,7 @@ node10 沒有 VM。
 
 VM 內（一般使用者需 `sudo`）：
 
-~~~bash
+```bash
 lsb_release -a                                  # Ubuntu 預設已有 lsb-release
 timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "port OK"
 cd /tmp
@@ -1096,7 +1124,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now wazuh-agent
 systemctl is-active wazuh-agent
 rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
-~~~
+```
 
 `sudo 變數=值 指令`：sudo 允許在指令前指定環境變數並傳給該指令；寫成 `WAZUH_MANAGER=... sudo dpkg ...` 則變數可能被 sudo 過濾掉。`/var/ossec` 只有 root 能讀，查設定檔也要 `sudo`。
 
@@ -1129,7 +1157,7 @@ Dashboard → Threat intelligence → Threat Hunting → Events，搜尋 `agent.
 
 以系統管理員身分開啟 PowerShell：
 
-~~~powershell
+```powershell
 # 1. 確認連得到 Manager
 Test-NetConnection 192.0.2.32 -Port 1514
 Test-NetConnection 192.0.2.32 -Port 1515
@@ -1146,7 +1174,7 @@ NET START Wazuh
 Get-Service | Where-Object DisplayName -like 'Wazuh*'
 Get-Content 'C:\Program Files (x86)\ossec-agent\ossec.log' -Tail 20 | Select-String 'Connected|ERROR'
 Remove-Item $env:TEMP\wazuh-agent.msi
-~~~
+```
 
 說明：`Start-Process ... -Wait` 會等安裝完成才回到提示字元；直接執行 `msiexec` 會立刻返回，下一步可能在安裝完成前就執行。
 
@@ -1190,11 +1218,11 @@ Remove-Item $env:TEMP\wazuh-agent.msi
 
 #### (1) 安裝前：快照與 VM-GenerationID
 
-~~~bash
+```bash
 qm config <VMID> | grep -E 'vmgenid|ostype'
 qm snapshot <VMID> pre-wazuh-agent --description "before Wazuh agent install"
 qm listsnapshot <VMID>
-~~~
+```
 
 **網域控制站的快照回復有風險。** 多台 DC 的環境中，把其中一台回復到舊快照，可能造成 **USN rollback**：這台 DC 的複寫紀錄倒退，與其他 DC 不一致。Windows Server 2012 以後搭配 hypervisor 的 **VM-GenerationID**（PVE 的 `vmgenid` 設定）可以偵測回復並保護 AD，因此要先確認 `vmgenid` 存在。即使有保護，**DC 的快照只作為最後手段**；Agent 有問題時優先解除安裝，而不是回復快照。
 
@@ -1206,21 +1234,21 @@ qm listsnapshot <VMID>
 
 #### (2) 安裝前：記錄 AD 健康基準（在 DC 上，系統管理員 PowerShell）
 
-~~~powershell
+```powershell
 netdom query fsmo                       # 哪台 DC 持有 FSMO 角色
 repadmin /replsummary                   # 複寫摘要，fails 應為 0
 dcdiag /q                               # 只列出錯誤；沒有輸出代表健康
 Get-Service NTDS,DNS,Netlogon,Kdc | Format-Table Name,Status
-~~~
+```
 
 先記下安裝前的結果，安裝後才能比較。安裝順序：先裝**沒有 FSMO 角色**的 DC，確認正常後再裝持有 FSMO 的 DC，最後裝 CA。
 
 CA 的基準：
 
-~~~powershell
+```powershell
 Get-Service CertSvc | Format-Table Name,Status
 certutil -ping
-~~~
+```
 
 本案基準（2026-09-30 16:23）：
 
@@ -1292,7 +1320,7 @@ certutil -ping
 
 PBS 是獨立主機，不在 PVE 的 VM／CT 清單中；做法與 PVE 節點相同（9-2、9-2a），直接在 PBS 上以 root 執行。
 
-~~~bash
+```bash
 # 1. 環境確認
 proxmox-backup-manager versions
 cat /etc/debian_version
@@ -1313,7 +1341,7 @@ systemctl daemon-reload
 systemctl enable --now wazuh-agent
 systemctl is-active wazuh-agent
 rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
-~~~
+```
 
 注意：
 
@@ -1352,7 +1380,7 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 
 在 CT 112 內建立政策檔：
 
-~~~bash
+```bash
 cat > /root/wazuh-alerts-30d.json <<'JSONEOF'
 {
   "policy": {
@@ -1374,11 +1402,11 @@ cat > /root/wazuh-alerts-30d.json <<'JSONEOF'
   }
 }
 JSONEOF
-~~~
+```
 
 建立政策，並套用到**已經存在**的告警索引（`ism_template` 只會自動套用到之後新建的索引）：
 
-~~~bash
+```bash
 curl -sk -u admin -X PUT 'https://127.0.0.1:9200/_plugins/_ism/policies/wazuh-alerts-30d' \
   -H 'Content-Type: application/json' -d @/root/wazuh-alerts-30d.json
 
@@ -1386,7 +1414,7 @@ curl -sk -u admin -X POST 'https://127.0.0.1:9200/_plugins/_ism/add/wazuh-alerts
   -H 'Content-Type: application/json' -d '{"policy_id": "wazuh-alerts-30d"}'
 
 curl -sk -u admin 'https://127.0.0.1:9200/_plugins/_ism/explain/wazuh-alerts-*?pretty' | grep -E '"index"|policy_id'
-~~~
+```
 
 每個指令都會詢問 admin 密碼。也可以在 Dashboard 的 **Index Management → Index policies** 建立同樣的政策。
 
@@ -1404,14 +1432,14 @@ curl -sk -u admin 'https://127.0.0.1:9200/_plugins/_ism/explain/wazuh-alerts-*?p
 
 Indexer 的政策管不到 `/var/ossec/logs/alerts/`。以排程刪除 30 天前、已按日期歸檔的檔案（只處理年份子目錄，不碰目前正在寫入的 alerts.json）：
 
-~~~bash
+```bash
 cat > /etc/cron.d/wazuh-alerts-cleanup <<'CRONEOF'
 # Remove archived Wazuh alert logs older than 30 days
 17 3 * * * root find /var/ossec/logs/alerts/20* -type f -mtime +30 -delete; find /var/ossec/logs/alerts/20* -mindepth 1 -type d -empty -delete
 CRONEOF
 chmod 644 /etc/cron.d/wazuh-alerts-cleanup
 find /var/ossec/logs/alerts/20* -type f -mtime +30 | head    # 先預覽：目前應沒有符合的檔案
-~~~
+```
 
 本案實測（2026-10-02）：已建立 `/etc/cron.d/wazuh-alerts-cleanup`（權限 644）；預覽沒有符合的檔案。cron 會忽略權限或擁有者不正確的設定檔且不報錯，建立後用 `ls -l` 確認為 `-rw-r--r-- root`。
 
@@ -1424,7 +1452,7 @@ find /var/ossec/logs/alerts/20* -type f -mtime +30 | head    # 先預覽：目�
 
 在 CT 112 內執行，全部唯讀；Indexer 查詢以管理員憑證進行，不需輸入 admin 密碼：
 
-~~~bash
+```bash
 du -sh /var/ossec/queue/* 2>/dev/null | sort -h | tail -6
 df -h / | tail -1
 grep -E 'queue_usage|dropped' /var/ossec/var/run/wazuh-analysisd.state
@@ -1433,7 +1461,7 @@ C=/etc/wazuh-indexer/certs
 curl -sk --cert $C/admin.pem --key $C/admin-key.pem "https://127.0.0.1:9200/_cat/indices/wazuh-alerts-*?v&s=index&h=index,docs.count,store.size"
 curl -sk --cert $C/admin.pem --key $C/admin-key.pem "https://127.0.0.1:9200/_plugins/_ism/explain/wazuh-alerts-*" | grep -o '"policy_id":"[^"]*"' | sort | uniq -c
 ls -l /etc/cron.d/wazuh-alerts-cleanup; du -sh /var/ossec/logs/alerts
-~~~
+```
 
 | 項目 | 10/02 | 10/14 | 判讀 |
 | --- | --- | --- | --- |
@@ -1454,7 +1482,7 @@ ls -l /etc/cron.d/wazuh-alerts-cleanup; du -sh /var/ossec/logs/alerts
 
 在 CT 112 內對 Indexer 做彙總查詢，取過去 24 小時數量最多的 15 條規則：
 
-~~~bash
+```bash
 cat > /root/top-rules.json <<'JSONEOF'
 {
   "size": 0,
@@ -1474,7 +1502,7 @@ JSONEOF
 curl -sk -u admin 'https://127.0.0.1:9200/wazuh-alerts-*/_search' \
   -H 'Content-Type: application/json' -d @/root/top-rules.json > /root/top-rules.out
 head -c 100 /root/top-rules.out; echo     # 必須是 { 開頭；若是 Unauthorized 代表密碼錯誤
-~~~
+```
 
 再用 Python 整理成表格（見本案操作紀錄）。輸出存檔時錯誤訊息也會被寫進檔案，所以存完要先看開頭。
 
@@ -1501,11 +1529,11 @@ head -c 100 /root/top-rules.out; echo     # 必須是 { 開頭；若是 Unauthor
 
 **追查**（node10）：
 
-~~~bash
+```bash
 journalctl -k --since "1 hour ago" | grep 'apparmor="DENIED"' \
   | sed -E 's/.*operation="([^"]*)".*profile="([^"]*)".*name="([^"]*)".*comm="([^"]*)".*/\1 | \2 | \3 | \4/' \
   | sort | uniq -c | sort -rn | head -10
-~~~
+```
 
 一小時 2,178 次皆為同一組合：namespace `lxc-113`（ai 容器）、profile `rsyslogd`、操作 `sendmsg`、目標 `/run/systemd/journal/dev-log`、程式 `systemd-journal`。容器內 Ubuntu 24.04 的 rsyslog AppArmor 規則擋下 journald 轉送日誌；容器與主機共用 kernel，紀錄寫在 node10 的 kernel 日誌，被 node10 的 Agent 收集。
 
@@ -1522,13 +1550,13 @@ journalctl -k --since "1 hour ago" | grep 'apparmor="DENIED"' \
 
 **處理**（node10，保留系統層級的 gateway）：
 
-~~~bash
+```bash
 pct exec 113 -- systemctl --user --machine=root@.host disable --now hermes-gateway.service
 pct exec 113 -- bash -c "ps -ef | grep -v grep | grep 'gateway run'"      # 只剩 --replace 那個
 pct exec 113 -- bash -c "grep -q '^precedence ::ffff:0:0/96' /etc/gai.conf || echo 'precedence ::ffff:0:0/96  100' >> /etc/gai.conf"
 pct exec 113 -- getent ahosts api.telegram.org | head -3                    # 第一筆應為 IPv4
 pct exec 113 -- systemctl restart hermes-gateway
-~~~
+```
 
 `/etc/gai.conf` 的 precedence 設定讓系統連線時優先使用 IPv4，不需要變更容器網路。
 
@@ -1542,11 +1570,11 @@ pct exec 113 -- systemctl restart hermes-gateway
 
 AppArmor 告警減少約 98%。剩餘的是正常日誌量造成的轉送阻擋，可再停用容器內 rsyslog 的 AppArmor 規則（容器本身仍受主機 LXC AppArmor 規則限制）：
 
-~~~bash
+```bash
 pct exec 113 -- ln -s /etc/apparmor.d/usr.sbin.rsyslogd /etc/apparmor.d/disable/usr.sbin.rsyslogd
 pct exec 113 -- apparmor_parser -R /etc/apparmor.d/usr.sbin.rsyslogd
 pct exec 113 -- systemctl restart rsyslog
-~~~
+```
 
 本案結果（2026-10-02）：三行指令第一次執行皆無輸出（成功）；重複執行時出現 `File exists`、`Profile doesn't exist`，代表第一次已完成，不是錯誤。`/sys/kernel/security/apparmor/profiles` 已無 rsyslogd，rsyslog 維持 active。
 
@@ -1554,12 +1582,12 @@ pct exec 113 -- systemctl restart rsyslog
 
 **移除規則後仍被擋：要一併重啟 journald。** 移除規則、重啟 rsyslog 後，node10 仍出現同樣的 DENIED（profile 仍為 `rsyslogd`，對象是自 9/29 未重啟的 journald，PID 6881）；`logger` 測試訊息也沒有寫入 syslog。檢查發現 ai 容器的 `/var/log/syslog` **最後一筆停在 9/29 開機時**，也就是這三天 rsyslog 完全收不到 journald 轉送的日誌。推測 journald 既有的 socket 仍帶著舊規則的標記，重啟相關服務後解決：
 
-~~~bash
+```bash
 pct exec 113 -- systemctl restart systemd-journald
 pct exec 113 -- systemctl restart syslog.socket rsyslog
 pct exec 113 -- logger -t wazuhtest "rsyslog test after journald restart"
 pct exec 113 -- tail -3 /var/log/syslog      # 最後一行出現 wazuhtest 即正常
-~~~
+```
 
 本案結果：syslog 出現 03:27（UTC）rsyslog 啟動紀錄與測試訊息，停擺三天的 syslog 恢復寫入。之後追蹤 node10 的 kernel 日誌，最後一筆 DENIED 發生在重啟當下的 11:27:09（台灣時間），之後不再出現，52002 告警歸零。rsyslog 啟動時的 `imklog: cannot open kernel log (/proc/kmsg): Permission denied` 是非特權容器的正常限制。
 
@@ -1569,12 +1597,12 @@ pct exec 113 -- tail -3 /var/log/syslog      # 最後一行出現 wazuhtest 即�
 
 **修改流程（順序不可顛倒）**：
 
-~~~bash
+```bash
 cp -a /var/ossec/etc/rules/local_rules.xml /var/ossec/etc/rules/local_rules.xml.bak-$(date +%F-%H%M)
 # ...編輯 local_rules.xml...
 /var/ossec/bin/wazuh-analysisd -t ; echo "exit=$?"            # 必須是 exit=0
 systemctl restart wazuh-manager && systemctl is-active wazuh-manager
-~~~
+```
 
 規則寫錯時 Manager 會無法啟動，17 台 Agent 全部斷線；**先 `-t` 再重啟**。`-t` 失敗時硬碟上的檔案已經是壞的，要立刻修正或還原備份，否則下次 CT 遷移、重開機就會起不來。
 
@@ -1601,7 +1629,7 @@ systemctl restart wazuh-manager && systemctl is-active wazuh-manager
 
 **做法**：只比對**已知**的電腦帳號，不比對所有 `$` 結尾的帳號。陌生或偽造的電腦帳號登入時仍會告警（攻擊者會濫用電腦帳號）；代價是新增 Windows 主機時要把名稱加入規則。
 
-~~~xml
+```xml
 <group name="local,windows,tuning,">
   <rule id="100100" level="0">
     <if_sid>60137</if_sid>
@@ -1614,7 +1642,7 @@ systemctl restart wazuh-manager && systemctl is-active wazuh-manager
     <description>Windows logon success by known computer account (suppressed)</description>
   </rule>
 </group>
-~~~
+```
 
 | regex 片段 | 意思 |
 | --- | --- |
@@ -1639,21 +1667,21 @@ systemctl restart wazuh-manager && systemctl is-active wazuh-manager
 
 **分析**：原先推測是 ProxCenter 定期 SSH 登入，實際日誌顯示來源是 **LibreNMS 的 SNMP 監控**：
 
-~~~text
+```text
 node10 sudo: Debian-snmp : PWD=/ ; USER=root ; COMMAND=/usr/local/bin/proxmox
 node10 sudo: pam_unix(sudo:session): session opened for user root(uid=0) by (uid=109)
-~~~
+```
 
 LibreNMS 每 5 分鐘以 SNMP 輪詢 → snmpd 的 `extend proxmox /usr/bin/sudo /usr/local/bin/proxmox` → 以 root 執行腳本讀取 PVE 資訊。每次輪詢在每台節點產生 5402（sudo）、5501（工作階段開啟）、5502（工作階段關閉）各一筆。
 
 **降級前先確認權限安全**（任一節點）：
 
-~~~bash
+```bash
 grep -rn 'Debian-snmp' /etc/sudoers /etc/sudoers.d/
 ls -l /usr/local/bin/proxmox; ls -ld /usr/local/bin
 grep -n 'proxmox' /etc/snmp/snmpd.conf
 for n in node10 node11 node12; do echo -n "$n: "; ssh $n id -u Debian-snmp; done   # UID 由各節點分配，需逐台確認
-~~~
+```
 
 | 項目 | 本案結果 | 判讀 |
 | --- | --- | --- |
@@ -1663,14 +1691,14 @@ for n in node10 node11 node12; do echo -n "$n: "; ssh $n id -u Debian-snmp; done
 
 **已收緊（2026-10-02，三台節點）**：原設定寫在 `/etc/sudoers` 第 55 行，而且位於 `@includedir /etc/sudoers.d` 之後（sudoers 以最後符合的規則為準，所以舊行一定要刪除）。改為獨立檔案，限定以 root 執行且不得帶參數（sudoers 中指令未寫參數代表允許任意參數，`""` 才代表禁止）：
 
-~~~text
+```text
 舊：Debian-snmp ALL=(ALL)  NOPASSWD: /usr/local/bin/proxmox      （/etc/sudoers）
 新：Debian-snmp ALL=(root) NOPASSWD: /usr/local/bin/proxmox ""   （/etc/sudoers.d/librenms-snmp）
-~~~
+```
 
 每一步都先 `visudo -cf` 檢查暫存檔，通過才寫入（sudoers 語法錯誤會讓整台主機的 sudo 失效）：
 
-~~~bash
+```bash
 cat > /root/sudoers-snmp.sh <<'SUEOF'
 #!/bin/bash
 set -e
@@ -1691,13 +1719,13 @@ echo "no args (should work): $(sudo -u Debian-snmp /usr/bin/sudo -n /usr/local/b
 echo "with arg (should be denied): $(sudo -u Debian-snmp /usr/bin/sudo -n /usr/local/bin/proxmox test 2>&1 | head -1)"
 SUEOF
 for n in node10 node11 node12; do ssh $n bash -s < /root/sudoers-snmp.sh; done   # 先做一台確認，再做其餘
-~~~
+```
 
 本案結果：三台皆 `visudo OK`、規則只剩 `/etc/sudoers.d/librenms-snmp`；以 Debian-snmp 身分不帶參數執行可輸出 VM 資訊（行數隨各節點 VM 數量不同），帶參數則回 `sudo: a password is required`（遭拒，Wazuh 會記錄一筆 sudo 失敗，屬預期）。還原：`cp -a $(ls -t /root/sudoers.bak-* | head -1) /etc/sudoers && rm -f /etc/sudoers.d/librenms-snmp && visudo -c`。
 
 **規則**：
 
-~~~xml
+```xml
 <group name="local,sudo,tuning,">
   <rule id="100110" level="0">
     <if_sid>5402</if_sid>
@@ -1717,7 +1745,7 @@ for n in node10 node11 node12; do ssh $n bash -s < /root/sudoers-snmp.sh; done  
     <description>sudo session closed (suppressed; open and command are still logged)</description>
   </rule>
 </group>
-~~~
+```
 
 | 規則 | 條件 | 仍會告警的情況 |
 | --- | --- | --- |
@@ -1741,7 +1769,7 @@ ProxCenter 約每 6 分鐘以 SSH 登入一台節點並執行 sudo，一天約�
 
 **分析**：`full_log` 是全文欄位，不能直接做 terms 彙總（會回傳錯誤，沒有 `aggregations`），改為抓回原始告警再用 Python 計數：
 
-~~~bash
+```bash
 cat > /root/rootcheck.json <<'JSONEOF'
 {
   "size": 2000,
@@ -1760,7 +1788,7 @@ d = json.load(open('/root/rootcheck.out'))
 c = collections.Counter((h['_source']['agent']['name'], h['_source'].get('full_log', '')[:200]) for h in d['hits']['hits'])
 for (agent, msg), n in sorted(c.items()): print(f"{agent:10} ({n}) {msg}")
 PYEOF2
-~~~
+```
 
 本案 24 小時 1,440 筆，**10 台 LXC 全部**觸發，內容只有兩種：
 
@@ -1773,7 +1801,7 @@ rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿
 
 **做法**：不關閉 `/dev` 檢查，只以完整路徑放過這兩類檔案；`/dev` 出現其他隱藏檔（例如 `/dev/.x`、`/dev/.lxc-backdoor`）仍會告警。
 
-~~~xml
+```xml
 <group name="local,rootcheck,tuning,">
   <rule id="100120" level="0">
     <if_sid>510</if_sid>
@@ -1781,15 +1809,15 @@ rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿
     <description>rootcheck: LXC runtime file in /dev (suppressed)</description>
   </rule>
 </group>
-~~~
+```
 
 套用後（先 `-t` 再重啟），可手動觸發掃描驗證，不必等 12 小時：
 
-~~~bash
+```bash
 /var/ossec/bin/agent_control -l                 # 查 Agent ID
 /var/ossec/bin/agent_control -r -u 000          # Manager 本機
 /var/ossec/bin/agent_control -r -u 005          # 例：librenms
-~~~
+```
 
 **驗證**：觸發掃描約 20 分鐘後查詢 510，`510 total = 0`。
 
@@ -1827,7 +1855,7 @@ rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿
 
 **61104：子規則**。以服務名稱（`param4`，不受介面語言影響）比對；其他服務的啟動類型變更（例如 Windows Modules Installer，一天約 3 筆）仍告警。攻擊者濫用 BITS 是建立下載工作，記錄在另一個事件頻道，不受此規則影響。
 
-~~~xml
+```xml
 <group name="local,windows,tuning,">
   <rule id="100130" level="0">
     <if_sid>61104</if_sid>
@@ -1835,13 +1863,13 @@ rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿
     <description>BITS start type toggled by Windows (suppressed)</description>
   </rule>
 </group>
-~~~
+```
 
 事件欄位實例：`param1` = Background Intelligent Transfer Service、`param2` = 指定啟動、`param3` = 自動啟動、`param4` = BITS。
 
 **750、550：集中式 Agent 設定**。不寫降級規則，而是讓 Agent 不掃描這些路徑，同時省下掃描資源。編輯 Manager 上的 `/var/ossec/etc/shared/default/agent.conf`（預設群組，所有 Agent 都會套用；原本只有空範本）：
 
-~~~xml
+```xml
 <!-- Windows: VSS updates diagnostic timestamps on every shadow copy -->
 <agent_config os="Windows">
   <syscheck>
@@ -1858,14 +1886,14 @@ rootcheck 把 `/dev` 底下以 `.` 開頭的檔案視為可能的 rootkit 藏匿
     <ignore type="sregex">^/etc/pve/nodes/\w+/lrm_status$</ignore>
   </syscheck>
 </agent_config>
-~~~
+```
 
-~~~bash
+```bash
 chown root:wazuh /var/ossec/etc/shared/default/agent.conf
 chmod 660 /var/ossec/etc/shared/default/agent.conf
 /var/ossec/bin/verify-agent-conf                                  # 必須顯示 OK
 grep -c 'VSS' /var/ossec/etc/shared/default/merged.mg            # ≥ 1 代表已打包給 Agent
-~~~
+```
 
 注意：
 
@@ -1884,43 +1912,43 @@ grep -c 'VSS' /var/ossec/etc/shared/default/merged.mg            # ≥ 1 代表�
 
 來源追查（PVE 節點）：
 
-~~~bash
+```bash
 grep -il 'hostname: *ipam' /etc/pve/nodes/*/lxc/*.conf          # 找出 CT 與所在節點
 pct exec 103 -- systemctl list-timers --no-pager                 # jt-ipam-sync.timer 每 5 分鐘
 pct exec 103 -- systemctl cat --no-pager jt-ipam-sync.service    # 加 --no-pager 避免停在分頁畫面
 pct exec 103 -- journalctl -u jt-ipam-sync --since '-30min' --no-pager | tail -20
-~~~
+```
 
 比對兩邊的設備清單：
 
-~~~bash
+```bash
 # LibreNMS（CT 102）
 pct exec 102 -- mysql librenms -e "select device_id, hostname, sysName, disabled, \`ignore\`, status from devices order by device_id;"
 # jt-ipam（CT 103，PostgreSQL 資料庫 jt_ipam）
 pct exec 103 -- su - postgres -c "psql -d jt_ipam -c 'select id, legacy_device_id, hostname, version from librenms_devices'"
-~~~
+```
 
 LibreNMS 有 9 台、jt-ipam 有 10 台，多出的 legacy_device_id 12 為 graylog（kernel 版本也停留在較舊的 `-15-pve`）。jt-ipam 同步時**不會刪除** LibreNMS 已移除的設備。
 
 **處理一：清除 jt-ipam 的過期紀錄**。先確認外鍵影響：
 
-~~~bash
+```bash
 pct exec 103 -- su - postgres -c "psql -d jt_ipam -c \"select conrelid::regclass, conname, confdeltype from pg_constraint where confrelid = 'librenms_devices'::regclass;\""
-~~~
+```
 
 本案：`arp_entries`、`fdb_entries` 為 `n`（SET NULL），`device_vlans` 為 `c`（CASCADE），沒有會擋下刪除的 `a`／`r`。備份後刪除：
 
-~~~bash
+```bash
 pct exec 103 -- su - postgres -c "pg_dump -Fc -d jt_ipam -f /var/lib/postgresql/jt_ipam-before-graylog12-$(date +%F-%H%M).dump"
 pct exec 103 -- su - postgres -c "psql -d jt_ipam -c \"select id, legacy_device_id, hostname from librenms_devices where legacy_device_id = 12 and hostname like 'graylog%';\""   # 應只有 1 筆
 pct exec 103 -- su - postgres -c "psql -d jt_ipam -c \"delete from librenms_devices where legacy_device_id = 12 and hostname like 'graylog%';\""                         # DELETE 1
-~~~
+```
 
 注意：直接改資料庫不會留在 jt-ipam 的稽核紀錄；有網頁刪除功能時優先使用。手動 `systemctl start jt-ipam-sync` 若距上次排程未滿 `sync_interval_seconds` 會被略過，要等下一次排程同步再驗證。
 
 **處理二：Graylog 重新加入 LibreNMS**。Graylog 容器（CT 105）的 snmpd 套件仍在，但設定檔已刪除、服務停用。從 LibreNMS 容器複製設定：
 
-~~~bash
+```bash
 pct pull 102 /etc/snmp/snmpd.conf /root/snmpd.conf.tmp
 pct pull 102 /usr/bin/distro /root/distro.tmp                    # extend distro 使用的腳本
 sed -i -e '/^rwuser /d' -e 's/^syslocation .*/syslocation Node10/' /root/snmpd.conf.tmp
@@ -1935,7 +1963,7 @@ C=$(pct exec 102 -- awk '/^com2sec/{print $NF}' /etc/snmp/snmpd.conf)
 pct exec 102 -- snmpget -v2c -c "$C" <graylog 主機名稱> .1.3.6.1.2.1.1.5.0 .1.3.6.1.2.1.1.6.0
 pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:add --v2c -c '$C' <graylog 主機名稱>"
 unset C
-~~~
+```
 
 本案加入後為 device 17（LibreNMS 的編號不重複使用）。
 
@@ -1943,7 +1971,7 @@ unset C
 
 **處理三：剩下的空結果 404 以子規則降級**（srcip、id、url 為靜態欄位，用專用標籤）：
 
-~~~xml
+```xml
 <group name="local,web,tuning,">
   <rule id="100140" level="0">
     <if_sid>31101</if_sid>
@@ -1953,16 +1981,16 @@ unset C
     <description>LibreNMS API empty result for jt-ipam sync (suppressed)</description>
   </rule>
 </group>
-~~~
+```
 
 三個條件都符合才降級；其他來源、其他路徑、其他狀態碼（例如 401、403）仍告警。
 
 **用 wazuh-logtest 直接驗證規則**：等告警數量下降要花時間，而且查詢範圍容易混到重啟前的紀錄。直接把一行實際日誌交給 `wazuh-logtest`，可立即看到解碼欄位與最後比對到的規則：
 
-~~~bash
+```bash
 # 從查詢結果取出一行原始日誌存檔（full_log），再交給 logtest
 /var/ossec/bin/wazuh-logtest < /root/vlans-line.txt 2>&1 | grep -E "id:|level:|description:|srcip|url|^\*\*Phase"
-~~~
+```
 
 本案結果：Phase 2 解出 `id: '404'`、`srcip`、`url: '/api/v0/resources/vlans'`；Phase 3 為 `id: '100140'`、`level: '0'`，規則生效。
 
@@ -1980,7 +2008,7 @@ unset C
 
 11-9 複製 SNMP 設定時發現範本中有 `rwuser snmpuser`，因此掃描所有節點與容器。腳本只列出設定種類與帳號名稱，community 與密碼以 `***` 遮蔽：
 
-~~~bash
+```bash
 cat > /root/snmp-rw-scan.sh <<'SCANEOF'
 #!/bin/bash
 # Read-only scan: list SNMP write-access settings without printing secrets
@@ -1994,13 +2022,13 @@ done
 SCANEOF
 chmod 700 /root/snmp-rw-scan.sh
 for n in node10 node11 node12; do ssh $n bash -s < /root/snmp-rw-scan.sh; done
-~~~
+```
 
 **結果**：node12 節點、AdGuard、Pihole、librenms、wireguard 共 5 台有 `rwuser snmpuser`，且 v3 帳號實際存在（`usmUser=1`）。
 
 **不能直接刪除**：LibreNMS 對 9 台設備都以 SNMPv3 `snmpuser`（authPriv）輪詢，而這 5 台的 `snmpuser` 只有 `rwuser`、沒有 `rouser`。刪掉會讓監控中斷，因此改為 `rouser`：帳號與密碼不變，只移除寫入權限。
 
-~~~bash
+```bash
 cat > /root/snmp-ro.sh <<'ROEOF'
 #!/bin/bash
 # Change SNMPv3 rwuser to rouser (keep user, drop write access)
@@ -2018,7 +2046,7 @@ chmod 700 /root/snmp-ro.sh
 pct push 109 /root/snmp-ro.sh /root/snmp-ro.sh --perms 700 && pct exec 109 -- /root/snmp-ro.sh
 # 驗證：在 LibreNMS 所在節點執行，出現 Snmpget[n/...] 即讀取正常
 pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:poll 13 -m core" 2>&1 | tail -8
-~~~
+```
 
 依序處理 wireguard → AdGuard → Pihole → librenms → node12 節點；每台都顯示 `rouser snmpuser`、`snmpd=active`，LibreNMS 輪詢 `Snmpget[3/0.05s]`。最後重跑掃描，所有主機都不再有 `rwuser`。
 
@@ -2043,7 +2071,7 @@ pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:poll 13 -m core" 2>&1
 
 安裝腳本（在 LibreNMS 所在節點執行，對象為同節點的容器）：
 
-~~~bash
+```bash
 cat > /root/snmp-v3-add.sh <<'ADDEOF'
 #!/bin/bash
 # Install snmpd with a read-only SNMPv3 user (SHA/AES) in a local LXC; secrets are never printed
@@ -2071,7 +2099,7 @@ sleep 2
 pct exec $CT -- bash -c 'echo "CT'"$CT"': snmpd=$(systemctl is-active snmpd) usmUser=$(grep -c ^usmUser /var/lib/snmp/snmpd.conf) createUser=$(grep -c ^createUser /var/lib/snmp/snmpd.conf) udp161=$(ss -ulnp | grep -c ":161 ")"'
 ADDEOF
 chmod 700 /root/snmp-v3-add.sh
-~~~
+```
 
 PBS 這類不在 PVE 內的獨立主機使用 `snmp-v3-add-host.sh root@主機 Location`：在 LibreNMS 所在節點產生設定檔、distro 腳本、`createUser` 與安裝程式，打包後以**單一 SSH 連線**（`tar | ssh`）傳到目標主機執行，只需輸入一次密碼，結束後兩邊的暫存檔都刪除。`apt update` 若因企業版套件來源回報 401 會忽略並繼續；最後同時顯示 `proxmox-backup-proxy` 狀態，確認備份服務未受影響。避開排程備份時段（本案 21:00）執行。
 
@@ -2079,7 +2107,7 @@ PBS 這類不在 PVE 內的獨立主機使用 `snmp-v3-add-host.sh root@主機 L
 
 加入 LibreNMS（`lnms device:add` 的 `-a` 預設為 MD5，必須明確指定 SHA；安全等級會依有無加密密碼自動判斷為 authPriv）：
 
-~~~bash
+```bash
 cat > /root/snmp-v3-lnms.sh <<'LNMSEOF'
 #!/bin/bash
 # Add a host to LibreNMS with SNMPv3 SHA/AES (secrets read from LibreNMS DB, never printed)
@@ -2093,7 +2121,7 @@ unset AP PP
 pct exec 102 -- mysql librenms -e "select device_id, hostname, snmpver, authlevel, authalgo, cryptoalgo from devices where hostname='$H';"
 LNMSEOF
 chmod 700 /root/snmp-v3-lnms.sh
-~~~
+```
 
 **本案結果**（每台一台一台執行並確認）：
 
@@ -2114,7 +2142,7 @@ chmod 700 /root/snmp-v3-lnms.sh
 
 **Graylog 由 v2c 改為 v3**（device 17）：先備份設定，再以 `snmp-v3-add.sh 105 Node10` 覆蓋為只有 v3 的設定，接著直接修改 LibreNMS 資料庫，帳號密碼從既有 v3 設備複製（不經過畫面）：
 
-~~~bash
+```bash
 pct exec 105 -- cp -a /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-v2c-$(date +%F-%H%M)
 /root/snmp-v3-add.sh 105 Node10
 pct exec 102 -- mysql librenms -e "
@@ -2124,7 +2152,7 @@ SET d.snmpver = 'v3', d.authlevel = 'authPriv',
     d.cryptopass = s.cryptopass, d.cryptoalgo = 'AES',
     d.community = NULL
 WHERE d.device_id = 17;"
-~~~
+```
 
 驗證：`lnms device:poll 17 -m core` 出現 `Snmpget[3/0.05s]`；以原 community 執行 `snmpget -v2c` 回 `Timeout: No Response`，確認 v2c 已失效。
 
@@ -2134,13 +2162,13 @@ WHERE d.device_id = 17;"
 
 **先唯讀檢查設定內容**（community 與密碼遮蔽）：
 
-~~~bash
+```bash
 grep -vE '^[[:space:]]*(#|$)' /etc/snmp/snmpd.conf | sed -E \
   -e 's/^(com2sec[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+).*/\1***/' \
   -e 's/^(rocommunity6?|rwcommunity6?)[[:space:]]+[^[:space:]]+/\1 ***/' \
   -e 's/^(createUser[[:space:]]+[^[:space:]]+).*/\1 ***/'
 awk '/^usmUser/{print $5}' /var/lib/snmp/snmpd.conf      # 實際存在的 v3 帳號
-~~~
+```
 
 本案發現：
 
@@ -2160,14 +2188,14 @@ awk '/^usmUser/{print $5}' /var/lib/snmp/snmpd.conf      # 實際存在的 v3 �
 
 核心修改：
 
-~~~bash
+```bash
 sed -i -E '/^[[:space:]]*(com2sec|access|view|rocommunity6?)[[:space:]]/d; /^[[:space:]]*group[[:space:]]+[^[:space:]]+[[:space:]]+v(1|2c)[[:space:]]/d; /^[[:space:]]*rouser[[:space:]]+authPrivUser[[:space:]]/d' /etc/snmp/snmpd.conf
 systemctl stop snmpd
 sed -i -E '/^usmUser .*"(snmpuser|anmpuser)"/d' /var/lib/snmp/snmpd.conf
 # 追加 createUser 行（由腳本從 LibreNMS 資料庫產生），再啟動
 systemctl start snmpd
 pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo='AES' WHERE device_id=<ID>;"
-~~~
+```
 
 先做一台（wireguard）確認，其餘以迴圈執行，任一台輸出沒有 `poll: Snmpget` 即停止。每台都要檢查 `usm="snmpuser" createUser=0 v2c=0`，且 `extend=` 數量與原本相同（節點與 librenms 為 1）。
 
@@ -2175,9 +2203,9 @@ pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo
 
 **Synology NAS（2 台）**：在 DSM「控制台 → 終端機 & SNMP → SNMP」取消 SNMPv1／v2c，SNMPv3 的驗證協定改為 SHA、隱私權協定改為 AES，按套用；DSM 會沿用已儲存的密碼重新產生金鑰，不必重新輸入。接著只更新 LibreNMS 的演算法並輪詢：
 
-~~~bash
+```bash
 pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo='AES' WHERE device_id IN (5,6);"
-~~~
+```
 
 兩台輪詢皆為 `Snmpget[3/0.04s]`。若輪詢逾時，代表 DSM 未沿用舊密碼，改為設定新密碼：DSM 與 LibreNMS 兩邊都填新密碼，LibreNMS 端以 `read -s` 輸入、只更新這兩台的 `authpass`／`cryptopass`。
 
@@ -2185,16 +2213,16 @@ pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='SHA', cryptoalgo
 
 還原（以容器為例；節點本身在節點上執行迴圈那一行）：
 
-~~~bash
+```bash
 pct exec <CTID> -- bash -c 'for f in /etc/snmp/snmpd.conf /var/lib/snmp/snmpd.conf; do cp -a $(ls -t $f.bak-v3upg-* | head -1) $f; done; systemctl restart snmpd'
 pct exec 102 -- mysql librenms -e "UPDATE devices SET authalgo='MD5', cryptoalgo='DES' WHERE device_id=<ID>;"
-~~~
+```
 
 ### 11-13 LibreNMS PHP 警告（31301）與 ports 404 結案（2026-10-16）
 
 **查詢**（Wazuh 容器內，最近 14 天每天筆數；`devices/17/ports` 的 404 以 `full_log` 片語比對）：
 
-~~~bash
+```bash
 C=/etc/wazuh-indexer/certs
 curl -sk --cert $C/admin.pem --key $C/admin-key.pem -H 'Content-Type: application/json' \
   "https://127.0.0.1:9200/wazuh-alerts-*/_search?size=0" -d '{
@@ -2204,7 +2232,7 @@ curl -sk --cert $C/admin.pem --key $C/admin-key.pem -H 'Content-Type: applicatio
   "aggs":{"r":{"terms":{"field":"rule.id"},
     "aggs":{"d":{"date_histogram":{"field":"timestamp","calendar_interval":"day","min_doc_count":1}}}}}}' \
   | python3 -m json.tool | grep -E '"key_as_string"|"key"|"doc_count"'
-~~~
+```
 
 | 項目 | 10/02～10/16 | 判斷 |
 | --- | --- | --- |
@@ -2213,15 +2241,15 @@ curl -sk --cert $C/admin.pem --key $C/admin-key.pem -H 'Content-Type: applicatio
 
 **樣本**（最近 3 筆，取 `full_log`）全部相同：
 
-~~~text
+```text
 [error] ... FastCGI sent in stderr: "PHP message: PHP Error(8192): ctype_digit(): Argument of type null will be interpreted as string in the future in /opt/librenms/includes/html/api_functions.inc.php:3229" while reading response header from upstream, client: <jt-ipam IP>, server: <LibreNMS 主機名稱>, request: "GET /api/v0/resources/links HTTP/1.1", ...
-~~~
+```
 
 觸發的請求是 `/api/v0/resources/links`，不是 11-9 當時記錄的 `ports?columns=`。這個路徑在環境沒有 LLDP／CDP 鄰居資料時回 404（已由 100140 降級），LibreNMS 處理同一請求時另在 nginx 錯誤 log 留下 PHP deprecated 警告（8192，不是錯誤），由 decoder `nginx-errorlog` 觸發 31301（Nginx error message）。
 
 **子規則**（三項條件都符合才降級；不寫行號，LibreNMS 更新後行號變動時只會讓警告重新出現）：
 
-~~~xml
+```xml
 <group name="local,web,tuning,">
   <rule id="100141" level="0">
     <if_sid>31301</if_sid>
@@ -2230,11 +2258,11 @@ curl -sk --cert $C/admin.pem --key $C/admin-key.pem -H 'Content-Type: applicatio
     <description>LibreNMS PHP deprecation on jt-ipam links sync (suppressed)</description>
   </rule>
 </group>
-~~~
+```
 
 套用與驗證：
 
-~~~bash
+```bash
 cp -a /var/ossec/etc/rules/local_rules.xml /var/ossec/etc/rules/local_rules.xml.bak-$(date +%Y%m%d-%H%M)
 grep -c 'id="100141"' /var/ossec/etc/rules/local_rules.xml        # 0，編號未使用
 # 以 cat >> 附加上面的 group 後
@@ -2245,7 +2273,7 @@ sed 's#/api/v0/resources/links#/api/v0/devices#' /root/links-line.txt > /root/ot
 systemctl restart wazuh-manager
 /var/ossec/bin/wazuh-logtest < /root/links-line.txt 2>&1 | grep -E "id:|level:" | tail -2
 /var/ossec/bin/wazuh-logtest < /root/other-line.txt 2>&1 | grep -E "id:|level:" | tail -2
-~~~
+```
 
 | 樣本 | 結果 |
 | --- | --- |
@@ -2263,11 +2291,11 @@ LibreNMS 原有三個 static 群組，由人工維護成員。改為 dynamic，�
 
 **盤點**（LibreNMS 容器，唯讀；容器不在本機時 `pct exec` 會顯示 `Configuration file ... does not exist`，先以 `ls /etc/pve/nodes/*/lxc/<CTID>.conf` 找所在節點）：
 
-~~~bash
+```bash
 pct exec 102 -- mysql librenms -e "SELECT device_id, hostname, os, hardware, features, sysDescr FROM devices ORDER BY device_id;"
 pct exec 102 -- mysql librenms -e "SELECT id, name, type, rules FROM device_groups\G"
 pct exec 102 -- mysql librenms -e "SELECT g.name, d.hostname FROM device_group_device gd JOIN device_groups g ON g.id=gd.device_group_id JOIN devices d ON d.device_id=gd.device_id ORDER BY g.name, d.hostname;"
-~~~
+```
 
 | 類型 | `os` | `features` | `sysDescr` 的 kernel |
 | --- | --- | --- | --- |
@@ -2304,7 +2332,7 @@ pct exec 102 -- mysql librenms -e "SELECT g.name, d.hostname FROM device_group_d
 
 Wazuh 的弱點偵測把**目前仍存在**的弱點存在 `wazuh-states-vulnerabilities-*` 索引（不是歷史告警）。Agent 每小時回報一次套件清單，套件更新後約 1 小時內會反映。在 CT 112 內：
 
-~~~bash
+```bash
 cat > /root/vuln.json <<'JSONEOF'
 {
   "size": 0,
@@ -2323,7 +2351,7 @@ cat > /root/vuln.json <<'JSONEOF'
 JSONEOF
 curl -sk -u admin 'https://127.0.0.1:9200/wazuh-states-vulnerabilities-*/_search' \
   -H 'Content-Type: application/json' -d @/root/vuln.json > /root/vuln.out
-~~~
+```
 
 再以 Python 整理為三段：嚴重度總計、各主機 Critical／High／Medium／Low、Critical／High 最多的套件（CVE 數、最高分、出現主機）。`hits.total` 顯示 10000 是計數上限。
 
@@ -2343,12 +2371,12 @@ curl -sk -u admin 'https://127.0.0.1:9200/wazuh-states-vulnerabilities-*/_search
 
 先唯讀掃描各容器的待更新數、容器內 kernel 套件與 rsync daemon：
 
-~~~bash
+```bash
 probe='apt-get update -qq >/dev/null 2>&1; echo "upg=$(apt list --upgradable 2>/dev/null | grep -c upgradable) sec=$(apt list --upgradable 2>/dev/null | grep -c -- -security) kernel_pkgs=$(dpkg -l "linux-image*" 2>/dev/null | grep -c ^ii) rsyncd=$(ss -tlnp 2>/dev/null | grep -c ":873 ")"'
 for id in $(pct list | awk 'NR>1 && $2=="running"{print $1}'); do
   echo "CT$id: $(pct exec $id -- bash -c "$probe" 2>/dev/null)"
 done
-~~~
+```
 
 每台的處理（`ct-upgrade.sh NODE CTID [purge-kernel]`，在 node10 執行）：建立快照 `pre-apt-20261003` →（wireguard）移除 `linux-image-*` → `apt-get upgrade --with-new-pkgs`（`--force-confold` 保留設定檔）→ `autoremove` → 從容器內 `reboot` → 等待 `systemctl is-system-running` 為 running／degraded，列出失敗的服務。先以影響最小的容器試做，其餘以迴圈執行，任一台不是 `running` 即停止。兩台 DNS（AdGuard、Pihole）分開執行。
 
@@ -2365,9 +2393,9 @@ done
 
 觀察一天服務皆正常後，已刪除各容器的 `pre-apt-20261003` 快照（2026-10-04），避免持續佔用 Ceph 空間：
 
-~~~bash
+```bash
 for n in node10 node11 node12; do ssh $n 'for id in $(pct list | awk "NR>1{print \$1}"); do pct listsnapshot $id 2>/dev/null | grep -q pre-apt-20261003 && pct delsnapshot $id pre-apt-20261003 && echo "deleted CT$id"; done'; done
-~~~
+```
 
 DC01、DC02、CA 的 Windows Update 由管理者手動執行（順序 DC02 → DC01 → CA，一次一台；DC 已加入 HA，一律選「更新並重新啟動」，不要選「更新並關機」）。
 
@@ -2390,12 +2418,12 @@ DC02 → DC01 → CA 的 Windows Update 與 ubclient 更新由管理者完成後
 
 **ubclient 的 kernel**：目前使用 `7.0.0-38-generic`；`-31` 是 `autoremove` 刻意保留的備用版本（保留目前與前一版）。使用中的 `-38` 被列出的大量 CVE 多為誤判（Wazuh 以上游 kernel 的 CVE 比對，Ubuntu 會自行移植修補、版本號看不出來）。移除舊版（不需重開機）：
 
-~~~bash
+```bash
 dpkg -l | grep 7.0.0-31 | awk '{print $2}'                      # 先確認清單只有 -31
 sudo apt purge -y $(dpkg -l | grep 7.0.0-31 | awk '{print $2}')
 dpkg -l | grep -c 7.0.0-31                                      # 0
 sudo systemctl restart wazuh-agent                              # 立即重新回報套件清單
-~~~
+```
 
 移除後只剩一個 kernel，下次 kernel 更新時 `-38` 會成為新的備用版本。`linux-image-generic-hwe-24.04` 中繼套件要保留。dpkg 提示 `/lib/modules/7.0.0-31-generic` 不是空的，是 DKMS 等產生的殘留檔案，確認不是使用中的 kernel 後可手動刪除。
 
@@ -2415,12 +2443,12 @@ Critical 與 High 都減少約七成。剩下的 Critical 中，ubclient 使用�
 
 ffmpeg 系列（37 個 Critical）是 ai 容器剩下的主要弱點，Ubuntu universe 尚無修補。移除前先確認用途（ai 為 CT 113）：
 
-~~~bash
+```bash
 pct exec 113 -- apt-cache rdepends --installed ffmpeg            # 沒有套件依賴它
 pct exec 113 -- bash -c "apt-mark showmanual | grep -x ffmpeg"    # 手動安裝
 pct exec 113 -- systemctl cat --no-pager hermes-gateway.service | grep -E 'ExecStart|WorkingDirectory'
 pct exec 113 -- bash -c "grep -rIl --exclude-dir={venv,node_modules,.git,__pycache__} -i ffmpeg /usr/local/lib/hermes-agent | head"
-~~~
+```
 
 結果：Hermes 的 `Dockerfile`、`nix/hermes-agent.nix` 都把 ffmpeg 列為相依套件，venv 中的 `edge_tts`（文字轉語音）會呼叫它，設定中也有語音轉文字（Whisper）與 TTS。**套件管理看不到「程式直接呼叫指令」的依賴關係**，所以 `rdepends` 為空不代表沒人使用。移除會讓語音功能失效，因此**保留**。
 
@@ -2437,20 +2465,20 @@ ffmpeg 的漏洞需要處理惡意影音檔才會觸發，對 Hermes 而言來�
 
 本案等待核准的那一筆經確認**不是管理者認識的帳號**（代表有陌生人找到 Bot 並嘗試配對），已備份後清除：
 
-~~~bash
+```bash
 pct exec 113 -- python3 -m json.tool /root/.hermes/pairing/telegram-pending.json      # 管理者自行查看，不外傳
 pct exec 113 -- bash -c "cp -a /root/.hermes/pairing/telegram-pending.json /root/.hermes/pairing/telegram-pending.json.bak && echo '{}' > /root/.hermes/pairing/telegram-pending.json"
-~~~
+```
 
 **啟用白名單**（2026-10-05）：`.env` 中原本已有被註解的 `TELEGRAM_ALLOWED_USERS`。先確認該行的數字 ID 與 `telegram-approved.json` 中的帳號相同（否則啟用後連自己都會被擋），再備份並取消註解：
 
-~~~bash
+```bash
 pct exec 113 -- sed -n '289p' /root/.hermes/.env                         # 自行比對，不外傳
 pct exec 113 -- python3 -m json.tool /root/.hermes/pairing/telegram-approved.json
 pct exec 113 -- cp -a /root/.hermes/.env /root/.hermes/.env.bak-$(date +%F-%H%M)
 pct exec 113 -- sed -i '289s/^#[[:space:]]*//' /root/.hermes/.env
 pct exec 113 -- systemctl restart hermes-gateway
-~~~
+```
 
 結果：`hermes-gateway` active，管理者帳號傳訊息 Bot 正常回應。之後不在白名單內的帳號傳訊息，Bot 不回應、也無法送出配對申請。還原方式：把最新的 `.env.bak-*` 複製回 `.env` 後重啟服務。確認運作正常後，已刪除 `.env.bak-*`（內含 Bot token 等機密）與 `telegram-pending.json.bak`（陌生帳號資料）（2026-10-06）；備份檔比現行 `.env` 多 2 bytes，正是移除的 `# `，證明只修改了該行。若擔心 token 外洩，最徹底的做法是在 @BotFather 重新產生 token（`rm` 不保證資料從 Ceph 磁碟上消失）。Ubuntu 發布 ffmpeg 修補後隨一般更新套用。
 
@@ -2460,12 +2488,12 @@ ubclient（VM 104，Ubuntu 26.04）有 21 個套件待更新：sssd 系列 15 �
 
 **更新前先看清單**（`apt-get -s` 只模擬，不安裝）：
 
-~~~bash
+```bash
 sudo apt update
 apt list --upgradable 2>/dev/null
 sudo apt-get -s dist-upgrade | grep -E "^(Inst|Remv)" | awk '{print $1, $2}'
 cat /var/run/reboot-required 2>/dev/null || echo "目前不需要重開"
-~~~
+```
 
 | 檢查 | 結果 | 判讀 |
 | --- | --- | --- |
@@ -2476,36 +2504,36 @@ cat /var/run/reboot-required 2>/dev/null || echo "目前不需要重開"
 
 sssd 若有在用（AD 登入），更新時要保留原本的 SSH 連線，另開新連線確認 AD 帳號能登入後才關。本案 sssd 沒在用，因此沒有打快照，以前一晚的 PBS 備份作為保底。
 
-~~~bash
+```bash
 sudo apt upgrade
 sudo systemctl --failed --no-pager
 cat /var/run/reboot-required 2>/dev/null || echo "不需要重開"
 apt list --upgradable 2>/dev/null | tail -n +2
 systemctl is-active wazuh-agent
-~~~
+```
 
 結果：21 個套件更新完成、清單清空、不需重開、`wazuh-agent` active。但 `systemctl --failed` 列出 **`logrotate.service` failed**。
 
 #### logrotate 失敗：cloud-init 拆套件留下重複設定
 
-~~~bash
+```bash
 journalctl -u logrotate --since "7 days ago" --no-pager | grep -iE "error|fail" | tail -20
-~~~
+```
 
-~~~text
+```text
 error: cloud-init-base:1 duplicate log entry for /var/log/cloud-init.log
 error: found error in file cloud-init-base, skipping
-~~~
+```
 
 10/11 起每天都失敗，與本次更新無關。`/etc/logrotate.d/` 有兩個檔案都管 `/var/log/cloud-init*.log`，logrotate 不允許重複，便跳過其中一個並回報失敗；其他 log 照常輪替，只有 cloud-init 的 log 沒有輪替。
 
-~~~bash
+```bash
 for f in $(grep -l "cloud-init" /etc/logrotate.d/*); do
   echo "== $f"; dpkg -S "$f"; ls -l "$f"; cat "$f"; echo
 done
 dpkg-query -W -f='${Package} ${Version}\n' cloud-init cloud-init-base
 dpkg-query -W -f='${Conffiles}\n' cloud-init | grep logrotate
-~~~
+```
 
 | 檔案 | 所屬套件 | 狀態 |
 | --- | --- | --- |
@@ -2514,13 +2542,13 @@ dpkg-query -W -f='${Conffiles}\n' cloud-init | grep logrotate
 
 兩個套件都是 `26.1-0ubuntu3~26.04.1`，兩個檔案內容完全相同。新版 cloud-init 拆成 `cloud-init` 與 `cloud-init-base`，logrotate 設定改由 `cloud-init-base` 提供，舊檔被當成使用者設定檔留下。處理：保留套件使用中的 `cloud-init-base`，舊檔搬出目錄（不刪除，可還原）：
 
-~~~bash
+```bash
 sudo mv /etc/logrotate.d/cloud-init /root/logrotate.d-cloud-init.bak
 sudo logrotate -d /etc/logrotate.conf 2>&1 | grep -iE "duplicate|error:" || echo "沒有錯誤"
 sudo systemctl start logrotate
 systemctl show logrotate -p Result --value          # success
 sudo systemctl --failed --no-pager | tail -1        # 0 loaded units listed.
-~~~
+```
 
 結果：`success`，沒有失敗的服務。`-d` 只模擬；若用 `grep error` 過濾，會誤抓到 `cups/error_log`、`ppp-connect-errors` 這類檔名，不是錯誤。
 
@@ -2548,14 +2576,14 @@ jt-ipam（ipam，CT 103）可同步 Wazuh Agent 清單（ID、IP、狀態、作�
 
 管理員帳號 `wazuh` 的密碼若遺失，可改用 Dashboard 設定檔 `/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml` 中的 `wazuh-wui`（administrator 角色）執行，腳本直接讀檔、不顯示密碼：
 
-~~~bash
+```bash
 F=/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
 AU=$(grep -m1 -E '^\s*username:' $F | sed -E 's/^\s*username:\s*//; s/^["'\'']//; s/["'\'']\s*$//')
 PW=$(grep -m1 -E '^\s*password:' $F | sed -E 's/^\s*password:\s*//; s/^["'\'']//; s/["'\'']\s*$//')
 T=$(curl -sk -u "$AU:$PW" -X POST "https://127.0.0.1:55000/security/user/authenticate?raw=true"); unset PW
 # 找出內建 agent:read 政策 id → POST /security/roles → POST /security/roles/<rid>/policies?policy_ids=<pid>
 # → POST /security/users {username, password} → POST /security/users/<uid>/roles?role_ids=<rid>
-~~~
+```
 
 驗證（以 jtipam 登入）：`/agents` 回 `error 0`、18 筆（17 Agent + Manager）；`/manager/info` 回 **HTTP 403**，證明只有讀取 Agent 的權限。
 
@@ -2565,7 +2593,7 @@ T=$(curl -sk -u "$AU:$PW" -X POST "https://127.0.0.1:55000/security/user/authent
 
 資料中心防火牆未啟用，因此在 Wazuh 容器內以 nftables 限制。附加到 `/etc/nftables.conf`（nftables 服務已 enabled），獨立成一個表：
 
-~~~text
+```text
 table inet wazuh_api {
     chain input {
         type filter hook input priority filter - 1; policy accept;
@@ -2573,31 +2601,31 @@ table inet wazuh_api {
         tcp dport 55000 drop
     }
 }
-~~~
+```
 
-~~~bash
+```bash
 nft -c -f /etc/nftables.conf && nft -f /etc/nftables.conf && nft list table inet wazuh_api
 # 防火牆生效後才改 API 綁定；務必保留 127.0.0.1（Dashboard 由本機連 API）
 sed -i "80s/host: \['127.0.0.1'\]/host: ['127.0.0.1', '<Wazuh IP>']/" /var/ossec/api/configuration/api.yaml
 systemctl restart wazuh-manager
 ss -tlnp | grep ':55000 '          # 127.0.0.1 與 Wazuh IP 各一行
-~~~
+```
 
 驗證（在 PVE 節點執行）：
 
-~~~bash
+```bash
 pct exec 103 -- curl -sk -o /dev/null -w '%{http_code}' --max-time 5 https://<Wazuh IP>:55000/   # 401：連得到
 curl -sk -o /dev/null -w '%{http_code}' --max-time 5 https://<Wazuh IP>:55000/                   # 000：被擋
-~~~
+```
 
 本案第一次執行時漏做防火牆步驟，改綁定後從節點也拿到 401（API 對整個網段開放）；補上規則後節點變為 000。**一定要以「非允許來源」實際測試到被擋**，不能只測允許來源。
 
 還原：
 
-~~~bash
+```bash
 cp -a $(ls -t /var/ossec/api/configuration/api.yaml.bak-* | head -1) /var/ossec/api/configuration/api.yaml && systemctl restart wazuh-manager
 cp -a $(ls -t /etc/nftables.conf.bak-* | head -1) /etc/nftables.conf && nft -f /etc/nftables.conf
-~~~
+```
 
 ### 13-3 jt-ipam 設定與結果
 
@@ -2638,13 +2666,13 @@ ct:109（wireguard，Agent 010）加上指令監控，每 5 分鐘回報 wg0 與
 
 **順帶修正：UBClient 的 QEMU Guest Agent。** 測試時發現 UBClient（vm:104）在 PVE 設定了 `agent: 1`，但 VM 內沒有執行 Guest Agent，`qm shutdown` 因 `guest-ping` 逾時而失敗，只好從 Console 關機。在 node11 一次檢查兩台：
 
-~~~bash
+```bash
 for id in 104 108; do
   echo "== vm:$id =="
   qm config $id | awk '/^agent:/ {print "agent:", $2}'
   qm agent $id ping 2>/dev/null && echo "Guest Agent 有回應" || echo "Guest Agent 沒有回應"
 done
-~~~
+```
 
 Guest Agent 沒回應時，從 PVE 主機分不出是「沒安裝」還是「沒執行」，要進 VM 確認。
 
@@ -2671,20 +2699,51 @@ Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警�
 
 升級 Wazuh 後，除了第 13 節的 `api.yaml` host 與 55000 規則，也確認 `indexer-proxy` 為 active、9201 規則仍在、`grafana` 帳號能登入。完整建置、驗證與還原見 [用 Grafana 建立戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)。
 
+## 常見問題
+
+| 現象 | 怎麼辦 | 參考 |
+| --- | --- | --- |
+| Indexer 起不來，或遷移到別台後起不來 | 每一台 PVE 節點的 `vm.max_map_count` 都要 ≥ 262144 | 第 1 節 |
+| 建立 CT 時選不到 VM_Pool | RBD 儲存的 Content 要勾 `Container`（rootdir） | 0-2 |
+| CT ID 不確定能不能用 | 用 `pvesh get /cluster/resources` 查叢集全部資源，不要憑印象 | 0-2 |
+| 安裝助手中途斷線 | 在 tmux 裡執行；`pct enter 112` → `tmux attach -t wazuh` 接回 | 第 5 節 |
+| 外部連不到 55000 | API 刻意只聽本機與允許的來源，這是預期 | 7-4、13-2 |
+| Agent 一直是 Pending | 剛註冊時正常，通常數十秒內轉為 Active | 9-6 |
+| PVE 節點裝 Agent 遇到相依性問題 | 先裝相依套件，再用 .deb 安裝，不新增 Wazuh 套件庫 | 9-2a |
+| 裝完 Agent 後告警暴增 | 先觀察、找出最常觸發的規則，再逐條調校，不要一次關掉大量規則 | 11-1 |
+| 想降低某條規則的等級 | 寫在 `local_rules.xml`，用子規則限定範圍，改完用 logtest 驗證 | 11-3 |
+| 磁碟越來越滿 | 確認 ISM 30 天與告警文字檔 cron 都在運作 | 10-2～10-5 |
+| 弱點數量很多 | 先更新套件；剩下的分「使用中 kernel 誤判」「上游未修補」「確認存取限制」 | 第 12 節 |
+| Agent 停機沒有 504 告警 | 正常關機產生的是 506；重要服務改用從外部主動檢查 | 第 14 節 |
+| 升級 Wazuh 後 jt-ipam 或 Grafana 連不上 | 檢查 `api.yaml` 的 host、nftables 規則、`indexer-proxy` 服務 | 13、15 |
+| `qm shutdown` 逾時 | VM 設了 `agent: 1` 但沒裝或沒啟動 QEMU Guest Agent | 第 14 節 |
+
+## 待辦
+
+- [ ] 驗收「重要事件仍然偵測得到」：調校後，抽幾條關鍵規則（登入失敗、FIM、sudo）實際觸發一次
+- [ ] jt-ipam、Grafana 匯入 Wazuh CA 後開啟 TLS 驗證
+- [ ] node10 的 AppArmor DENIED（52002）告警調校
+- [ ] 定期檢查索引佔用與保留是否正常（10-5）
+- [ ] 2027 年初規劃把容器升級到 Ubuntu 24.04（升級前先快照與 PBS 備份）
+
 ## 風險與注意事項
 
 - **LXC 不是 Wazuh 官方列出的標準部署形態**（官方以實體機、VM、容器映像為主）。LXC 可以跑，但遇到問題時要先排除「kernel 參數」「cgroup 資源限制」這類容器特有原因。追求官方支援與隔離度時，改用 VM 較單純。
 - 所有節點 `vm.max_map_count` 都必須 ≥ 262144，否則 HA／遷移後 Indexer 可能起不來。
-- 資料量成長很快，需規劃 Index 保留天數（Index State Management），並監控 rootfs 用量。
+- 資料量成長很快，要規劃 Index 保留天數（ISM），並監控 rootfs 用量。
 - Indexer 對儲存 I/O 敏感；放在 Ceph 上時，觀察 Ceph 延遲是否因此上升。
-- PVE 節點裝上 Agent 後告警量會明顯增加（`/etc/pve` 變更、套件異動、CIS 設定稽核），先觀察再調校，不要一次關閉大量規則。
-- 容器作業系統為 Ubuntu 22.04.5 LTS（jammy，2026-10-04 確認；LXC 共用主機 kernel，`uname -r` 顯示的是 PVE 的 kernel）。標準支援到 2027 年 4 月，2027 年初規劃升級到 24.04（Wazuh 4.14 支援）；升級前先做快照與 PBS 備份，All-in-one 架構升級期間 Indexer、Manager、Dashboard 會一起中斷。
-- 文中 IP 皆為文件示範位址（192.0.2.0/24），指令執行前請替換。
+- PVE 節點裝上 Agent 後告警量會明顯增加（`/etc/pve` 變更、套件異動、CIS 設定稽核），先觀察再調校。
+- 容器作業系統為 Ubuntu 22.04.5 LTS（jammy，2026-10-04 確認；LXC 共用主機 kernel，`uname -r` 顯示的是 PVE 的 kernel）。標準支援到 2027 年 4 月，2027 年初規劃升級到 24.04（Wazuh 4.14 支援）；All-in-one 架構升級期間 Indexer、Manager、Dashboard 會一起中斷。
 
-## 參考資料
+## 延伸閱讀
 
+- [把 PVE、PBS 與 NAS 的日誌集中到 Graylog](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-graylog-syslog-pipeline-sop/)
+- [用 Grafana 建立戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)
+- [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)
 - [Wazuh Quickstart（All-in-one 安裝）](https://documentation.wazuh.com/current/quickstart.html)
 - [Wazuh 安裝指南](https://documentation.wazuh.com/current/installation-guide/index.html)
 - [Wazuh 密碼管理](https://documentation.wazuh.com/current/user-manual/user-administration/password-management.html)
 - [Proxmox VE：Linux Container](https://pve.proxmox.com/wiki/Linux_Container)
 - [Proxmox VE：pct 手冊](https://pve.proxmox.com/pve-docs/pct.1.html)
+
+{% endraw %}
