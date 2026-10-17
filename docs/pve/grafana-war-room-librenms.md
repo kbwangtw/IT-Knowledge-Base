@@ -4,49 +4,85 @@ title: "用 Grafana 建立戰情中心（二）：接上 LibreNMS"
 date: 2026-10-14
 categories: [PVE, Grafana, LibreNMS]
 permalink: /docs/pve/grafana-war-room-librenms/
-last_modified_at: 2026-10-15
+last_modified_at: 2026-10-17
 ---
 
 # 用 Grafana 建立戰情中心（二）：接上 LibreNMS
 
-[第一階段](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)已在戰情中心放上 Wazuh 的資安數字。本篇接上 LibreNMS，讓同一頁也看得到設備上下線：一格「斷線設備」數字與一張設備清單。
+> **一句話**：讓 Grafana 戰情中心也看得到「哪些設備斷線了」：以**唯讀**帳號的 API Token 讀取 LibreNMS，做出一格「斷線設備」數字和一張設備清單。
 
-> 紀錄日期：2026-10-14；LibreNMS 26.9.1（LXC，nginx）、Grafana 13.2.3、Infinity plugin。文中 IP 皆為文件示範位址。
+| 項目 | 內容 |
+| --- | --- |
+| 適合誰看 | 想把監控系統的資料接到 Grafana 的人 |
+| 環境 | LibreNMS 26.9.1（LXC，CT 102，nginx）、Grafana 13.2.3（CT 114）、Infinity plugin |
+| 紀錄日期 | 2026-10-14（10/15 補充設備清單欄位與 SNMP 修正） |
+| 結果 | ✅ 斷線設備數字、設備清單（16 台）已上線；Token 屬唯讀使用者、寫入測試被拒（403） |
 
-## 1. 接法：API，不直接讀資料庫
+> 第一階段見 [戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)。文中 IP 都是文件示範位址。
+
+## 1. 先認識幾個名詞
+
+| 名詞 | 白話解釋 |
+| --- | --- |
+| **LibreNMS** | 用 SNMP 監控網路設備與主機的系統：誰在線、流量、CPU… |
+| **SNMP** | 監控系統向設備「問狀態」的標準協定；本環境都用加密的 SNMPv3 |
+| **Grafana** | 把各種資料做成圖表儀表板的工具 |
+| **Infinity plugin** | 讓 Grafana 讀取任意 JSON／API 資料的外掛 |
+| **API Token** | 給程式用的「通行證」，代替帳號密碼 |
+| **Global Read** | LibreNMS 的唯讀角色：看得到全部設備，但不能改任何東西 |
+| **Laravel Sanctum** | LibreNMS 26 用來管理 API Token 的元件 |
+
+## 2. 為什麼用 API，不直接讀資料庫
 
 | | 直接讀 MariaDB | LibreNMS API（採用） |
 | --- | --- | --- |
-| 要改 LibreNMS | 改資料庫綁定位址並重啟、加防火牆、建資料庫帳號 | 不用，網頁本來就開著 |
-| 權限 | 可細到資料表 | Global Read 使用者，只能讀 |
-| 彈性 | 可寫任意 SQL | 設備清單、`type=down`、告警都有 API，戰情中心夠用 |
-| 升級 | 資料表結構可能改變 | 相對穩定 |
+| 要不要改 LibreNMS | 要：改資料庫綁定位址並重啟、加防火牆、建資料庫帳號 | 不用，網頁本來就開著 |
+| 權限 | 可以細到資料表 | Global Read 使用者，只能讀 |
+| 彈性 | 可以寫任意 SQL | 設備清單、`type=down`、告警都有 API，戰情中心夠用 |
+| 升級時 | 資料表結構可能改變 | 相對穩定 |
 
-原則與第一階段相同：不動來源系統的服務與資料庫，以唯讀身分讀取。
+原則和第一階段相同：**不動來源系統的服務與資料庫，以唯讀身分讀取**。
 
-## 2. 前置檢查
+## 3. 前置檢查：Grafana 連得到 LibreNMS 嗎？
 
-在 node10（LibreNMS 為 CT 102、Grafana 為 CT 114）：
+在 node10 執行（LibreNMS 是 CT 102、Grafana 是 CT 114）：
 
-~~~bash
-pct exec 102 -- ss -tlnp | grep -E 'nginx|apache|php' | awk '{print $4}'
-pct exec 114 -- getent hosts librenms.<網域>
+```bash
+pct exec 102 -- ss -tlnp | grep -E 'nginx|apache|php' | awk '{print $4}'   # LibreNMS 監聽哪些埠
+pct exec 114 -- getent hosts librenms.<網域>                                # Grafana 解析得到名稱嗎
 for u in http://librenms.<網域>/api/v0 https://librenms.<網域>/api/v0; do
   echo "$u -> $(pct exec 114 -- curl -sk -o /dev/null -w '%{http_code}' --max-time 5 $u)"
 done
-~~~
+```
 
-結果：nginx 只監聽 `:80`；HTTP 回 401（連得到、需要 Token），HTTPS 為 000。暫用 HTTP，Token 會以明文在內網傳送；Token 屬唯讀使用者，列為待改善（LibreNMS 啟用 HTTPS）。瀏覽器直接開 API 網址會顯示 `{"message":"Unauthenticated."}`，代表 API 有要求驗證，屬正常。
+**看到的結果**：nginx 只監聽 `:80`；HTTP 回 **401**（連得到，但需要 Token），HTTPS 是 000（沒開）。
 
-## 3. 唯讀使用者與 API Token
+- 暫時用 HTTP，代表 Token 會以明文在內網傳送；因為 Token 屬於唯讀使用者，列為待改善（LibreNMS 啟用 HTTPS）。
+- 用瀏覽器直接開 API 網址會看到 `{"message":"Unauthenticated."}`，代表 API 有要求驗證，屬正常。
 
-**使用者**：LibreNMS 管理員登入 → 齒輪 → Manage Users → Add User：`grafana`，Role **Global Read**（Normal User 只看得到被指派的設備；Admin 權限過大），密碼存入密碼管理器。以該帳號登入可見 Roles 為 Global Read、Device Permissions 為 Global Viewing Access。
+## 4. 建立唯讀使用者與 API Token
 
-**Token**：LibreNMS 26 的「建立新的 API 存取權杖」視窗**沒有選擇使用者的欄位**，Token 會屬於目前登入的帳號（管理員）；Global Read 帳號的選單也沒有 API 頁面。因此不在畫面上建立。
+### 4-1 唯讀使用者
 
-新版改用 Laravel Sanctum（資料表 `personal_access_tokens`，舊的 `api_tokens` 已不存在；`app/Models/User.php` 有 `use HasApiTokens`），可直接呼叫 LibreNMS 自己的 `createToken()`，由程式產生並以雜湊儲存：
+LibreNMS 管理員登入 → 齒輪 → **Manage Users** → **Add User**：
 
-~~~bash
+| 欄位 | 設定 | 為什麼 |
+| --- | --- | --- |
+| 帳號 | `grafana` | — |
+| Role | **Global Read** | Normal User 只看得到被指派的設備；Admin 權限太大 |
+| 密碼 | 存進密碼管理器 | — |
+
+用這個帳號登入確認：Roles 是 Global Read、Device Permissions 是 Global Viewing Access。
+
+### 4-2 為什麼不能在畫面上建立 Token
+
+LibreNMS 26 的「建立新的 API 存取權杖」視窗**沒有選擇使用者的欄位**，Token 會屬於「目前登入的帳號」，也就是管理員；而 Global Read 帳號的選單裡沒有 API 頁面。所以在畫面上建，Token 就會擁有管理員權限。
+
+### 4-3 用程式替 `grafana` 建立 Token
+
+新版 LibreNMS 用 Laravel Sanctum 管理 Token（資料表 `personal_access_tokens`，舊的 `api_tokens` 已不存在；`app/Models/User.php` 有 `use HasApiTokens`）。可以直接呼叫 LibreNMS 自己的 `createToken()`，由程式產生、以雜湊儲存：
+
+```bash
 cat > /tmp/mktoken.php <<'PHP'
 <?php
 require '/opt/librenms/vendor/autoload.php';
@@ -59,59 +95,77 @@ pct push 102 /tmp/mktoken.php /tmp/mktoken.php --perms 644
 pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && php /tmp/mktoken.php"
 pct exec 102 -- rm -f /tmp/mktoken.php; rm -f /tmp/mktoken.php
 pct exec 102 -- mysql librenms -e "select t.id, u.username, t.name, t.expires_at from personal_access_tokens t left join users u on u.user_id=t.tokenable_id;"
-~~~
+```
 
-- Token 格式為「編號|字串」，整串（含編號與 `|`）存入密碼管理器，只顯示一次；程式檔本身不含 Token。
-- 確認擁有者為 `grafana`、到期日為一年後（2027-10-14）。
+- Token 格式是「編號|字串」，**整串**（含編號和 `|`）存進密碼管理器，只會顯示這一次。程式檔本身不含 Token。
+- **應該看到**：最後一行查詢，擁有者是 `grafana`、到期日是一年後（2027-10-14）。
 
-從 Grafana 容器測試（`read -s` 輸入，不留在指令歷史）：
+### 4-4 測試 Token 只能讀、不能寫
 
-~~~bash
+從 Grafana 容器測試（用 `read -s` 輸入，不會留在指令歷史）：
+
+```bash
 read -s -p "LibreNMS token: " T; echo
 curl -s -H "X-Auth-Token: $T" "http://librenms.<網域>/api/v0/devices" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status'), d.get('count'))"
 curl -s -H "X-Auth-Token: $T" "http://librenms.<網域>/api/v0/devices?type=down" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status'), d.get('count'))"
 curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "X-Auth-Token: $T" -H 'Content-Type: application/json' -d '{}' "http://librenms.<網域>/api/v0/devices"
 unset T
-~~~
+```
 
-結果：全部 16 台、斷線 0、寫入測試 **403**（空內容不會新增任何東西；若回 400／422 代表權限檢查放行，應停止）。Sanctum Token 仍可用 `X-Auth-Token` header。
+| 測試 | 結果 | 意思 |
+| --- | --- | --- |
+| 全部設備 | 16 台 | 讀得到 |
+| 斷線設備 | 0 | 讀得到 |
+| 寫入（POST 空內容） | **403** | ✅ 權限被拒，Token 確實是唯讀 |
 
-## 4. Infinity 資料來源
+> 寫入測試送的是空內容，不會新增任何東西。如果回的是 400／422，代表權限檢查**放行了**，要立刻停止。Sanctum Token 一樣用 `X-Auth-Token` header。
 
-Connections → Add new connection → Infinity → Install → Add new data source：
+## 5. 在 Grafana 建立 Infinity 資料來源
+
+Connections → Add new connection → Infinity → Install → **Add new data source**：
 
 | 欄位 | 設定 |
 | --- | --- |
 | Name | `LibreNMS` |
-| Auth type | API Key Value pair：Key `X-Auth-Token`、Value 為 Token、Add to **Header** |
+| Auth type | API Key Value pair：Key `X-Auth-Token`、Value 填 Token、Add to **Header** |
 | **Allowed hosts** | `http://librenms.<網域>`：Token 只會送往清單內的網址，查詢打錯網址也不會外送 |
 
-## 5. 面板
+## 6. 做兩個面板
 
-| 面板 | 查詢 | 設定 |
+| 面板 | 查詢 | 顯示設定 |
 | --- | --- | --- |
 | 斷線設備（LibreNMS） | JSON／Parser **JSONata**／URL `.../api/v0/devices?type=down`；Columns：selector `count`（Number） | Stat；Calculation Last \*；No value 0；綠、≥1 紅 |
-| 設備清單（LibreNMS） | JSON／JSONata／URL `.../api/v0/devices`；**Rows／Root `devices`**；Columns：`hostname`、`status`（Number）、`uptime`（Number）、`os`（類型）、`features`（發行版） | Table；狀態 Value mappings 1→Up 綠、0→Down 紅，Cell type Colored background；上線時間 Unit **duration (s)** |
+| 設備清單（LibreNMS） | JSON／JSONata／URL `.../api/v0/devices`；**Rows／Root 填 `devices`**；Columns：`hostname`、`status`（Number）、`uptime`（Number）、`os`（類型）、`features`（發行版） | Table；狀態用 Value mappings：1→Up 綠、0→Down 紅，Cell type Colored background；上線時間 Unit **duration (s)** |
 
-- 新版 Infinity 的 Parser 分成 Backend（JSONata、JQ）與 Frontend 兩類，沒有名為「Backend」的單一選項。
-- 「斷線設備」直接讀 API 的 `count`，沒有斷線時拿到的是真正的 0。驗證方式：暫時把 URL 改成不含 `?type=down`，應顯示 16（紅），改回後為 0。
-- 沒設 Rows／Root 時，整個回應被當成一列（`count`、`devices`、`status` 三欄）；設成 `devices` 後每台設備一列。
-- `uptime` 單位是秒；選 duration (ms) 會少 1000 倍。
-- 點表格「狀態」欄標題排序，Down 會排在最上面。
+設定小提醒：
 
-驗收：16 列皆為 Up；上線時間合理（grafana 1 day、多數 2 days）。表格上 melayu17 只有 1 hour，查證為當天更新 DSM 後重開，屬預期。
+| 情況 | 說明 |
+| --- | --- |
+| 找不到「Backend」Parser | 新版 Infinity 的 Parser 分 Backend（JSONata、JQ）和 Frontend 兩類，沒有叫「Backend」的單一選項 |
+| 斷線數字顯示 0 是真的嗎？ | 直接讀 API 的 `count`，沒有斷線時就是真正的 0。驗證：暫時把 URL 拿掉 `?type=down`，應顯示 16（紅），改回後是 0 |
+| 表格只有一列 | 沒設 Rows／Root 時，整個回應被當成一列（`count`、`devices`、`status` 三欄）；設成 `devices` 才會每台一列 |
+| 上線時間差了 1000 倍 | `uptime` 單位是秒，要選 duration (s)，不是 (ms) |
+| Columns 在哪裡 | 查詢區的 **Parsing options & Result fields** 裡 |
 
-**「系統」欄顯示 proxmox**：LXC 容器與 PVE 主機共用 kernel，SNMP 回報的 `version` 都是 `7.0.14-23-pve`，LibreNMS 因此把容器的 `os` 判斷為 proxmox。實際發行版在 `features` 欄（由 snmpd 的 `extend distro` 回報）：
+點表格「狀態」欄標題排序，Down 會排在最上面。
 
-~~~bash
+**驗收結果**：16 列都是 Up；上線時間合理（grafana 1 天、多數 2 天）。melayu17 只有 1 小時，查證是當天更新 DSM 後重開，屬預期。
+
+## 7. 「系統」欄為什麼都顯示 proxmox？（2026-10-15 修正）
+
+**原因**：LXC 容器和 PVE 主機**共用同一個核心（kernel）**，SNMP 回報的 `version` 都是 `7.0.14-23-pve`，所以 LibreNMS 把容器的 `os` 也判斷成 proxmox。實際的發行版在 `features` 欄，由 snmpd 的 `extend distro` 回報。
+
+```bash
 pct exec 102 -- mysql librenms -e "select hostname, os, version, features, hardware from devices order by hostname;"
-~~~
+```
 
-以 `snmp-v3-add.sh` 加入的主機有值（如 Ubuntu 24.04、Debian 13.7、Debian 12.15）；adguard、pihole、wireguard 與三台 PVE 節點為空；NAS 為 dsm、無此欄。表格因此改成「類型」（`os`）與「發行版」（`features`）兩欄，Columns 位於查詢區的 **Parsing options & Result fields** 內。
+用 `snmp-v3-add.sh` 加入的主機有值（例如 Ubuntu 24.04、Debian 13.7、Debian 12.15）；adguard、pihole、wireguard 和三台 PVE 節點是空的；NAS 是 dsm，沒有這欄。所以表格改成「**類型**」（`os`）和「**發行版**」（`features`）兩欄。
 
-**補上 `extend distro`（2026-10-15）**：檢查確認這 6 台既沒有 `/usr/bin/distro`，snmpd.conf 也沒有 `extend distro`（PVE 節點只有 `extend proxmox`）。從 LibreNMS 容器取出官方 distro 腳本後逐台補上：
+### 7-1 替 6 台補上 `extend distro`
 
-~~~bash
+這 6 台既沒有 `/usr/bin/distro`，snmpd.conf 也沒有 `extend distro`（PVE 節點只有 `extend proxmox`）。從 LibreNMS 容器取出官方 distro 腳本，逐台補上：
+
+```bash
 pct pull 102 /usr/bin/distro /root/distro
 # 容器（同節點；其他節點的容器先 scp 到該節點再 pct push）
 pct exec <CTID> -- cp -a /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-distro-$(date +%Y%m%d)
@@ -123,48 +177,52 @@ scp /root/distro <節點>:/usr/bin/distro
 ssh <節點> "chmod 755 /usr/bin/distro && cp -a /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-distro-\$(date +%Y%m%d) && (grep -q '^extend distro' /etc/snmp/snmpd.conf || echo 'extend distro /usr/bin/distro' >> /etc/snmp/snmpd.conf) && systemctl restart snmpd"
 # 不等每 6 小時的自動偵測，手動重新偵測 os 模組
 pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./discovery.php -h <主機名稱> -m os"
-~~~
+```
 
-結果：三個容器為 Debian 13.7，三台 PVE 節點為 `Debian 13.7/PVE 9.2.21`（distro 腳本會辨識 PVE）；snmpd 皆 active，原有 `extend proxmox` 不受影響。表格的「發行版」只剩兩台 NAS 空白。修改 snmpd.conf 與新增 distro 會產生 Wazuh 檔案異動紀錄，屬預期。
+**結果**：三個容器是 Debian 13.7，三台 PVE 節點是 `Debian 13.7/PVE 9.2.21`（distro 腳本會辨識 PVE）；snmpd 都 active，原本的 `extend proxmox` 不受影響。表格的「發行版」只剩兩台 NAS 空白。修改 snmpd.conf 會產生 Wazuh 檔案異動紀錄，屬預期。
 
-這 6 台的 `rouser snmpuser` 原本沒有 `priv`（允許只驗證不加密），以腳本加入的主機為 `rouser snmpuser priv`。同日改為一致：
+### 7-2 順便強制加密：`rouser snmpuser priv`
 
-~~~bash
+這 6 台的 `rouser snmpuser` 原本沒有 `priv`（允許「只驗證、不加密」），而用腳本加入的主機都是 `rouser snmpuser priv`。同日改成一致：
+
+```bash
 pct exec <CTID> -- cp -a /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.bak-priv-$(date +%Y%m%d)
 pct exec <CTID> -- sed -i 's/^rouser snmpuser[[:space:]]*$/rouser snmpuser priv/' /etc/snmp/snmpd.conf
 pct exec <CTID> -- systemctl restart snmpd
 pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device:poll <主機名稱> -m core"
-~~~
+```
 
-（PVE 節點在節點上直接執行同樣的 cp／sed／restart。）結果：6 台皆為 `rouser snmpuser priv`、snmpd active；LibreNMS 一律以 authPriv 輪詢，6 台 poll 皆有 `Snmpget` 回應、無逾時。還原：複製 `.bak-priv-日期` 回 snmpd.conf 並重啟 snmpd。
+（PVE 節點在節點上直接執行同樣的 cp／sed／restart。）
 
-## 6. 發現：jt-ipam 的 LibreNMS Token 屬於 admin
+**結果**：6 台都是 `rouser snmpuser priv`、snmpd active；LibreNMS 一律以 authPriv（驗證＋加密）輪詢，6 台 poll 都有 `Snmpget` 回應、沒有逾時。還原：把 `.bak-priv-日期` 複製回 snmpd.conf 並重啟 snmpd。
 
-`personal_access_tokens` 只有兩筆：`admin` 的 `jt-ipam`（不過期）與 `grafana` 的 `Grafana war room`。jt-ipam 主機若被入侵，該 Token 可修改 LibreNMS 任何設定。jt-ipam 的「自動加入監控」功能可能需要寫入權限，暫不更動，列為待評估。
+## 8. 發現：jt-ipam 的 LibreNMS Token 屬於 admin
 
-## 還原
+`personal_access_tokens` 只有兩筆：`admin` 的 `jt-ipam`（**不會過期**）和 `grafana` 的 `Grafana war room`。jt-ipam 主機如果被入侵，那把 Token 可以修改 LibreNMS 任何設定。jt-ipam 的「自動加入監控」功能可能需要寫入權限，所以暫不更動，列為待評估。
 
-~~~bash
+## 9. 還原方式
+
+```bash
 pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join users u on u.user_id=t.tokenable_id where u.username='grafana';"
-~~~
+```
 
-再到 LibreNMS 刪除 `grafana` 使用者，並在 Grafana 移除 LibreNMS 資料來源與兩個面板。LibreNMS 本身沒有其他變更。
+再到 LibreNMS 刪除 `grafana` 使用者，並在 Grafana 移除 LibreNMS 資料來源和兩個面板。LibreNMS 本身沒有其他變更。
 
-## 待辦
+## 10. 待辦
 
 | 項目 | 狀態 |
 | --- | --- |
 | LibreNMS 啟用 HTTPS（Token 目前以 HTTP 傳送） | 待改善 |
-| 2027-10-14 前更換 Grafana 用的 LibreNMS Token | 長期追蹤 |
+| 2027-10-14 前更換 Grafana 用的 LibreNMS Token | 長期追蹤（已排入 Google Calendar 2027-10-01） |
 | 評估 jt-ipam 改用權限較小的 LibreNMS 使用者 | 待評估 |
 | 「目前告警」面板（`/api/v0/alerts?state=1`） | 可擴充 |
-| 設備清單「系統」欄改為「類型」（`os`）＋「發行版」（`features`） | 完成（2026-10-15） |
-| adguard、pihole、wireguard、node10～12 補 `extend distro` | 完成（2026-10-15） |
-| 上述 6 台的 `rouser snmpuser` 加上 `priv`（強制加密） | 完成（2026-10-15） |
+| 設備清單改為「類型」＋「發行版」 | ✅ 完成（2026-10-15） |
+| 6 台補 `extend distro` | ✅ 完成（2026-10-15） |
+| 6 台 `rouser snmpuser` 加上 `priv` | ✅ 完成（2026-10-15） |
 
-## 參考資料
+## 11. 延伸閱讀
 
-- [LibreNMS：API Authentication](https://docs.librenms.org/API/)
-- [LibreNMS：API Devices](https://docs.librenms.org/API/Devices/)
+- [LibreNMS：API Authentication](https://docs.librenms.org/API/)、[API Devices](https://docs.librenms.org/API/Devices/)
 - [Laravel Sanctum：API Token Authentication](https://laravel.com/docs/sanctum#api-token-authentication)
 - [Grafana Infinity data source](https://grafana.com/docs/plugins/yesoreyeram-infinity-datasource/latest/)
+- [用 Grafana 建立戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)
