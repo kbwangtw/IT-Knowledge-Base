@@ -390,7 +390,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 ## 10. 延伸閱讀
 
 - [把 PVE、PBS 與 NAS 的日誌集中到 Graylog（一）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-graylog-syslog-pipeline-sop/)：11-1 Graylog 顯示時區（和容器系統時區是兩回事）
-- [Graylog 告警與監控（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)：告警信裡的 `+08:00` 是時區標記（第 10 節）
+- [Graylog 告警與監控（三）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)：告警信裡的 `+08:00` 是時區標記（第 11 節）
 - [Ceph 出現 BlueStore 慢操作告警](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/)：PVE／PBS 備份時段
 - [LibreNMS 官方安裝文件](https://docs.librenms.org/Installation/Install-LibreNMS/)：PHP `date.timezone` 與系統時區要一致
 - [systemd timedatectl](https://www.freedesktop.org/software/systemd/man/latest/timedatectl.html)

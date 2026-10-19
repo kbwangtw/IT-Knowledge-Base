@@ -25,7 +25,8 @@
 ### 日誌、監控與資安
 
 - [把 PVE、PBS 與 NAS 的日誌集中到 Graylog（一）](docs/pve/proxmox-graylog-syslog-pipeline-sop.md)：收集、分類、主機名稱查表、Gmail 寄信設定
-- [Graylog 告警與監控（二）](docs/pve/graylog-alerts-monitoring.md)：14 個告警、PVE 監控腳本、監控 Graylog 本身、NAS 複寫與備份監控、中文告警信（2026-10-19 從上篇拆出）
+- [Graylog 告警與監控（二）](docs/pve/graylog-alerts-monitoring.md)：14 個告警、PVE 監控腳本、監控 Graylog 本身、NAS 複寫與備份監控（2026-10-19 從上篇拆出）
+- [Graylog 告警與監控（三）：中文告警信與摘要](docs/pve/graylog-alert-templates.md)：13 個通知的中文範本、主旨、每個告警的摘要寫法（2026-10-19 從（二）拆出）
 - [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18.md)
 - [在 PVE Cluster 用 LXC 架設 Wazuh（一）：安裝與接上 Agent](docs/pve/wazuh-lxc-ubuntu2204-sop.md)
 - [Wazuh 維運（二）：資料保留、告警調校、弱點修補與整合](docs/pve/wazuh-lxc-ubuntu2204-operations.md)：告警調校、弱點修補、LibreNMS 動態群組、jt-ipam／Grafana 整合
@@ -95,4 +96,4 @@ IT-Knowledge-Base/
 
 ## 附件
 
-- Graylog 文章的可下載 Markdown：上篇 [`assets/downloads/Proxmox_Graylog_SOP_public.md`](assets/downloads/Proxmox_Graylog_SOP_public.md)、下篇 [`assets/downloads/Graylog_Alerts_Monitoring_public.md`](assets/downloads/Graylog_Alerts_Monitoring_public.md)（與文章同步）；同目錄的 Word 檔是早期版本，沒有同步。
+- Graylog 文章的可下載 Markdown：上篇 [`assets/downloads/Proxmox_Graylog_SOP_public.md`](assets/downloads/Proxmox_Graylog_SOP_public.md)、下篇 [`assets/downloads/Graylog_Alerts_Monitoring_public.md`](assets/downloads/Graylog_Alerts_Monitoring_public.md)、第三篇 [`assets/downloads/Graylog_Alert_Templates_public.md`](assets/downloads/Graylog_Alert_Templates_public.md)（與文章同步）；同目錄的 Word 檔是早期版本，沒有同步。
