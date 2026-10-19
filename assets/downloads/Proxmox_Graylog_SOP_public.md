@@ -642,7 +642,7 @@ openssl s_client -starttls smtp -connect smtp.gmail.com:587 -crlf   # 第 2 層�
 | Notification Title | PVE 任務失敗通知 |
 | Type | Email Notification |
 | Description | 當 Proxmox VE 任務執行失敗時發送警報通知 |
-| Subject | `【Graylog 警報】${event_definition_title}` |
+| Subject | 當時是 `【Graylog 警報】${event_definition_title}`；10/19 改為 `【PVE 任務告警】${event_definition_title}`（下篇第 8 節） |
 | 寄件人／收件人 | 已核對正確的 Gmail 地址（公開文件不列） |
 | Time zone | Taipei，測試信顯示 +08:00 |
 | Body／HTML Body Template | 當時保留 Graylog 預設範本；10/19 改為中文範本（下篇第 8 節） |

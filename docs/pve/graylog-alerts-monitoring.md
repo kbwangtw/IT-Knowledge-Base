@@ -1134,6 +1134,46 @@ python3 /root/gl-tpl/notif.py restore /root/gl-notifications-backup-<日期時�
 
 > 備份檔含收件人信箱，只有 root 能讀；觀察一週沒問題再刪。
 
+### 第五步：統一主旨
+
+13 個主旨裡只有兩個還是 `【Graylog 警報】…`，看不出類別。改成和其他一樣的「【類別 告警】告警名稱」：
+
+| Notification | 原本 | 改成 |
+| --- | --- | --- |
+| PVE 任務失敗通知 | `【Graylog 警報】${event_definition_title}` | `【PVE 任務告警】${event_definition_title}` |
+| PVE 服務異常通知 | `【Graylog 警報】${event_definition_title}` | `【PVE 服務告警】${event_definition_title}` |
+
+```bash
+cat > /root/gl-tpl/subject.py <<'EOF2'
+import json, os, sys, base64, urllib.request
+url = os.environ["GL_URL"].rstrip("/")
+auth = base64.b64encode(("admin:" + os.environ["GLPW"]).encode()).decode()
+H = {"Authorization": "Basic " + auth, "Accept": "application/json",
+     "Content-Type": "application/json", "X-Requested-By": "cli"}
+def call(method, path, data=None):
+    body = None if data is None else json.dumps(data).encode()
+    req = urllib.request.Request(url + path, method=method, headers=H, data=body)
+    with urllib.request.urlopen(req, timeout=15) as r:
+        b = r.read()
+        return json.loads(b) if b else None
+NEW = {"PVE 任務失敗通知": "【PVE 任務告警】${event_definition_title}",
+       "PVE 服務異常通知": "【PVE 服務告警】${event_definition_title}"}
+for n in call("GET", "/api/events/notifications?per_page=100")["notifications"]:
+    if n["title"] in NEW:
+        old = n["config"]["subject"]
+        n["config"]["subject"] = NEW[n["title"]]
+        call("PUT", "/api/events/notifications/" + n["id"], n)
+        print("已更新：", n["title"], "|", old, "→", NEW[n["title"]])
+EOF2
+export GL_URL GLPW
+python3 /root/gl-tpl/notif.py backup /root/gl-notifications-backup-$(date +%Y%m%d-%H%M).json
+python3 /root/gl-tpl/subject.py
+GL_URL="$GL_URL" GLPW="$GLPW" python3 /root/gl-notif-inventory.py | grep -E '^==|subject'
+unset GLPW
+```
+
+**看到的結果**：`已更新：` 兩行（舊 → 新），盤點後 13 個主旨都不再出現 `【Graylog 警報】`。主旨只影響之後的信件標題，沒有另外觸發測試信，等這兩個告警自然觸發時確認。
+
 ## 9. postfix 改用新的加密參數（2026-10-19）
 
 **做什麼**：三台 PVE 和 PBS31 的 postfix 把舊參數 `smtp_use_tls` 換成 `smtp_tls_security_level = encrypt`。postfix 是所有告警信的出口（PVE 備份通知、PBS 通知、第 5～7 節的監控腳本），所以一次只改一台，改完立刻寄測試信。
