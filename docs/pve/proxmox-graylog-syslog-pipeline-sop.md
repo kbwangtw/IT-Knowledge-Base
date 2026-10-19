@@ -1760,7 +1760,7 @@ PBS31 不在叢集的 SSH 互信裡（也不該為此加進去），到 PBS31 �
 | node10 | 30 | ✅ `status=sent`，已收到 |
 | node11 | 31 | ✅ `status=sent`，已收到 |
 | node12 | 30 | ✅ `status=sent`，已收到 |
-| pbs31 | — | ✅ `status=sent`，已收到 |
+| pbs31 | 30 | ✅ `status=sent`，已收到 |
 
 **萬一寄不出去**（`status=deferred`、`TLS is required, but was not offered`），在該台還原：
 
