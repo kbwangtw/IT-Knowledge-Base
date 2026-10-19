@@ -1448,7 +1448,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | 彙總型告警改成「每筆」 | Ceph、Corosync、儲存 ×3 改成每筆觸發後，摘要才能直接寫出哪台、哪個儲存（第 8 節第七步）；會改到告警判斷邏輯，要逐一重新測試，儲存警告的 Grace 是 24 小時 |
 | 「每筆」告警的新摘要 | DSM 管理員登入已確認（10/19）；Node 離線、服務異常、WireGuard 自然觸發時，確認摘要顯示正常 |
 | 每月看一次 Snapshot Replication | 補上第 6 節抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
-| 單節點故障演練 | 和 PVE HA 文件第 14 節一起做：一台失聯時，確認「節點離線」告警、另兩台第 5、6 節的監控與 postfix 寄信都正常，記錄收信時間 |
+| 單節點故障演練 | 和 PVE HA 文件第 15 節一起做：一台失聯時，確認「節點離線」告警、另兩台第 5、6 節的監控與 postfix 寄信都正常，記錄收信時間 |
 | 其他新告警的測試 | 每個新告警都安排安全、可控的測試事件，記錄原始訊息、欄位、事件、收信時間與 Grace 下的重複通知情形 |
 
 ## 12. 延伸閱讀與下載
@@ -1457,5 +1457,5 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 - [PVE 告警實測紀錄（更新至 2026-09-22）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-pve-alert-validation-2026-09-18/)：告警的真實日誌證據與 logger 安全測試
 - [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)：WireGuard VPN 異常告警的建置
 - [把 PVE／PBS 通知改成繁體中文](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-zh-tw-notification/)：PVE／PBS 本身寄的通知信（和 Graylog 告警是兩套機制）
-- [PVE HA 放置策略](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)：單節點故障演練（第 14 節）
+- [PVE HA 放置策略](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)：單節點故障演練（第 15 節）
 - [Graylog 官方文件：Alerts and Notifications](https://go2docs.graylog.org/current/interacting_with_your_log_data/alerts.html)

@@ -15,8 +15,8 @@ last_modified_at: 2026-10-19
 | --- | --- |
 | 適合誰看 | 同時用 PVE 和 ProxCenter，不確定規則該設在哪邊的人 |
 | 環境 | Proxmox VE 9.2.20 → 9.2.21，三節點（node10、node11、node12），Ceph 共用儲存 |
-| 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案 |
-| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；⏳ 單節點故障演練 |
+| 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案；10/19 再次分散 |
+| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；✅ 10/19 HA 資源分散為 4／5／4；⏳ 單節點故障演練 |
 
 ## 1. 先認識幾個名詞
 
@@ -385,9 +385,94 @@ HA Resources 清單中 12 台的 `Auto-Rebalance` 都顯示 `true`，但 `datace
 
 - **非 HA 的 guest 沒人自動平衡、也沒有規則保護。** WinClient（108）、UBClient（104）有顯示卡直通，本來就無法遷移；更新前照第 11 節先關機。
 - **新增重要服務時，要記得加入 HA resources**，必要時一併建立 HA rules，否則 PVE 不會管它。
-- **服務集中只能人工分散。** 10/13 的 HA 資源分布：node10 7 台（AdGuard、librenms、IPAM、Graylog、wireguard、ai、DC02）、node11 1 台（ProxCenter）、node12 4 台（Pihole、wazuh、DC01、CA）。`static` CRS 只影響啟動和故障轉移時放哪裡，不會搬動正在運作的服務。
+- **服務集中只能人工分散。** 10/13 的 HA 資源分布：node10 7 台（AdGuard、librenms、IPAM、Graylog、wireguard、ai、DC02）、node11 1 台（ProxCenter）、node12 4 台（Pihole、wazuh、DC01、CA）。`static` CRS 只影響啟動和故障轉移時放哪裡，不會搬動正在運作的服務（10/19 已再分散，見第 13 節）。
 
-## 13. 常見問題
+## 13. 再次手動分散 HA 資源（2026-10-19）
+
+**為什麼**：10/13 之後 Grafana（ct:114）也加入 HA，HA 資源變成 13 個，分布是 **8／1／4**。node10 一台掛掉會有 8 個服務同時重啟；CRS static 不會自己搬動正在運作的服務，只能人工分散。
+
+**分配原則**：
+
+| 原則 | 做法 |
+| --- | --- |
+| DNS、DC 分開 | 既有的兩條 Resource Affinity 規則保證（第 6、10 節） |
+| 三套監控分開 | Graylog、LibreNMS、Wazuh 各在一台，任一台掛了還有兩套能看 |
+| 遠端救援的路要保留 | WireGuard 不跟最多服務的節點放一起 |
+| Grafana 放第三台 | 它讀 LibreNMS（node10）和 Wazuh（node12），放 node11 時任一台掛了還看得到另一邊 |
+
+**① 盤點**（node10，只讀取）：
+
+```bash
+ha-manager status | grep -E '^service' | sort -k3
+for n in node10 node11 node12; do
+  pvesh get /nodes/$n/status --output-format json | python3 -c "
+import json,sys; d=json.load(sys.stdin); m=d['memory']
+print('$n', '已用 %.1f / 共 %.1f GiB（%.0f%%）' % (m['used']/2**30, m['total']/2**30, 100*m['used']/m['total']))"
+done
+for id in 105 109 113; do
+  node=$(pvesh get /cluster/resources --type vm --output-format json | python3 -c "import json,sys; print([r['node'] for r in json.load(sys.stdin) if r['vmid']==$id][0])")
+  echo "ct:$id（$node）$(ssh root@$node "pct config $id" < /dev/null | grep -E '^(hostname|memory|cores|swap):' | tr '\n' ' ')"
+done
+ha-manager rules config
+grep crs /etc/pve/datacenter.cfg
+```
+
+**看到的結果**：
+
+| 節點 | HA 資源 | 記憶體 |
+| --- | --- | --- |
+| node10 | AdGuard(100)、LibreNMS(102)、IPAM(103)、Graylog(105)、WireGuard(109)、ai(113)、Grafana(114)、DC02(vm:107)（8） | 16.7 / 62.1 GiB（27%） |
+| node11 | ProxCenter(110)（1） | 22.1 / 62.1 GiB（36%，顯示卡直通 VM 佔用） |
+| node12 | Pi-hole(101)、Wazuh(112)、DC01(vm:106)、CA(vm:111)（4） | 17.7 / 62.1 GiB（29%） |
+
+要搬到 node11 的設定值：Graylog 8 GiB／4 核、ai 2 GiB／2 核、WireGuard 0.5 GiB／1 核，加上 Grafana，合計約 12 GiB；node11 搬完約 55%，仍有空間。DNS、DC 兩條規則 `enabled`、`in use`，`crs: ha=static,ha-rebalance-on-start=1`。
+
+**② 逐台搬移**：先搬不重要的（ai）量時間，WireGuard 最後搬，而且**在內網操作**（透過 VPN 操作的話，搬的時候連線會斷）。用一個小函式搬移並計時：
+
+```bash
+mig() {
+  id=$1; t0=$(date +%s)
+  ha-manager migrate ct:$id node11
+  for i in $(seq 1 100); do
+    sleep 3
+    if ha-manager status | grep -q "ct:$id (node11, started)"; then
+      echo "✅ ct:$id 已在 node11 啟動，耗時 $(( $(date +%s) - t0 )) 秒"; return 0
+    fi
+  done
+  echo "⚠️ ct:$id 5 分鐘內沒有完成，目前狀態："; ha-manager status | grep "ct:$id"
+}
+mig 113        # ai
+mig 114        # Grafana
+mig 105        # Graylog（漏收 1～3 分鐘日誌；外部健康檢查可能寄一封【Graylog 異常】，屬預期）
+mig 109        # WireGuard（最後、在內網）
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `ha-manager migrate` | HA 資源要用它搬；LXC 自動走「關機 → 搬移 → 開機」 |
+| `grep "ct:$id (node11, started)"` | 每 3 秒檢查，直到在 node11 啟動 |
+
+**③ 每台搬完的檢查**：
+
+```bash
+ssh root@node11 "pct exec 114 -- curl -s http://localhost:3000/api/health" < /dev/null
+ssh root@node11 "pct exec 105 -- sh -c 'curl -s -o /dev/null -w \"lbstatus http=%{http_code}\n\" http://\$(hostname -I | awk \"{print \\\$1}\"):9000/api/system/lbstatus'" < /dev/null
+ssh root@node11 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|latest handshake'" < /dev/null
+```
+
+**看到的結果**：四台都在 node11 `started`；Grafana `"database": "ok"`（13.2.3）；Graylog `lbstatus http=200`；WireGuard 搬完後用手機行動網路連 VPN，連得上、能進內網服務（容器 IP 跟著容器走，路由器的 port forwarding 指向容器 IP，不用改）。
+
+**搬完的分布（4／5／4）**：
+
+| 節點 | HA 資源 |
+| --- | --- |
+| node10 | AdGuard、LibreNMS、IPAM、DC02 |
+| node11 | ProxCenter、Graylog、WireGuard、ai、Grafana |
+| node12 | Pi-hole、Wazuh、DC01、CA |
+
+一台故障時同時重啟的服務，從最多 8 個降到最多 5 個。維護後服務不一定回到這個位置（CRS static 不會自動搬回），每次逐台更新後用 `ha-manager status` 對照這張表，必要時手動 `ha-manager migrate`。
+
+## 14. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
@@ -395,11 +480,11 @@ HA Resources 清單中 12 台的 `Auto-Rebalance` 都顯示 `true`，但 `datace
 | `ha-manager rules config` 看不出是分開還是放一起 | 打開規則或看 `/etc/pve/ha/rules.cfg` 的 `affinity negative` |
 | 搬 HA 資源用 `pct migrate` 沒反應或被拒 | HA 資源要用 `ha-manager migrate` |
 | VM 在客體內關機後又自己開起來 | HA 資源要用 `ha-manager set … --state stopped` |
-| 維護後服務沒回到原節點 | 正常；比對更新前的 Placement，手動 `ha-manager migrate` |
+| 維護後服務沒回到原節點 | 正常；對照第 13 節的分布表，手動 `ha-manager migrate` |
 | Rolling Update 中途中斷 | 可能是 ProxCenter 自己被搬走；先更新沒有 ProxCenter 的節點 |
 | 叢集使用率很平均，但某台服務特別多 | DRS 只看使用率；可用性風險要人工分散 |
 
-## 14. 待驗證與後續
+## 15. 待驗證與後續
 
 | 項目 | 狀態 |
 | --- | --- |
@@ -410,11 +495,11 @@ HA Resources 清單中 12 台的 `Auto-Rebalance` 都顯示 `true`，但 `datace
 | Dynamic Load 與 Automatic Rebalance 的實際行為 | ⏳ 未查證；目前全域未開啟（10/13 確認） |
 | ProxCenter DRS 停用、規則改由 PVE 統一管理 | ✅ 2026-10-13（第 12 節） |
 | ProxCenter Operation mode 改為 Manual（保險） | ✅ 2026-10-19，Guest types 同時改為只留 VMs（第 12-2 節） |
-| HA 資源集中在 node10（7／1／4），是否再分散 | ⏳ 待規劃 |
+| HA 資源集中在 node10，是否再分散 | ✅ 2026-10-19 由 8／1／4 分散為 4／5／4（第 13 節） |
 
 **單節點故障的預期行為**（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，而且在節點回來前沒有再壞一顆硬碟的餘裕。
 
-## 15. 延伸閱讀
+## 16. 延伸閱讀
 
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)（Shutdown Policy 改為 migrate）
 - [ProxCenter 逐台更新 PVE](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/)
