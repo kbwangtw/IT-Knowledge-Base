@@ -79,6 +79,7 @@ Infrastructure Syslog 的實際索引名稱是 `infra_syslog_0`（Index Set `inf
 | 告警 | ✅ 14 個告警運作中，全部寄 Gmail；10/16 盤點並修正 3 項設定；10/19 加入「每日健康回報」 |
 | 監控 Graylog 本身 | ✅ 10/19 三台 PVE 每 5 分鐘從外部檢查，異常直接用 postfix 寄信；每日 08:00 健康回報驗證整條告警鏈（11-6） |
 | NAS 快照複寫 | ✅ 10/19 複寫失敗、停止由 tokyo16 DSM 寄信；兩台 NAS 是否回應由三台 PVE 每 5 分鐘檢查（11-7） |
+| 備份 | ✅ PVE 備份、PBS GC／Verify 失敗本來就會寄信；10/19 加上每天 08:30 檢查每台 VM／CT 的最新備份與驗證結果（11-8） |
 | 看板 | 🔶「PVE 任務監控」八個 Widget 保留；整體基礎設施看板待完善 |
 | 告警信格式 | 🔶 預設格式難判讀，改為中文範本列入待辦 |
 
@@ -1396,6 +1397,140 @@ done
 
 三台各執行 `systemctl disable --now nas-reach-check.timer`，刪除腳本、兩個 systemd 檔、`/root/.nas-monitor.conf`、`/var/lib/nas-reach/` 後 `daemon-reload`。tokyo16 可刪除「快照複寫停止」規則與對應的收件者設定檔。
 
+### 11-8 備份監控（2026-10-19）
+
+**為什麼要做**：備份分成三段，任何一段出錯都要知道；最難發現的是「備份根本沒執行」，因為那時信箱只是少了幾封信。
+
+```text
+每晚 21:00～22:30  PVE 三台各自備份（vzdump）→ PBS31
+每晚 00:00          PBS31 GC（清掉不要的資料、釋放空間）
+每晚 02:00          PBS31 Verify（檢查備份資料有沒有損壞）
+每天 08:30          三台 PVE 檢查每台 VM／CT 的最新備份（本節新增）
+```
+
+#### 盤點：失敗時本來就會寄信的部分
+
+| 階段 | 通知方式 | 證據 |
+| --- | --- | --- |
+| PVE 備份 | 三個 vzdump 排程都是 `notification-mode notification-system`；PVE 沒有 `/etc/pve/notifications.cfg`，用預設：每次都寄到 root@pam，經 postfix 轉寄 Gmail | `grep -A12 '^vzdump:' /etc/pve/jobs.cfg`；另有 Graylog「PVE 任務失敗警報」 |
+| PBS GC、Verify | PBS 目標 `mail-to-root`（sendmail）、規則 `default-matcher`（除了成功的 Prune 以外全部都寄）；root@pam 有 email；postfix relayhost 為 Gmail | `proxmox-backup-manager notification target list`、`… matcher list` |
+| 實際收信 | 每天收到中文的【PBS 垃圾資料回收成功】、【PBS 備份驗證成功】 | 成功每次都寄，失敗也一定會寄 |
+
+PBS 的任務結果不會以 `TASK ERROR`／`end task` 的形式出現在 Graylog（搜尋 7 天 0 筆），所以 PBS 這段只靠 PBS 自己的通知。
+
+**Gmail 篩選器**：每天有約 5 封成功信，失敗信容易被淹沒。主旨含「失敗」→ 標上星號、永遠標示為重要、永不移至垃圾郵件，並套用到既有的相符信件。
+
+#### 新增：每日備份檢查（抓「沒執行」與「驗證失敗」）
+
+**做法**：直接看結果。PVE 本來就連得到 PBS31，用 `pvesh` 讀 PBS31 上的備份清單，**不需要新增帳號或密碼**。
+
+| 檢查 | 判定異常 | 抓的情況 |
+| --- | --- | --- |
+| 叢集裡每台 VM／CT（不含範本）在 PBS31 上有沒有備份 | 完全沒有 | 新建的 VM 沒被納入備份 |
+| 最新備份的時間 | 超過 26 小時 | 備份沒執行（排程停用、PBS 掛載失效） |
+| 最新備份的驗證結果 | `failed` 或沒有驗證紀錄 | 備份損壞，或 Verify 沒執行 |
+| 讀不到 PBS31 的備份清單 | 指令失敗 | PBS31 掛了或連線問題 |
+
+先用唯讀指令確認讀得到（10/19 實測：15 台、最新備份都是 10/18 21:00～22:07、驗證全部 `ok`）。指令裡含引號的 Python 要先用 `<<'EOF'` 寫成檔案再執行，直接放在 `python3 -c '…'` 裡用 `\"` 跳脫會出現 SyntaxError。
+
+`/usr/local/sbin/pbs-backup-check.py`：
+
+```python
+#!/usr/bin/env python3
+# 每日備份檢查：PBS31 上每台 VM／CT 是否有 26 小時內的新備份、最新一份是否驗證通過
+# 有問題才用本機 postfix 寄信（不經過 Graylog）
+import json, os, socket, subprocess, time
+
+STORAGE = "PBS31"
+MAX_AGE_H = float(os.environ.get("MAX_AGE_H", "26"))   # 測試時可用環境變數縮短
+CONF = "/root/.graylog-monitor.conf"
+host = socket.gethostname().split(".")[0]
+mail_to = next(l.split("=", 1)[1].strip() for l in open(CONF) if l.startswith("MAIL_TO="))
+
+def pvesh(*args):
+    r = subprocess.run(["pvesh", "get", *args, "--output-format", "json"],
+                       capture_output=True, text=True, timeout=180, check=True)
+    return json.loads(r.stdout)
+
+problems = []
+try:
+    guests = {str(g["vmid"]): g.get("name", "") for g in pvesh("/cluster/resources", "--type", "vm")
+              if not g.get("template")}
+    latest = {}
+    for b in pvesh(f"/nodes/{host}/storage/{STORAGE}/content"):
+        v = str(b.get("vmid", ""))
+        if v and b.get("ctime", 0) > latest.get(v, {}).get("ctime", 0):
+            latest[v] = b
+    now = time.time()
+    for v in sorted(guests, key=int):
+        name = guests[v]
+        b = latest.get(v)
+        if not b:
+            problems.append(f"{v} {name}：PBS31 上完全沒有備份")
+            continue
+        age = (now - b["ctime"]) / 3600
+        when = time.strftime("%m/%d %H:%M", time.localtime(b["ctime"]))
+        state = b.get("verification", {}).get("state")
+        if age > MAX_AGE_H:
+            problems.append(f"{v} {name}：最新備份是 {when}（{age:.1f} 小時前），超過 {MAX_AGE_H:g} 小時")
+        if state == "failed":
+            problems.append(f"{v} {name}：最新備份（{when}）驗證失敗")
+        elif not state:
+            problems.append(f"{v} {name}：最新備份（{when}）沒有驗證紀錄")
+    summary = f"檢查 {len(guests)} 台，異常 {len(problems)} 項"
+except Exception as e:
+    problems.append(f"讀不到 {STORAGE} 的備份清單：{e}")
+    summary = "檢查失敗"
+
+print(summary)
+for p in problems:
+    print(" -", p)
+if problems:
+    body = (f"偵測主機：{host}\n時間：{time.strftime('%F %T')}\n{summary}\n\n異常項目：\n"
+            + "\n".join(f"- {p}" for p in problems)
+            + "\n\n這封信由 PVE 節點直接寄出，不經過 Graylog。\n")
+    subprocess.run(["mail", "-s", f"【備份檢查異常】{len(problems)} 項（{host} 偵測）", mail_to],
+                   input=body, text=True)
+    subprocess.run(["logger", "-t", "pbs-backup-check", f"BACKUP_CHECK_PROBLEM host={host} {summary}"])
+```
+
+| 設計 | 原因 |
+| --- | --- |
+| 先列出叢集**所有** VM／CT 再對照 | 只看 PBS 上有的備份，會漏掉「從來沒備份過」的新 VM |
+| 每台節點用自己的連線查 PBS31 | 某台節點連不到 PBS31 時，只有那台寄「讀不到」，看得出是哪一台 |
+| `MAX_AGE_H` 可用環境變數覆蓋 | 測試時改成 1 小時觸發告警 |
+
+systemd：`pbs-backup-check.service`（oneshot，`After=… pve-cluster.service`）與 `pbs-backup-check.timer`（`OnCalendar=*-*-* 08:30:00`、`Persistent=true`，節點 08:30 剛好關機時開機後補跑）。
+
+#### 測試與部署（10/19）
+
+```bash
+/usr/local/sbin/pbs-backup-check.py               # 檢查 15 台，異常 0 項，不寄信
+MAX_AGE_H=1 /usr/local/sbin/pbs-backup-check.py   # 15 台都超過 1 小時 → 收到【備份檢查異常】15 項（node10 偵測）
+systemctl enable --now pbs-backup-check.timer
+for h in node11 node12; do
+  scp -p /usr/local/sbin/pbs-backup-check.py root@$h:/usr/local/sbin/
+  scp -p /etc/systemd/system/pbs-backup-check.service /etc/systemd/system/pbs-backup-check.timer root@$h:/etc/systemd/system/
+  ssh root@$h "systemctl daemon-reload && systemctl enable --now pbs-backup-check.timer"
+done
+```
+
+**看到的結果**：三台腳本指紋相同、都有收件人設定檔、手動檢查都是「檢查 15 台，異常 0 項」、timer 下次執行 10/20 08:30。
+
+#### 收到【備份檢查異常】時怎麼查
+
+| 異常項目 | 先查什麼 |
+| --- | --- |
+| 完全沒有備份 | 是新建的 VM／CT 嗎？確認備份排程的 Selection 是 All 且有 Node，或手動備份一次 |
+| 超過 26 小時 | 前一晚有沒有收到該節點的 PVE 備份信；`pvenode task list --typefilter vzdump --limit 3`；PBS31 的 Tokyo16 是否掛載（「PVE 儲存設備離線」告警） |
+| 驗證失敗 | 看當天的【PBS 備份驗證】信；PBS 網頁 Datastore → Content 找到該份備份，必要時手動重新驗證或重新備份 |
+| 沒有驗證紀錄 | 前一晚 02:00 的 Verify 有沒有執行（PBS 網頁 Tasks） |
+| 讀不到備份清單 | `pvesm status --storage PBS31`；PBS31 是否開機、8007 是否連得到 |
+
+#### 還原
+
+三台各執行 `systemctl disable --now pbs-backup-check.timer`，刪除腳本與兩個 systemd 檔後 `daemon-reload`。
+
 ## 12. 日常維運
 
 ### 12-1 把顯示時區改成台灣時間（2026-10-16）
@@ -1562,6 +1697,8 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | Graylog 搜不到快照複寫的紀錄 | 複寫日誌在套件自己的日誌頁，不在 DSM 記錄中心 | 到 Snapshot Replication → 日誌查看或匯出 CSV |
 | DSM API 登入回 402 | 一般帳號用了自訂的 `session` 名稱，或沒有 DSM 應用程式權限 | `session=webui`，並允許 DSM 權限 |
 | `read -s` 讀進來的密碼少一個字 | 沒加 `-r` 時反斜線會被吃掉 | 改用 `read -rs` |
+| 收到【備份檢查異常】信 | 有 VM／CT 太久沒備份、驗證失敗或沒被備份 | 依 11-8「收到信時怎麼查」 |
+| 失敗信混在每天的成功信裡沒看到 | PVE、PBS 成功也會寄信 | Gmail 篩選器：主旨含「失敗」→ 加星號、標示為重要 |
 | 收到【Graylog 異常】信 | Graylog 本身出問題，信是節點直接寄的 | 依 11-6「收到異常信時怎麼查」 |
 | 早上沒收到【每日健康回報】 | 告警鏈某處斷了（含 Gmail 寄信失敗） | 先看有沒有【Graylog 異常】信；再到 Search 搜 `"GRAYLOG_DAILY_HEARTBEAT"`、看 Event Definition 的 Last Matched |
 | `read -s` 存進去的不是 token | `read -s` 那行和下一段指令一起貼上，下一行被當成輸入 | `read -s` 單獨貼上、輸入完再貼下一段；token 改用 API 建立直接寫檔（11-6） |
@@ -1574,7 +1711,6 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | 中文通知信範本 | 預設信件把 Backlog 整筆欄位倒出，`Source` 顯示 Graylog 本身，看不出哪台出問題。改為中文自訂範本：Subject、Body Template、HTML Body Template，用 `${foreach backlog message}` 列出 `${message.source}` 與 `${message.message}`；先用 Execute Test Notification 測試，注意 `${message.timestamp}` 可能是 UTC。先確認 Alerts → Notifications 有幾個通知、各告警共用哪一個 |
 | 驗證 Summary Template | `PVE 任務失敗：${source.message}` 能否帶出原始訊息；補齊 node、task、VM／CT ID、UPID 與錯誤內容 |
 | 完善看板 | 沿用任務看板，再加入節點、服務、登入等統計與異常明細 |
-| PBS 任務分類與失敗告警 | PBS 的任務日誌來自 proxmox-backup-proxy，格式和 PVE 不同，現有「PVE 任務失敗警報」不適用；依真實日誌建立分類與告警（或改用 PBS 內建通知） |
 | PBS 的認證事件 | 確認 PBS 的登入與 sudo 是否也要分類 |
 | 每月看一次 Snapshot Replication | 補上 11-7 抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
 | DSM 日誌過濾器 | 確認兩台 NAS 送出哪些種類的日誌 |
