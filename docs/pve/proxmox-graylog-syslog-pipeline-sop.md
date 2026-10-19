@@ -1423,7 +1423,7 @@ done
 | --- | --- | --- |
 | PVE 備份 | 三個 vzdump 排程都是 `notification-mode notification-system`；PVE 沒有 `/etc/pve/notifications.cfg`，用預設：每次都寄到 root@pam，經 postfix 轉寄 Gmail | `grep -A12 '^vzdump:' /etc/pve/jobs.cfg`；另有 Graylog「PVE 任務失敗警報」 |
 | PBS GC、Verify | PBS 目標 `mail-to-root`（sendmail）、規則 `default-matcher`（除了成功的 Prune 以外全部都寄）；root@pam 有 email；postfix relayhost 為 Gmail | `proxmox-backup-manager notification target list`、`… matcher list` |
-| 實際收信 | 每天收到中文的【PBS 垃圾資料回收成功】、【PBS 備份驗證成功】 | 成功每次都寄，失敗也一定會寄 |
+| 實際收信 | 每天收到中文的【PBS 垃圾資料回收成功】、【PBS 備份驗證成功】；2026-10-19 在測試 datastore 實際製造 GC 失敗、Verify 失敗，兩封中文失敗信都有寄到 | 成功每次都寄，失敗也確認會寄（做法見中文通知文件 9-1） |
 
 PBS 的任務結果不會以 `TASK ERROR`／`end task` 的形式出現在 Graylog（搜尋 7 天 0 筆），所以 PBS 這段只靠 PBS 自己的通知。
 
