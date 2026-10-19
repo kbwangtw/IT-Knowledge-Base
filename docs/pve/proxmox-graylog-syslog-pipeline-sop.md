@@ -4,7 +4,7 @@ title: "把 PVE、PBS 與 NAS 的日誌集中到 Graylog"
 date: 2026-09-17
 categories: [PVE, Graylog, Syslog]
 permalink: /docs/pve/proxmox-graylog-syslog-pipeline-sop/
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-19
 ---
 
 # 把 PVE、PBS 與 NAS 的日誌集中到 Graylog
@@ -16,8 +16,8 @@ last_modified_at: 2026-10-17
 | 適合誰看 | 第一次接觸「集中式日誌」與 Graylog 的人；或要維護這套環境的人 |
 | 收集對象 | PVE 三台節點（node10～12）、PBS31、兩台 Synology NAS（tokyo16、melayu17） |
 | 環境 | Graylog 7.1.9，裝在 PVE 叢集上的 LXC 容器（CT 105，Debian 12） |
-| 目前狀態 | 收集、分類、主機名稱查表、13 個 Email 告警都已運作並驗證；看板與信件格式仍待改善（見第 14 節） |
-| 紀錄期間 | 2026-09-17 起陸續建置，最後更新 2026-10-17 |
+| 目前狀態 | 收集、分類、主機名稱查表、14 個 Email 告警都已運作並驗證；Graylog 本身也有監控（11-6）；看板與信件格式仍待改善（見第 14 節） |
+| 紀錄期間 | 2026-09-17 起陸續建置，最後更新 2026-10-19 |
 
 **這篇怎麼讀**：
 
@@ -64,7 +64,7 @@ tokyo16、melayu17 ── UDP 1515 → Input「Synology Syslog UDP」→ Stream�
 
                     ↓ 存好的訊息可以：
                     ├─ 搜尋、看「PVE 任務監控」看板
-                    └─ 由 13 個 Event Definition 檢查 → 符合條件 → Gmail 告警
+                    └─ 由 14 個 Event Definition 檢查 → 符合條件 → Gmail 告警
 ```
 
 另外，PVE 節點上有兩支**監控腳本**，每 1 分鐘、每 5 分鐘檢查一次節點和儲存空間，有異常就寫一筆日誌，再由 Graylog 告警（第 11-3 節）。
@@ -85,7 +85,8 @@ Infrastructure Syslog 的實際索引名稱是 `infra_syslog_0`（Index Set `inf
 | 分類（Pipeline） | ✅ 主機、服務、任務、認證、系統錯誤分類；PBS 識別；NAS 登入解析 |
 | 主機名稱查表 | ✅ 10/15 接上 jt-ipam，訊息中的 IP 自動補上 `src_host` |
 | 雜訊過濾 | ✅ 10/16 丟棄 PBS 讀取 NAS 產生的大量紀錄，tokyo16 每天少了約 7 萬筆 |
-| 告警 | ✅ 13 個告警運作中，全部寄 Gmail；10/16 盤點並修正 3 項設定 |
+| 告警 | ✅ 14 個告警運作中，全部寄 Gmail；10/16 盤點並修正 3 項設定；10/19 加入「每日健康回報」 |
+| 監控 Graylog 本身 | ✅ 10/19 三台 PVE 每 5 分鐘從外部檢查，異常直接用 postfix 寄信；每日 08:00 健康回報驗證整條告警鏈（11-6） |
 | 看板 | 🔶「PVE 任務監控」八個 Widget 保留；整體基礎設施看板待完善 |
 | 告警信格式 | 🔶 預設格式難判讀，改為中文範本列入待辦 |
 
@@ -705,6 +706,7 @@ rm /root/event-defs.json
 | Synology DSM 登入失敗 | `synology_auth_result:failed AND synology_service:DSM` | 5／5 | 同一台 NAS、同一來源 IP ≥ 3 次 | 5 分／10 |
 | Synology DSM 管理員登入 | `message:"User [<NAS 管理員帳號>]" AND message:"signed in to [DSM] successfully"` | 5／5 | 每筆 | 5 分／10 |
 | WireGuard VPN 異常 | `source:wazuh AND "WireGuard ct:109"`（由 Wazuh 轉來） | 1／5 | 每筆 | 30 分／5 |
+| Graylog 每日健康回報 | `"GRAYLOG_DAILY_HEARTBEAT"`（三台每天 08:00 送出；10/19 加入，見 11-6） | 5／5 | 有就觸發 | 60 分／3 |
 | System notification events | Graylog 內建 | — | — | — |
 
 - 每個告警都綁了一個 Email 通知（第 9 節）。
@@ -896,6 +898,323 @@ node12 部署前，它的 storage 腳本和 node11 改版前的備份 `diff` 沒
 
 還原（node11 或 node12）：`systemctl disable --now pve-node-monitor.timer`，刪除 node-monitor 腳本與兩個 systemd 檔案後 `daemon-reload`；storage 腳本用 `.bak-日期` 還原。
 
+### 11-6 監控 Graylog 本身（2026-10-19）
+
+**為什麼要做**：所有告警都由 Graylog 寄出，連 Wazuh 的 VPN 告警也要經過它。Graylog 自己掛掉時，**所有告警都會靜默**，而且沒有任何通知。所以監控 Graylog 一定要走**另一條寄信路線**。
+
+「Graylog 掛了」有四種情況，用兩層分工處理：
+
+| # | 情況 | 例子 | 由哪一層抓 |
+| --- | --- | --- | --- |
+| 1 | 服務停了 | 容器沒開、graylog-server 當掉 | 第一層 |
+| 2 | 服務在，但收不到日誌 | Input 停了、來源端的 rsyslog 壞了 | 第一層 |
+| 3 | 收得到，但處理不了 | OpenSearch 卡住、磁碟滿，訊息堆在佇列（journal） | 第一層 |
+| 4 | 都正常，但**信寄不出去** | Gmail 應用程式密碼失效 | 第二層 |
+
+```text
+第一層：外部檢查（抓 1、2、3）
+  node10／11／12 每 5 分鐘呼叫 Graylog API 檢查
+    → 異常 → 用節點本機的 postfix 直接寄 Gmail（不經過 Graylog）
+
+第二層：每日健康回報（抓 4）
+  每天 08:00 三台各送一筆 GRAYLOG_DAILY_HEARTBEAT 日誌
+    → Graylog 照正常告警流程寄出【每日健康回報】
+    → 哪天早上沒收到這封信 = 告警鏈有地方斷了
+```
+
+> 三台都部署，是因為 node10、node11 同時故障時，node12 雖然失去 quorum，但檢查腳本只用 `curl` 和 `mail`、不依賴叢集功能，仍然能檢查和寄信。代價是同一個故障會收到 3 封信（主旨寫明是哪一台偵測到的）。
+
+#### 第一步：確認節點能直接寄信
+
+PVE 沒有 `/etc/pve/notifications.cfg`，代表用預設方式：交給本機 postfix，而 postfix 已設定經 Gmail 轉寄（備份通知信就是走這條路）。
+
+```bash
+postconf -h relayhost          # 應為 smtp.gmail.com:587
+command -v sendmail mail       # 有這兩個指令
+read -p "收件 Gmail：" TO
+```
+
+```bash
+echo "寄信測試，來自 $(hostname)" | mail -s "【測試】$(hostname) 直接寄信（不經過 Graylog）" "$TO"
+journalctl --since "10 min ago" --no-pager | grep -E 'postfix/.*status=' | tail -3
+```
+
+**看到的結果**：三台 relayhost 都是 `smtp.gmail.com:587`，紀錄出現 `status=sent (250 2.0.0 OK …)`，三封測試信都收到。postfix 的服務名稱各版本不同，所以用 `journalctl` 讀全部日誌再 grep，不指定 `-u`。
+
+`postconf` 會出現 `support for parameter "smtp_use_tls" will be removed` 警告，是舊參數名稱，目前不影響寄信（列入待辦）。
+
+#### 第二步：建立唯讀帳號與 token
+
+腳本要讀 Graylog API，所以建一個只有 **Reader** 角色的帳號 `pve-monitor`。以下在 node10 用管理員身分透過 API 建立，token 直接寫進設定檔，**不顯示在畫面上、不經過剪貼簿**。
+
+先建立設定檔（`read -p` 單獨貼上）：
+
+```bash
+read -p "收件 Gmail：" TO
+```
+
+```bash
+umask 077
+printf 'GL_URL=http://<Graylog IP>:9000\nGL_TOKEN=\nMAIL_TO=%s\n' "$TO" > /root/.graylog-monitor.conf
+ls -l /root/.graylog-monitor.conf      # 應為 -rw-------
+```
+
+輸入管理員密碼（`read -s` 單獨貼上，輸入時畫面不顯示）：
+
+```bash
+read -s -p "Graylog admin 密碼：" GLPASS; echo
+```
+
+建立帳號與 token：
+
+```bash
+. /root/.graylog-monitor.conf
+H=(-s -u "admin:$GLPASS" -H 'X-Requested-By: cli' -H 'Content-Type: application/json' -H 'Accept: application/json')
+UPW=$(openssl rand -base64 32)
+curl "${H[@]}" -w '  http=%{http_code}\n' -X POST "$GL_URL/api/users" -d "{\"username\":\"pve-monitor\",\"first_name\":\"PVE\",\"last_name\":\"Monitor\",\"email\":\"$MAIL_TO\",\"password\":\"$UPW\",\"roles\":[\"Reader\"],\"permissions\":[]}"
+unset UPW
+UID_=$(curl "${H[@]}" "$GL_URL/api/users/pve-monitor" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))')
+RESP=$(curl "${H[@]}" -X POST "$GL_URL/api/users/$UID_/tokens/pve-graylog-monitor" -d '{"token_ttl":"P3650D"}')
+unset GLPASS H
+NEWTOKEN=$(printf '%s' "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' 2>/dev/null)
+[ -n "$NEWTOKEN" ] && sed -i "s|^GL_TOKEN=.*|GL_TOKEN=$NEWTOKEN|" /root/.graylog-monitor.conf
+unset NEWTOKEN RESP UID_
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `UPW=$(openssl rand …)` | 帳號的密碼隨機產生、不顯示；這個帳號只用 token，不用密碼登入 |
+| `"roles":["Reader"]` | 只能讀，不能改任何設定 |
+| `/api/users/<ID>/tokens/<名稱>` | 建立 token 要用帳號 ID，不是帳號名稱 |
+| `"token_ttl":"P3650D"` | 有效期 3650 天，避免預設期限一到監控就失效 |
+| `sed -i …` | token 直接寫進設定檔 |
+
+測試 token（`-u "<token>:token"` 是 Graylog 的 token 登入方式：帳號欄放 token，密碼欄固定寫 `token`）：
+
+```bash
+. /root/.graylog-monitor.conf; echo "token 長度：${#GL_TOKEN}"
+A=(-s -m 10 -u "$GL_TOKEN:token" -H 'Accept: application/json')
+for p in system/lbstatus system/journal system/inputstates system/metrics/org.graylog2.throughput.input system/metrics/org.graylog2.throughput.output; do
+  printf '%-48s ' "$p"; curl "${A[@]}" -o /dev/null -w 'http=%{http_code}\n' "$GL_URL/api/$p"
+done
+```
+
+**看到的結果**：token 長度 52，五個端點都是 `http=200`。Reader 權限就讀得到佇列、Input 狀態和累計數字，不需要再補權限。
+
+| 端點 | 用途 | 實測值（10/19） |
+| --- | --- | --- |
+| `system/lbstatus` | 健康狀態，不需登入 | `ALIVE` |
+| `system/journal` | 佇列堆積幾筆 | 9 筆，每秒進出各 6 筆 |
+| `system/inputstates` | 每個 Input 是否 RUNNING | 全部 RUNNING |
+| `…throughput.input` | 啟動以來**收進**幾筆（累計） | 1,016,412 |
+| `…throughput.output` | 啟動以來**處理完**幾筆（累計） | 825,263（比收進少，是 7-3 的丟棄規則把 NAS 雜訊丟掉） |
+
+> `system/throughput`（每秒處理量）**不適合**拿來判斷：連續 10 秒測得 6、0、3、0、6、3、6、0、3、0，日誌是一陣一陣進來的，碰到空檔就是 0，會誤報。所以改用只增不減的累計數字。`count/total` 在 Graylog 7 已不存在（404）。
+
+#### 第三步：安裝檢查腳本
+
+| 檢查 | 判定異常的條件 | 對應情況 |
+| --- | --- | --- |
+| 健康端點 | 不是 `ALIVE`，或 10 秒內沒回應 | 1 |
+| Input | 有任何 Input 不是 `RUNNING` | 2 |
+| 輸入累計 | 和上次檢查（5 分鐘前）相比完全沒增加 | 2 |
+| 處理累計 | 有收到新訊息，但處理數完全沒增加 | 3 |
+| 佇列 | 堆積超過 50,000 筆（平常個位數） | 3 |
+| API | 讀不到資料 | token 失效或權限被改 |
+
+**寄信規則**：剛異常時立刻寄一封；持續異常每 60 分鐘再寄一次；恢復時寄「已恢復」。Graylog 重開時累計數字會歸零，腳本把「數字變小」視為重開，不當成異常。
+
+`/usr/local/sbin/graylog-health-check.sh`：
+
+```bash
+#!/bin/bash
+# Graylog 健康檢查：異常時用本機 postfix 直接寄信（不經過 Graylog）
+CONF=${CONF:-/root/.graylog-monitor.conf}
+STATE_DIR=/var/lib/graylog-health
+JOURNAL_MAX=50000   # 佇列堆積超過這個數量就告警
+REPEAT_MIN=60       # 持續異常時，每隔幾分鐘再寄一次
+. "$CONF" || exit 1
+mkdir -p "$STATE_DIR"
+H=$(hostname -s); NOW=$(date +%s); problems=()
+api() { curl -s -m 10 -u "$GL_TOKEN:token" -H 'Accept: application/json' "$GL_URL/api/$1"; }
+num() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)" 2>/dev/null; }
+
+lb=$(curl -s -m 10 "$GL_URL/api/system/lbstatus")
+if [ "$lb" != "ALIVE" ]; then
+  problems+=("健康端點不是 ALIVE（實際回應：${lb:-沒有回應}）")
+else
+  in_now=$(api system/metrics/org.graylog2.throughput.input | num '["count"]')
+  out_now=$(api system/metrics/org.graylog2.throughput.output | num '["count"]')
+  unc=$(api system/journal | num '["uncommitted_journal_entries"]')
+  down=$(api system/inputstates | python3 -c 'import json,sys; print(", ".join(s["message_input"]["title"]+"="+s["state"] for s in json.load(sys.stdin)["states"] if s["state"]!="RUNNING"))' 2>/dev/null)
+  if [ -z "$in_now" ] || [ -z "$out_now" ] || [ -z "$unc" ]; then
+    problems+=("API 讀不到累計數字或佇列（token 失效或權限被改？）")
+  else
+    [ -n "$down" ] && problems+=("Input 沒有在執行：$down")
+    [ "$unc" -gt "$JOURNAL_MAX" ] && problems+=("佇列堆積 $unc 筆（上限 $JOURNAL_MAX）：收得到但處理不了")
+    read -r in_prev out_prev 2>/dev/null < "$STATE_DIR/counts"
+    if [ -n "$in_prev" ] && [ "$in_now" -ge "$in_prev" ]; then   # 數字變小 = Graylog 重開，略過這一輪
+      [ "$in_now" -eq "$in_prev" ] && problems+=("上次檢查到現在沒有收到任何新訊息（輸入累計停在 $in_now）")
+      [ "$in_now" -gt "$in_prev" ] && [ "$out_now" -eq "$out_prev" ] && problems+=("有收到新訊息，但處理數沒有增加（停在 $out_now）")
+    fi
+    echo "$in_now $out_now" > "$STATE_DIR/counts"
+  fi
+fi
+
+prev=$(cat "$STATE_DIR/status" 2>/dev/null || echo OK)
+last=$(cat "$STATE_DIR/last_mail" 2>/dev/null || echo 0)
+if [ ${#problems[@]} -gt 0 ]; then
+  logger -t graylog-health "GRAYLOG_UNHEALTHY host=$H $(printf '%s; ' "${problems[@]}")"
+  if [ "$prev" = OK ] || [ $((NOW-last)) -ge $((REPEAT_MIN*60)) ]; then
+    printf '偵測主機：%s\n時間：%s\n\n異常項目：\n%s\n\n這封信由 PVE 節點直接寄出，不經過 Graylog。\n處理方式見知識庫 Graylog 文件「監控 Graylog 本身」一節。\n' \
+      "$H" "$(date '+%F %T')" "$(printf -- '- %s\n' "${problems[@]}")" \
+      | mail -s "【Graylog 異常】$H 偵測到 Graylog 有問題" "$MAIL_TO"
+    echo "$NOW" > "$STATE_DIR/last_mail"
+  fi
+  echo FAIL > "$STATE_DIR/status"
+else
+  if [ "$prev" = FAIL ]; then
+    printf '偵測主機：%s\n時間：%s\n\nGraylog 已恢復正常（健康端點 ALIVE、佇列 %s 筆）。\n' \
+      "$H" "$(date '+%F %T')" "$unc" | mail -s "【Graylog 已恢復】$H" "$MAIL_TO"
+    logger -t graylog-health "GRAYLOG_RECOVERED host=$H"
+  fi
+  echo OK > "$STATE_DIR/status"
+fi
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `CONF=${CONF:-…}` | 平常讀正式設定檔；測試時可以換成另一份 |
+| `api()`、`num()` | 小函式：呼叫 API、從 JSON 取出數字 |
+| `/var/lib/graylog-health/` | 記錄狀態（OK／FAIL）、上次寄信時間、上次的累計數字 |
+| `logger -t graylog-health` | 異常時也寫一筆 syslog，Graylog 還活著時事後查得到 |
+
+systemd 設定（每 5 分鐘）：
+
+```ini
+# /etc/systemd/system/graylog-health-check.service
+[Unit]
+Description=Graylog health check (alerts via local postfix, not Graylog)
+After=network-online.target postfix.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/graylog-health-check.sh
+
+# /etc/systemd/system/graylog-health-check.timer
+[Unit]
+Description=Run Graylog health check every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+先手動執行兩次（隔 60 秒）確認 `exit=0`、狀態 `OK`、累計數字有增加，再啟用 timer。
+
+#### 第四步：模擬故障測試（不碰真正的 Graylog）
+
+用一份故意寫錯埠號的設定，讓腳本以為連不到 Graylog：
+
+```bash
+sed 's|:9000|:9999|' /root/.graylog-monitor.conf > /root/.graylog-monitor-test.conf; chmod 600 /root/.graylog-monitor-test.conf
+CONF=/root/.graylog-monitor-test.conf /usr/local/sbin/graylog-health-check.sh   # 模擬故障 → 寄「異常」
+CONF=/root/.graylog-monitor-test.conf /usr/local/sbin/graylog-health-check.sh   # 60 分鐘內 → 不再寄
+/usr/local/sbin/graylog-health-check.sh                                          # 正式設定 → 寄「已恢復」
+rm -f /root/.graylog-monitor-test.conf
+```
+
+| 測試 | 結果（10/19） |
+| --- | --- |
+| 模擬故障 | ✅ 狀態 FAIL，收到【Graylog 異常】node10，內容「健康端點不是 ALIVE（實際回應：沒有回應）」 |
+| 重複告警 | ✅ 沒有再寄 |
+| 模擬恢復 | ✅ 狀態 OK，收到【Graylog 已恢復】node10 |
+
+#### 第五步：部署到三台並啟用
+
+```bash
+systemctl enable --now graylog-health-check.timer
+for h in node11 node12; do
+  scp -p /usr/local/sbin/graylog-health-check.sh root@$h:/usr/local/sbin/
+  scp -p /etc/systemd/system/graylog-health-check.service /etc/systemd/system/graylog-health-check.timer root@$h:/etc/systemd/system/
+  scp -p /root/.graylog-monitor.conf root@$h:/root/
+  ssh root@$h "chmod 600 /root/.graylog-monitor.conf && systemctl daemon-reload && /usr/local/sbin/graylog-health-check.sh; systemctl enable --now graylog-health-check.timer"
+done
+for h in node10 node11 node12; do
+  echo "== $h"; ssh root@$h "ls -l /root/.graylog-monitor.conf | cut -c1-10; md5sum /usr/local/sbin/graylog-health-check.sh | cut -c1-12; cat /var/lib/graylog-health/status; systemctl list-timers --no-pager | grep graylog-health"
+done
+```
+
+**看到的結果**：三台設定檔都是 `-rw-------`、腳本指紋相同、狀態 `OK`、timer 每 5 分鐘執行。
+
+#### 第六步：每日健康回報（第二層）
+
+三台節點每天 08:00 送一筆心跳日誌：
+
+```ini
+# /etc/systemd/system/graylog-heartbeat.service
+[Unit]
+Description=Send daily heartbeat message to Graylog
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -t graylog-heartbeat "GRAYLOG_DAILY_HEARTBEAT host=%H"
+
+# /etc/systemd/system/graylog-heartbeat.timer
+[Unit]
+Description=Daily Graylog heartbeat at 08:00
+
+[Timer]
+OnCalendar=*-*-* 08:00:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+```
+
+| 設定 | 意思 |
+| --- | --- |
+| `%H` | systemd 自動換成主機名稱 |
+| `OnCalendar=*-*-* 08:00:00` | 每天 08:00（節點時區 CST） |
+| `Persistent=false` | 08:00 剛好關機時，開機後不補送，避免半夜收到「每日回報」 |
+
+三台都複製這兩個檔案後 `systemctl daemon-reload && systemctl enable --now graylog-heartbeat.timer`。
+
+Graylog 端建立通知與 Event Definition：
+
+| 項目 | 設定 |
+| --- | --- |
+| 通知 | Title `每日健康回報通知`；Email Notification；Subject `【每日健康回報】Graylog 告警鏈正常`；Time Zone `Asia/Taipei`；先 Execute Test Notification 收到測試信再 Create |
+| Event Definition | Title `Graylog 每日健康回報`；Priority Low；Filter & Aggregation；Query `"GRAYLOG_DAILY_HEARTBEAT"`；Stream Infrastructure Syslog；每 5 分鐘、看 5 分鐘；Filter has results；通知 `每日健康回報通知`；**Grace 60 分鐘**（三台各一筆只寄一封）；Backlog 3 |
+
+**測試**：建好 Event Definition **之後**才手動觸發（規則只看最近 5 分鐘，建好前送的訊息不會被抓到）：
+
+```bash
+for h in node10 node11 node12; do ssh root@$h "systemctl start graylog-heartbeat.service"; done
+```
+
+**看到的結果**（10/19）：三筆訊息進入 Infrastructure Syslog（`device_type=pve`），09:00:34 觸發事件，收到**一封**【每日健康回報】信。
+
+**日常使用**：Gmail 可設篩選器（主旨含「每日健康回報」→ 略過收件匣、加標籤），**每天早上看一眼有沒有今天的信**；沒收到就代表告警鏈斷了，依第一層的信或手動檢查找原因。
+
+#### 收到「Graylog 異常」信時怎麼查
+
+| 信裡的異常項目 | 先查什麼 |
+| --- | --- |
+| 健康端點不是 ALIVE | Graylog 容器有沒有開（`pct status 105`）、`systemctl status graylog-server`、OpenSearch 是否正常 |
+| Input 沒有在執行 | Graylog **System → Inputs**，看錯誤訊息後重新啟動該 Input |
+| 沒有收到任何新訊息 | 來源端 rsyslog（`systemctl status rsyslog`）、網路、Input 是否 RUNNING |
+| 處理數沒有增加／佇列堆積 | OpenSearch 狀態（12-2）、磁碟空間；佇列會在恢復後自動消化 |
+| API 讀不到資料 | token 被刪除或過期、`pve-monitor` 帳號被停用；重建 token（第二步） |
+
+#### 還原
+
+三台各執行：`systemctl disable --now graylog-health-check.timer graylog-heartbeat.timer`，刪除 `/usr/local/sbin/graylog-health-check.sh`、四個 systemd 檔案、`/root/.graylog-monitor.conf`、`/var/lib/graylog-health/` 後 `daemon-reload`。Graylog 端刪除 Event Definition「Graylog 每日健康回報」、通知「每日健康回報通知」與 `pve-monitor` 帳號（連同它的 token）。
+
 ## 12. 日常維運
 
 ### 12-1 把顯示時區改成台灣時間（2026-10-16）
@@ -1058,6 +1377,10 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | OpenSearch 重啟後是 red | 資料還在載入 | `wait_for_status=green` 等它（12-2） |
 | 告警信看不出是哪台出問題 | 預設範本只把整筆訊息倒出來 | 依 11-3 的表判讀；改中文範本列入待辦 |
 | 重啟 Graylog 後少了一段日誌 | UDP 不重送 | 屬預期，重啟要避開重要時段 |
+| 收到【Graylog 異常】信 | Graylog 本身出問題，信是節點直接寄的 | 依 11-6「收到異常信時怎麼查」 |
+| 早上沒收到【每日健康回報】 | 告警鏈某處斷了（含 Gmail 寄信失敗） | 先看有沒有【Graylog 異常】信；再到 Search 搜 `"GRAYLOG_DAILY_HEARTBEAT"`、看 Event Definition 的 Last Matched |
+| `read -s` 存進去的不是 token | `read -s` 那行和下一段指令一起貼上，下一行被當成輸入 | `read -s` 單獨貼上、輸入完再貼下一段；token 改用 API 建立直接寫檔（11-6） |
+| 每秒處理量常常是 0 | 日誌是一陣一陣進來的 | 判斷「有沒有在收」改用累計數字（11-6） |
 
 ## 14. 待辦
 
@@ -1071,7 +1394,7 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | 快照複寫失敗告警 | melayu17 是最後防線；建議 DSM 內建通知，加上「24 小時沒有成功紀錄就通知」 |
 | DSM 日誌過濾器 | 確認兩台 NAS 送出哪些種類的日誌 |
 | 觀察磁碟用量 | 一週後決定是否也丟棄 PBS 的寫入紀錄 |
-| 監控 Graylog 本身 | Graylog 掛掉時所有告警都寄不出去，而且不會有任何通知 |
+| postfix 舊參數 | 三台 `main.cf` 的 `smtp_use_tls` 將被移除，改成 `smtp_tls_security_level = encrypt`；改前先寄測試信確認、改後再寄一次 |
 | 其他新告警的測試 | 每個新告警都安排安全、可控的測試事件，記錄原始訊息、欄位、事件、收信時間與 Grace 下的重複通知情形 |
 | TP-Link 整合 | 尚未列入 |
 
