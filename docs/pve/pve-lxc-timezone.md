@@ -246,6 +246,44 @@ ssh root@node10 "pct exec 102 -- sh -c '
 
 看到的結果（16:08）：cron 有 `*/5 * * * * librenms … poller-wrapper.py 16`，`librenms.service` 是 `inactive`（本來就沒用 dispatcher），`last_polled` 為 `2026-10-19 16:06:40`、16 台設備，`[OK] Active pollers found`、`[OK] Python poller wrapper is polling`。
 
+**④ 修正改時區前的舊事件紀錄**：LibreNMS 存時間的欄位有兩種型態，`DATETIME` 不帶時區，以前用 UTC 寫進去的數字，改時區後看起來會早 8 小時。
+
+```bash
+ssh root@node10 "pct exec 102 -- sh -c '
+  mysql -t librenms -e \"SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=\\\"librenms\\\" AND TABLE_NAME IN (\\\"eventlog\\\",\\\"alert_log\\\",\\\"alerts\\\",\\\"syslog\\\")
+    AND DATA_TYPE IN (\\\"datetime\\\",\\\"timestamp\\\") ORDER BY TABLE_NAME\"
+  mysql -t librenms -e \"SELECT event_id, datetime, type, LEFT(message,50) AS message FROM eventlog ORDER BY event_id DESC LIMIT 12\"
+'" < /dev/null
+```
+
+| 資料表 | 型態 | 結論 |
+| --- | --- | --- |
+| `alerts`、`alert_log`、`syslog` | timestamp（內部存 UTC，讀取時換算） | ✅ 不會差 |
+| `eventlog`（事件紀錄） | datetime（不帶時區） | ⚠️ 舊紀錄差 8 小時 |
+
+依寫入順序（`event_id`）看，切點很清楚：`436510` 是 `07:40:21`（改之前，UTC），`436511` 是 `15:55:20`（MariaDB 重啟後，台灣時間）。用 event_id 切，不會改到新紀錄；先備份這張表再修正：
+
+```bash
+ssh root@node10 "pct exec 102 -- sh -c '
+  mysqldump --single-transaction librenms eventlog | gzip > /root/eventlog-before-tzfix-20261019.sql.gz
+  ls -lh /root/eventlog-before-tzfix-20261019.sql.gz
+  mysql -t librenms -e \"SELECT COUNT(*) AS 要修正的筆數, MIN(datetime) AS 最早, MAX(datetime) AS 最晚 FROM eventlog WHERE event_id <= 436510\"
+  mysql librenms -e \"UPDATE eventlog SET datetime = datetime + INTERVAL 8 HOUR WHERE event_id <= 436510\"
+  mysql -t librenms -e \"SELECT event_id, datetime, LEFT(message,40) AS message FROM eventlog WHERE event_id BETWEEN 436507 AND 436514 ORDER BY event_id\"
+'" < /dev/null
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `mysqldump --single-transaction … eventlog` | 只備份這張表，不鎖資料庫，poller 照常運作 |
+| `WHERE event_id <= 436510` | 只改切點（含）之前的紀錄 |
+| `+ INTERVAL 8 HOUR` | 時間加 8 小時 |
+
+**看到的結果**：備份約 128 KB；要修正 12,560 筆，最早 `2026-09-19 00:50:04`（事件只保留約 30 天）、最晚 `2026-10-19 07:40:21`；修正後切點前後連續：`436509 15:35:20`、`436510 15:40:21`、`436511 15:55:20`。
+
+還原：`zcat /root/eventlog-before-tzfix-20261019.sql.gz | mysql librenms`（在 CT 102 內）。
+
 ## 7. 步驟五：再檢查一次
 
 ```bash
@@ -329,6 +367,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 | 時間已經是 `+0800`，但 `/etc/timezone` 還寫 `Etc/UTC` | `timedatectl` 只改 `/etc/localtime`；`echo Asia/Taipei > /etc/timezone`，Java 程式才會讀到新時區 |
 | `while read` 迴圈裡用 ssh，只跑了第一台 | ssh 會吃掉迴圈的標準輸入；ssh 指令後面加 `< /dev/null` |
 | LibreNMS `validate.php`：`Time between this server and the mysql database is off` | MariaDB 還在用舊時區；`systemctl restart mariadb` |
+| 改時區後，LibreNMS 舊的事件紀錄時間早了 8 小時 | `eventlog.datetime` 是 DATETIME（不帶時區）；依 event_id 找出切點，備份後把切點之前的紀錄 +8 小時（步驟四④）。`alerts`、`alert_log`、`syslog` 是 TIMESTAMP，不受影響 |
 | LibreNMS 時間差 8 小時，`php.ini` 沒有 `date.timezone` | PHP 預設 UTC；fpm 和 cli 兩份 `php.ini` 都設 `date.timezone = Asia/Taipei`，重啟 php-fpm |
 | 改時區後，排程的執行時間變了 | 固定時間的 cron／timer 照新時區算，會提早 8 小時；改之前先用步驟二盤點 |
 | 改了時區，服務的 log 還是 UTC | 已在執行的程式要重啟才會套用新時區（例如 Graylog，7-1） |
@@ -343,9 +382,10 @@ ssh root@node10 "pct exec 102 -- sh -c '
 - [x] CT 105 Graylog 重啟，log 時間改為 `+08:00`（7-1）
 - [x] LibreNMS `daily.sh` 移到 05:19（7-2）
 - [ ] 10/20 05:19 之後確認 `daily.sh` 有執行：`ls -l /opt/librenms/logs/daily.log` 的時間是 05:19 左右
-- [ ] 確認 LibreNMS 改時區前寫入的舊事件紀錄顯示時間是否差 8 小時（未確認；若資料庫欄位是 DATETIME，舊紀錄會以 UTC 數字顯示）
+- [x] LibreNMS 舊事件紀錄（`eventlog`，DATETIME）event_id ≤ 436510 共 12,560 筆已 +8 小時（步驟四④）
+- [ ] 一個感測器反覆出現 `Temperature above threshold: 68 °C (> 61 °C)`：查是哪台設備，判斷是真的偏熱還是門檻太低（和時區無關）
 - [ ] 以後新建 LXC 時，建好就設 `timedatectl set-timezone Asia/Taipei`；定期用 `/root/check-ct-tz.sh` 檢查
-- [ ] 約一週後刪除 CT 102 的 `/etc/php/8.4/*/php.ini.bak-20261019`、`/root/librenms.cron.bak-20261019`
+- [ ] 約一週後刪除 CT 102 的 `/etc/php/8.4/*/php.ini.bak-20261019`、`/root/librenms.cron.bak-20261019`、`/root/eventlog-before-tzfix-20261019.sql.gz`
 
 ## 10. 延伸閱讀
 
