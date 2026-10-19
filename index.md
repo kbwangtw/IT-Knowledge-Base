@@ -11,7 +11,7 @@ last_modified_at: 2026-10-19
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 剛接觸虛擬化、備份、監控的 IT 新鮮人；想找實際案例對照的維運人員 |
-| 文章數 | 29 篇，分 6 類 |
+| 文章數 | 30 篇，分 6 類 |
 | 最近更新 | 2026-10-17：全站改寫為新手版 |
 
 ## 1. 這裡記錄的是什麼環境
@@ -79,6 +79,7 @@ last_modified_at: 2026-10-19
 | [PVE HA 放置策略：PVE 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy/) | 兩台 DNS 不能放同一台，規則要設在哪裡 |
 | [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新 PBS 前後要查什麼；怎麼安全清理舊 kernel |
 | [PVE 9 登入一直跳「No valid subscription」](docs/pve/pve9-subscription-nag-removal/) | 沒買訂閱，想取消登入提示 |
+| [一次檢查並統一所有 LXC 的時區](docs/pve/pve-lxc-timezone/) | 容器時間差 8 小時；改時區前先看排程會不會移位 |
 | [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification/) | 備份通知信看不懂，想改成中文 |
 
 ### 4-3 備份與還原
