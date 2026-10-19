@@ -934,7 +934,7 @@ journalctl --since "10 min ago" --no-pager | grep -E 'postfix/.*status=' | tail 
 
 **看到的結果**：三台 relayhost 都是 `smtp.gmail.com:587`，紀錄出現 `status=sent (250 2.0.0 OK …)`，三封測試信都收到。postfix 的服務名稱各版本不同，所以用 `journalctl` 讀全部日誌再 grep，不指定 `-u`。
 
-`postconf` 會出現 `support for parameter "smtp_use_tls" will be removed` 警告，是舊參數名稱，目前不影響寄信（列入待辦）。
+`postconf` 當時會出現 `support for parameter "smtp_use_tls" will be removed` 警告，是舊參數名稱，不影響寄信；10/19 已改成新參數（12-4）。
 
 #### 第二步：建立唯讀帳號與 token
 
@@ -1675,6 +1675,90 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | 驗證 | 同測試項目，另外確認 Wazuh Agent、LibreNMS 輪詢、Graylog 有收到新日誌 |
 | 收尾 | 快照觀察數天後刪除 |
 
+### 12-4 postfix 改用新的加密參數（2026-10-19）
+
+**做什麼**：三台 PVE 和 PBS31 的 postfix 把舊參數 `smtp_use_tls` 換成 `smtp_tls_security_level = encrypt`。postfix 是所有告警信的出口（PVE 備份通知、PBS 通知、11-6～11-8 的監控腳本），所以一次只改一台，改完立刻寄測試信。
+
+| 名詞 | 白話解釋 |
+| --- | --- |
+| **`smtp_use_tls = yes`** | 舊寫法，等於「對方支援就加密，不支援就用明碼」；postfix 3.10 會出現 `will be removed` 警告 |
+| **`smtp_tls_security_level`** | 新寫法；`may` 和舊寫法一樣，`encrypt` 是「一定要加密，否則不寄」 |
+| **`smtp_sasl_security_options =`（空白）** | 允許用明碼方式送帳密；搭配 `may` 時，若加密被中途拿掉，Gmail 帳密可能以明碼送出 |
+
+**盤點結果**（四台都一樣）：postfix 3.10.13，`relayhost = smtp.gmail.com:587`、`smtp_use_tls = yes`、`smtp_sasl_auth_enable = yes`、`smtp_sasl_security_options =`。
+
+選 `encrypt` 而不是 `may`：寄信時要送 Gmail 帳密，強制加密較安全；Gmail 的 587 一定支援 STARTTLS，不影響正常寄信。
+
+**怎麼做**：先在一台本機改（這次是 node10）：
+
+```bash
+cp -a /etc/postfix/main.cf /etc/postfix/main.cf.bak-$(date +%Y%m%d)
+postconf -X smtp_use_tls
+postconf -e 'smtp_tls_security_level = encrypt'
+postfix check && echo "CHECK-OK"
+postconf -n >/dev/null
+grep -nE '^\s*(smtp_use_tls|smtp_tls_security_level)\b' /etc/postfix/main.cf
+systemctl reload postfix
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `cp -a … .bak-日期` | 改之前備份，出事直接複製回來 |
+| `postconf -X smtp_use_tls` | 從 `main.cf` 刪掉舊參數 |
+| `postconf -e '… = encrypt'` | 加上新參數 |
+| `postfix check` | 設定沒錯才印 `CHECK-OK` |
+| `postconf -n >/dev/null` | 只看警告；`will be removed` 應該消失 |
+| `systemctl reload postfix` | 新設定生效，不中斷正在寄的信 |
+
+寄測試信，收件人從 11-6 的設定檔讀：
+
+```bash
+TO=$(grep -oP '^MAIL_TO="?\K[^"]+' /root/.graylog-monitor.conf)
+echo "postfix TLS 設定更新測試，來自 $(hostname)" | mail -s "【測試】$(hostname) postfix 改用 smtp_tls_security_level" "$TO"
+journalctl --since "2 min ago" --no-pager | grep -E 'postfix/.*status=' | tail -3
+```
+
+**看到的結果**：`CHECK-OK`、沒有警告、`smtp_tls_security_level = encrypt`，`status=sent (250 2.0.0 OK …)`，Gmail 收到信。
+
+確認第一台沒問題後，其餘兩台節點從 node10 依序執行，任一步失敗就還原並停止：
+
+```bash
+for h in node11 node12; do
+  echo "===== $h ====="
+  ssh -o BatchMode=yes root@$h '
+    B=/etc/postfix/main.cf.bak-$(date +%Y%m%d)
+    cp -a /etc/postfix/main.cf "$B"
+    postconf -X smtp_use_tls
+    postconf -e "smtp_tls_security_level = encrypt"
+    if ! postfix check; then cp -a "$B" /etc/postfix/main.cf; echo "CHECK 失敗，已還原"; exit 1; fi
+    postconf -n >/dev/null
+    grep -nE "^\s*(smtp_use_tls|smtp_tls_security_level)\b" /etc/postfix/main.cf
+    systemctl reload postfix
+    TO=$(grep -oP "^MAIL_TO=\"?\K[^\"]+" /root/.graylog-monitor.conf)
+    echo "postfix TLS 設定更新測試，來自 $(hostname)" | mail -s "【測試】$(hostname) postfix 改用 smtp_tls_security_level" "$TO"
+    sleep 15
+    journalctl --since "1 min ago" --no-pager | grep -E "postfix/.*status=" | tail -1
+  ' || { echo "!!! $h 失敗，停止"; break; }
+done
+```
+
+PBS31 不在叢集的 SSH 互信裡（也不該為此加進去），到 PBS31 本機執行同一段修改指令；它沒有 `/root/.graylog-monitor.conf`，收件人改用 `read -p "收件 Gmail：" TO`（單獨貼上）。
+
+**看到的結果**：
+
+| 主機 | 新參數所在行 | 測試信 |
+| --- | --- | --- |
+| node10 | 30 | ✅ `status=sent`，已收到 |
+| node11 | 31 | ✅ `status=sent`，已收到 |
+| node12 | 30 | ✅ `status=sent`，已收到 |
+| pbs31 | — | ✅ `status=sent`，已收到 |
+
+**萬一寄不出去**（`status=deferred`、`TLS is required, but was not offered`），在該台還原：
+
+```bash
+cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload postfix
+```
+
 ## 13. 常見問題與踩雷
 
 | 現象 | 原因 | 怎麼辦 |
@@ -1715,7 +1799,6 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | 每月看一次 Snapshot Replication | 補上 11-7 抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
 | DSM 日誌過濾器 | 確認兩台 NAS 送出哪些種類的日誌 |
 | 觀察磁碟用量 | 一週後決定是否也丟棄 PBS 的寫入紀錄 |
-| postfix 舊參數 | 三台 `main.cf` 的 `smtp_use_tls` 將被移除，改成 `smtp_tls_security_level = encrypt`；改前先寄測試信確認、改後再寄一次 |
 | 其他新告警的測試 | 每個新告警都安排安全、可控的測試事件，記錄原始訊息、欄位、事件、收信時間與 Grace 下的重複通知情形 |
 | TP-Link 整合 | 尚未列入 |
 
