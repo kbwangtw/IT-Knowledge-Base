@@ -105,6 +105,7 @@ rm /root/event-defs.json
 | System notification events | Graylog 內建 | — | — | — |
 
 - 每個告警都綁了一個 Email 通知（上篇第 9 節），共 13 個；10/19 起內文都是中文範本（第 8 節）。
+- 「每筆」和「有就觸發／≥ N 次」決定了信裡「摘要」能不能帶出原始日誌的欄位（第 8 節第七步）。
 - **Grace 5 分鐘**：同一告警 5 分鐘內最多寄一封。狀態持續時（節點一直離線、儲存一直超標）會每 5 分鐘再寄一封，直到恢復。
 - **NAS 登入失敗**：要「同一台 NAS、同一個 IP、5 分鐘內 ≥ 3 次」才通知；比較慢的嘗試由 DSM 的自動封鎖處理。
 - **NAS 管理員登入**：只涵蓋那一個管理員帳號。兩步驟驗證時只有最後的 `signed in ... successfully via [OTP]` 符合，一次登入只寄一封。
@@ -1253,6 +1254,83 @@ logger -p daemon.warning "end task UPID:node10:TEST:TEST:TEST:vzstart:999:root@p
 
 **還原**：`python3 /root/gl-tpl/summary.py "PVE 任務失敗警報" 'PVE 任務失敗：${source.message}'`。
 
+### 第七步：其他告警的摘要
+
+第六步確認 `${source.欄位}` 可以用之後，先盤點全部告警的摘要（只讀取）：
+
+```bash
+cat > /root/gl-tpl/summary-list.py <<'EOF2'
+import json, os, base64, urllib.request
+url = os.environ["GL_URL"].rstrip("/")
+auth = base64.b64encode(("admin:" + os.environ["GLPW"]).encode()).decode()
+req = urllib.request.Request(url + "/api/events/definitions?per_page=100",
+      headers={"Authorization": "Basic " + auth, "Accept": "application/json"})
+for e in sorted(json.load(urllib.request.urlopen(req, timeout=15))["event_definitions"], key=lambda x: x["title"]):
+    c = e.get("config") or {}
+    print("==", e["title"])
+    print("   摘要:", e.get("event_summary_template") or "（空白：信裡會顯示說明）")
+    print("   分組:", c.get("group_by") or "（無）", "| 查詢:", (c.get("query") or "")[:90])
+EOF2
+python3 /root/gl-tpl/summary-list.py
+```
+
+**看到的結果**：Ceph、Corosync、Node 離線、儲存 ×3、WireGuard 是空白；多次驗證失敗、DSM 登入失敗、DSM 管理員登入是固定文字；PVE 服務異常是 `PVE 服務異常：${source}`（`${source}` 是整筆訊息，不是欄位，寫法不對）。
+
+**批次修改工具**：讀一個「告警名稱 → 新摘要」的 JSON，改之前把全部告警備份成一個檔案：
+
+```bash
+cat > /root/gl-tpl/summary-bulk.py <<'EOF2'
+import json, os, sys, base64, urllib.request, time
+url = os.environ["GL_URL"].rstrip("/")
+auth = base64.b64encode(("admin:" + os.environ["GLPW"]).encode()).decode()
+H = {"Authorization": "Basic " + auth, "Accept": "application/json",
+     "Content-Type": "application/json", "X-Requested-By": "cli"}
+def call(method, path, data=None):
+    body = None if data is None else json.dumps(data).encode()
+    req = urllib.request.Request(url + path, method=method, headers=H, data=body)
+    with urllib.request.urlopen(req, timeout=15) as r:
+        b = r.read()
+        return json.loads(b) if b else None
+NEW = json.load(open(sys.argv[1]))
+defs = call("GET", "/api/events/definitions?per_page=100")["event_definitions"]
+os.umask(0o077)
+bk = "/root/gl-eventdefs-backup-%s.json" % time.strftime("%Y%m%d-%H%M")
+json.dump(defs, open(bk, "w"), ensure_ascii=False, indent=1)
+print("已備份", len(defs), "個 →", bk)
+for e in defs:
+    if e["title"] in NEW:
+        e["event_summary_template"] = NEW[e["title"]]
+        call("PUT", "/api/events/definitions/" + e["id"] + "?schedule=true", e)
+        print("已更新：", e["title"], "→", call("GET", "/api/events/definitions/" + e["id"])["event_summary_template"])
+EOF2
+```
+
+**踩到的雷：「有就觸發」的告警抓不到原始欄位**。第一次把 9 個告警都改成 `…${source.message}`，用假的 Ceph 訊息測試（`logger -t ceph-mon "Health check failed: GRAYLOG-SUMMARY-TEST (TEST_ONLY)"`），摘要卻是 `Ceph 健康警告：Ceph 健康警告: count()=1.0`。原因是 3-2 清單裡「有就觸發」的告警，底層是先**計數**（`count() > 0`）再產生事件，事件沒有對應到某一筆日誌，`${source.message}` 拿到的是計數結果。原始日誌仍完整列在信裡的「相關日誌」。
+
+| 告警類型（3-2「分組、門檻」欄） | 例子 | `${source.欄位}` |
+| --- | --- | --- |
+| 每筆 | PVE 任務失敗、Node 離線、服務異常、DSM 管理員登入、WireGuard | ✅ 可用 |
+| 有就觸發、≥ N 次（彙總） | Ceph、Corosync、儲存 ×3、每日健康回報、多次驗證失敗、DSM 登入失敗 | ❌ 只會得到 `count()=…`，改用固定說明文字 |
+
+**最後的設定**（兩次 `summary-bulk.py`，JSON 用 `<<'EOF'` 寫入）：
+
+| 告警 | 摘要 |
+| --- | --- |
+| PVE Node 狀態離線 | `節點離線或監控異常：${source.message}` |
+| PVE 服務異常 | `${source.source} 服務異常：${source.message}` |
+| Synology DSM 管理員登入 | `DSM 管理員登入：${source.message}` |
+| WireGuard VPN 異常 | `WireGuard 異常：${source.message}` |
+| Ceph 健康警告 | `Ceph 健康檢查失敗，詳細內容請看下方「相關日誌」` |
+| PVE Corosync 成員離線 | `有節點離開 PVE 叢集，請看下方「相關日誌」是哪一台回報` |
+| PVE 儲存空間嚴重 | `儲存空間超過 90%，請看下方「相關日誌」是哪一台、哪個儲存` |
+| PVE 儲存空間警告 | `儲存空間超過 80%，請看下方「相關日誌」是哪一台、哪個儲存` |
+| PVE 儲存設備離線 | `共用儲存狀態異常，請看下方「相關日誌」是哪一台、哪個儲存` |
+| 多次驗證失敗、DSM 登入失敗、每日健康回報 | 維持原本的固定文字 |
+
+「每筆」類型的四個沒有另外製造事件測試（和 PVE 任務失敗同一種機制，推測沒問題），等自然觸發時確認。
+
+**還原**：備份在 `/root/gl-eventdefs-backup-<時間>.json`（每次執行各一份），把其中的設定逐一 `PUT` 回 `/api/events/definitions/<id>?schedule=true` 即可。
+
 ## 9. postfix 改用新的加密參數（2026-10-19）
 
 **做什麼**：三台 PVE 和 PBS31 的 postfix 把舊參數 `smtp_use_tls` 換成 `smtp_tls_security_level = encrypt`。postfix 是所有告警信的出口（PVE 備份通知、PBS 通知、第 5～7 節的監控腳本），所以一次只改一台，改完立刻寄測試信。
@@ -1344,6 +1422,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | --- | --- | --- |
 | 告警信看不出是哪台出問題 | 預設範本只把整筆訊息倒出來 | 10/19 已改中文範本，「相關日誌」直接列出主機（第 8 節）；腳本產生的訊息依 4-1 的表判讀 |
 | 收到【PVE 任務告警】，摘要寫「node10 的 vzstart 失敗（VM／CT 999）」 | 這是第 8 節第六步的結構化摘要：哪個節點、什麼任務、哪台 VM／CT | 完整錯誤在「相關日誌」那一行；到該節點 **Tasks** 看同一筆任務的日誌 |
+| 摘要出現 `count()=1.0` | 「有就觸發」的告警是彙總事件，`${source.…}` 拿不到原始日誌 | 改用固定說明文字，細節看「相關日誌」（第 8 節第七步） |
 | 收到【NAS 連不上】或 `[tokyo16]` 複寫失敗信 | NAS 或複寫出問題 | 依第 6 節「收到信時怎麼查」 |
 | Graylog 搜不到快照複寫的紀錄 | 複寫日誌在套件自己的日誌頁，不在 DSM 記錄中心 | 到 Snapshot Replication → 日誌查看或匯出 CSV |
 | DSM API 登入回 402 | 一般帳號用了自訂的 `session` 名稱，或沒有 DSM 應用程式權限 | `session=webui`，並允許 DSM 權限 |
@@ -1359,7 +1438,8 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 
 | 項目 | 說明 |
 | --- | --- |
-| 其他告警的摘要 | 第 8 節第六步確認 `${source.欄位名}` 可用後，視需要把「PVE 服務異常」「Synology DSM 登入失敗」等告警的摘要也改成「哪台、什麼事」的寫法 |
+| 彙總型告警改成「每筆」 | Ceph、Corosync、儲存 ×3 改成每筆觸發後，摘要才能直接寫出哪台、哪個儲存（第 8 節第七步）；會改到告警判斷邏輯，要逐一重新測試，儲存警告的 Grace 是 24 小時 |
+| 「每筆」告警的新摘要 | Node 離線、服務異常、DSM 管理員登入、WireGuard 自然觸發時，確認摘要顯示正常 |
 | 每月看一次 Snapshot Replication | 補上第 6 節抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
 | 單節點故障演練 | 和 PVE HA 文件第 14 節一起做：一台失聯時，確認「節點離線」告警、另兩台第 5、6 節的監控與 postfix 寄信都正常，記錄收信時間 |
 | 其他新告警的測試 | 每個新告警都安排安全、可控的測試事件，記錄原始訊息、欄位、事件、收信時間與 Grace 下的重複通知情形 |
