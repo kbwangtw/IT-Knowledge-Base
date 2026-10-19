@@ -344,5 +344,5 @@ Proxmox 更新時，官方範本偶爾會**新增或改名變數**（`{{...}}` �
 - [Proxmox VE 官方文件：Notifications](https://pve.proxmox.com/pve-docs/chapter-notifications.html)：通知的目標（Target）、比對規則（Matcher）與範本
 - [Proxmox Backup Server 官方文件：Notifications](https://pbs.proxmox.com/docs/notifications.html)
 - [Handlebars 語法](https://handlebarsjs.com/guide/)：想自己修改範本時參考
-- 本知識庫：[Graylog 告警與監控（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)：Graylog 告警信是另一套機制，中文化方式見該文第 8 節
+- 本知識庫：[Graylog 告警與監控（三）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)：Graylog 告警信是另一套機制，中文化方式見該文
 {% endraw %}

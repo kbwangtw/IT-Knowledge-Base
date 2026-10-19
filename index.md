@@ -11,7 +11,7 @@ last_modified_at: 2026-10-19
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 剛接觸虛擬化、備份、監控的 IT 新鮮人；想找實際案例對照的維運人員 |
-| 文章數 | 31 篇，分 6 類 |
+| 文章數 | 32 篇，分 6 類 |
 | 最近更新 | 2026-10-17：全站改寫為新手版 |
 
 ## 1. 這裡記錄的是什麼環境
@@ -97,7 +97,8 @@ last_modified_at: 2026-10-19
 | 文章 | 適合什麼時候看 |
 | --- | --- |
 | [把 PVE、PBS 與 NAS 的日誌集中到 Graylog（一）：收集、分類與寄信設定](docs/pve/proxmox-graylog-syslog-pipeline-sop/) | 想把各主機日誌集中查詢、設定 Gmail 寄信 |
-| [Graylog 告警與監控（二）：告警清單、監控腳本與中文告警信](docs/pve/graylog-alerts-monitoring/) | 告警有哪些、Graylog 掛了怎麼知道、NAS 複寫與備份監控、中文告警信 |
+| [Graylog 告警與監控（二）：告警清單與監控腳本](docs/pve/graylog-alerts-monitoring/) | 告警有哪些、Graylog 掛了怎麼知道、NAS 複寫與備份監控 |
+| [Graylog 告警與監控（三）：中文告警信與摘要](docs/pve/graylog-alert-templates/) | 告警信改成中文、摘要直接寫出哪台什麼事 |
 | [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 告警設好了，怎麼證明它真的會寄信 |
 | [在 PVE Cluster 用 LXC 架設 Wazuh（一）：安裝與接上 Agent](docs/pve/wazuh-lxc-ubuntu2204-sop/) | 自建資安監控：建容器、安裝、備份與 HA、幫各種主機裝 Agent |
 | [Wazuh 維運（二）：資料保留、告警調校、弱點修補與整合](docs/pve/wazuh-lxc-ubuntu2204-operations/) | Wazuh 裝好後：磁碟不爆、告警降噪、看弱點、接其他系統 |

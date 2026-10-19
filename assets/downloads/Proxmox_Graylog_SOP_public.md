@@ -8,7 +8,8 @@
 | 收集對象 | PVE 三台節點（node10～12）、PBS31、兩台 Synology NAS（tokyo16、melayu17） |
 | 環境 | Graylog 7.1.9，裝在 PVE 叢集上的 LXC 容器（CT 105，Debian 12） |
 | 目前狀態 | 收集、分類、主機名稱查表、Gmail 寄信都已運作並驗證；14 個告警與各項監控見下篇；整體看板仍待完善（見第 13 節） |
-| 下篇 | [Graylog 告警與監控（二）：告警清單、監控腳本與中文告警信](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)：全部告警、PVE 監控腳本、監控 Graylog 本身、NAS 複寫與備份監控、中文告警信、postfix |
+| 下篇 | [Graylog 告警與監控（二）：告警清單與監控腳本](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)：全部告警、PVE 監控腳本、監控 Graylog 本身、NAS 複寫與備份監控、中文告警信、postfix |
+| 第三篇 | [Graylog 告警與監控（三）：中文告警信與摘要](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)：13 個通知的中文範本、主旨、每個告警的摘要寫法 |
 | 紀錄期間 | 2026-09-17 起陸續建置，最後更新 2026-10-19 |
 
 **這篇怎麼讀**：
@@ -83,7 +84,7 @@ Infrastructure Syslog 的實際索引名稱是 `infra_syslog_` 加上編號（In
 | NAS 快照複寫 | ✅ 10/19 複寫失敗、停止由 tokyo16 DSM 寄信；兩台 NAS 是否回應由三台 PVE 每 5 分鐘檢查（下篇第 6 節） |
 | 備份 | ✅ PVE 備份、PBS GC／Verify 失敗本來就會寄信；10/19 加上每天 08:30 檢查每台 VM／CT 的最新備份與驗證結果（下篇第 7 節） |
 | 看板 | 🔶「PVE 任務監控」八個 Widget 保留；整體基礎設施看板待完善 |
-| 告警信格式 | ✅ 10/19 十三個通知改用同一份中文範本，信裡直接列出時間、主機、原始訊息（下篇第 8 節） |
+| 告警信格式 | ✅ 10/19 十三個通知改用同一份中文範本，信裡直接列出時間、主機、原始訊息（[第三篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)） |
 
 > 驗證的界線：告警都以 `logger` 產生的「合成測試訊息」驗證過完整鏈路（訊息 → 分類 → 事件 → 收到信），**沒有為了測試去弄壞真正的 VM、容器或 Ceph**。
 
@@ -633,7 +634,7 @@ openssl s_client -starttls smtp -connect smtp.gmail.com:587 -crlf   # 第 2 層�
 | Event Limit | 100 |
 | Custom Fields | 第一版沒有新增 |
 
-當時填的 Event Summary Template 是 `PVE 任務失敗：${source.message}`，當時還沒驗證這個變數能不能帶出原始訊息（10/19 已驗證可以，並改成結構化摘要，見下篇第 8 節第六步）。建好時 Last Matched 是 Never（當時沒有新的失敗），這不代表規則壞了，也不能當作告警已通過的證據；9/22 已用 5-5 節的合成訊息確認 Last Matched 更新並收到正式告警信。
+當時填的 Event Summary Template 是 `PVE 任務失敗：${source.message}`，當時還沒驗證這個變數能不能帶出原始訊息（10/19 已驗證可以，並改成結構化摘要，見[第三篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)第 8 節）。建好時 Last Matched 是 Never（當時沒有新的失敗），這不代表規則壞了，也不能當作告警已通過的證據；9/22 已用 5-5 節的合成訊息確認 Last Matched 更新並收到正式告警信。
 
 ### 10-2 建立通知並綁定
 
@@ -642,10 +643,10 @@ openssl s_client -starttls smtp -connect smtp.gmail.com:587 -crlf   # 第 2 層�
 | Notification Title | PVE 任務失敗通知 |
 | Type | Email Notification |
 | Description | 當 Proxmox VE 任務執行失敗時發送警報通知 |
-| Subject | 當時是 `【Graylog 警報】${event_definition_title}`；10/19 改為 `【PVE 任務告警】${event_definition_title}`（下篇第 8 節） |
+| Subject | 當時是 `【Graylog 警報】${event_definition_title}`；10/19 改為 `【PVE 任務告警】${event_definition_title}`（[第三篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)） |
 | 寄件人／收件人 | 已核對正確的 Gmail 地址（公開文件不列） |
 | Time zone | Taipei，測試信顯示 +08:00 |
-| Body／HTML Body Template | 當時保留 Graylog 預設範本；10/19 改為中文範本（下篇第 8 節） |
+| Body／HTML Body Template | 當時保留 Graylog 預設範本；10/19 改為中文範本（[第三篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)） |
 | 測試 | 2026-09-18 實際收到，信內時間 14:28:26.023+08:00 |
 
 收到測試信後，回到「PVE 任務失敗警報」→ Edit → **Notifications**，加入「PVE 任務失敗通知」，Grace Period 5 分鐘，最後按 **Update event definition**，看到 `Event Definition "PVE 任務失敗警報" was updated successfully.` 才算存好（只在下拉選單選到通知不算）。
@@ -832,7 +833,8 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 
 ## 14. 延伸閱讀與下載
 
-- [Graylog 告警與監控（二）：告警清單、監控腳本與中文告警信](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)：下篇
+- [Graylog 告警與監控（二）：告警清單與監控腳本](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)：下篇
+- [Graylog 告警與監控（三）：中文告警信與摘要](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)：第三篇
 - [PVE 告警實測紀錄（更新至 2026-09-22）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-pve-alert-validation-2026-09-18/)：告警的真實日誌證據與 logger 安全測試
 - [jt-ipam 導入紀錄](https://kbwangtw.github.io/IT-Knowledge-Base/docs/network/jt-ipam-adoption-itbh/)：IP 管理系統與 Graylog 整合
 - [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)：WireGuard VPN 異常告警的建置
