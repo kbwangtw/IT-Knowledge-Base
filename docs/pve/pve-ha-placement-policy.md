@@ -406,7 +406,7 @@ HA Resources 清單中 12 台的 `Auto-Rebalance` 都顯示 `true`，但 `datace
 | 用 ProxCenter 完整逐台更新三台，每台確認 DNS／DC 位置 | ✅ 2026-10-03（第 10 節） |
 | ProxCenter 搬移非 HA VM 時是否遵守 Affinity rules | 已改為 DC 加入 HA、由 PVE 規則保證，不再依賴 |
 | 逐台更新時 DC 規則全程有效、服務維護後是否自動搬回 | ✅ 2026-10-08：規則有效；服務不一定自動搬回，需手動（第 11 節） |
-| 單節點故障演練（實測 Ceph I/O latency 與 HA 恢復時間） | ⏳ 未演練 |
+| 單節點故障演練：實測 Ceph I/O latency、HA 恢復時間，並確認告警鏈（Graylog「節點離線」、另兩台的監控腳本與 postfix 寄信）在一台失聯時仍會寄信 | ⏳ 未演練（2026-10-19 列入待辦；需事先排時段、避開 21:00～03:00 備份） |
 | Dynamic Load 與 Automatic Rebalance 的實際行為 | ⏳ 未查證；目前全域未開啟（10/13 確認） |
 | ProxCenter DRS 停用、規則改由 PVE 統一管理 | ✅ 2026-10-13（第 12 節） |
 | ProxCenter Operation mode 改為 Manual（保險） | ✅ 2026-10-19，Guest types 同時改為只留 VMs（第 12-2 節） |
