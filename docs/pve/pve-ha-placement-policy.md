@@ -4,7 +4,7 @@ title: "PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？"
 date: 2026-10-02
 categories: [PVE, HA, ProxCenter]
 permalink: /docs/pve/pve-ha-placement-policy/
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-19
 ---
 
 # PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？
@@ -16,7 +16,7 @@ last_modified_at: 2026-10-17
 | 適合誰看 | 同時用 PVE 和 ProxCenter，不確定規則該設在哪邊的人 |
 | 環境 | Proxmox VE 9.2.20 → 9.2.21，三節點（node10、node11、node12），Ceph 共用儲存 |
 | 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案 |
-| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除；⏳ 單節點故障演練 |
+| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；⏳ 單節點故障演練 |
 
 ## 1. 先認識幾個名詞
 
@@ -363,7 +363,18 @@ ProxLB 的 README 也提到，PVE 9.2 起內建 Dynamic Load Balancing，可以�
 | PVE HA Node Affinity Rules | 無 |
 | `grep crs /etc/pve/datacenter.cfg` | `crs: ha=static,ha-rebalance-on-start=1`，和 10/02 相同，沒有自動平衡 |
 
-- ProxCenter 的 Operation mode 仍顯示 Automatic。DRS 關閉時不會執行，但建議改成 **Manual** 當保險，避免日後有人誤開 DRS 就直接開始搬。
+- **10/19 保險設定**：ProxCenter **DRS → Configuration → General settings** 改成下表後按 Save，重新整理確認已保存。就算日後有人誤開 DRS，也只會在 Recommendations 頁列出建議，不會自己搬。
+
+  | 欄位 | 修改前 | 修改後 |
+  | --- | --- | --- |
+  | DRS enabled | 關閉 | **維持關閉**（決定不開啟「只給建議」模式） |
+  | Operation mode | Automatic（Fully automatic balancing） | **Manual**（Recommendations only） |
+  | Per-cluster mode（ITBH-Cluster） | Global default (Automatic) | Global default (Manual)，跟著全域設定 |
+  | Guest types to balance | VMs + Containers (LXC) | **只留 VMs (QEMU)** |
+
+  **為什麼只留 VM**：比「重開機」的話容器比較快，但 DRS 搬移時兩者方式不同。VM 用 **live migration**，不重開機，實測停頓約 63 ms（第 9 節 DC02）；容器只能**重啟式遷移**（關機 → 搬移 → 開機），裡面的 DNS 會短暫查不到，Graylog、Wazuh 這類 Java＋資料庫服務要好幾分鐘才完全就緒。這個欄位的說明寫明它**只影響 DRS 負載平衡**，維護模式與 HA 規則仍會搬所有類型，所以不影響 PVE 的維護與故障轉移。
+
+- **兩者怎麼相輔相成**：PVE HA 自動負責故障轉移與維護搬移（遵守互斥規則）；DRS 的長處是看負載，但不認得 PVE 的規則。所以不讓兩者同時自動執行；需要參考負載時，可以開啟 DRS 並維持 Manual，由人看過建議、確認沒有把 DNS 或 DC 搬到同一台後再套用。
 - ProxCenter 的 Rolling Update 不屬於 DRS，可以繼續使用；它呼叫 PVE 維護模式，HA 服務仍由 PVE 搬。
 
 ### 12-3 HA Resources 的 Auto-Rebalance 欄位
@@ -398,7 +409,7 @@ HA Resources 清單中 12 台的 `Auto-Rebalance` 都顯示 `true`，但 `datace
 | 單節點故障演練（實測 Ceph I/O latency 與 HA 恢復時間） | ⏳ 未演練 |
 | Dynamic Load 與 Automatic Rebalance 的實際行為 | ⏳ 未查證；目前全域未開啟（10/13 確認） |
 | ProxCenter DRS 停用、規則改由 PVE 統一管理 | ✅ 2026-10-13（第 12 節） |
-| ProxCenter Operation mode 改為 Manual（保險） | ⏳ 建議，未執行 |
+| ProxCenter Operation mode 改為 Manual（保險） | ✅ 2026-10-19，Guest types 同時改為只留 VMs（第 12-2 節） |
 | HA 資源集中在 node10（7／1／4），是否再分散 | ⏳ 待規劃 |
 
 **單節點故障的預期行為**（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，而且在節點回來前沒有再壞一顆硬碟的餘裕。
