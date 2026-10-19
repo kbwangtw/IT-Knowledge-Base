@@ -89,13 +89,13 @@ rm /root/event-defs.json
 
 | 告警 | 條件（Search Query） | 每／範圍（分） | 分組、門檻 | Grace／Backlog |
 | --- | --- | --- | --- | --- |
-| Ceph 健康警告 | `message:"Health check failed:" AND NOT message:"cmd=" AND NOT message:"dispatch" AND NOT message:"finished"` | 5／5 | 有就觸發 | 5 分／10 |
-| PVE Corosync 成員離線 | `message:corosync AND message:"Members left:"` | 5／5 | 有就觸發 | 5 分／10 |
+| Ceph 健康警告 | `message:"Health check failed:" AND NOT message:"cmd=" AND NOT message:"dispatch" AND NOT message:"finished"` | 5／5 | 每筆（10/19 由「有就觸發」改，第 8 節第八步） | 5 分／10 |
+| PVE Corosync 成員離線 | `message:corosync AND message:"Members left:"` | 5／5 | 每筆（10/19 由「有就觸發」改，第 8 節第八步） | 5 分／10 |
 | PVE Node 狀態離線 | `"PVE_NODE_OFFLINE" OR "PVE_NODE_MONITOR_ERROR"`（4-1 的腳本產生；10/16 加入後者） | 1／1 | 每筆 | 5 分／10 |
 | PVE 任務失敗警報 | `pve_event_type:task_failed` | 5／5 | 每筆 | 5 分／5（10/16 由 0 改為 5） |
-| PVE 儲存空間嚴重 | `message:"STORAGE_CRITICAL"`（4-1） | 5／5 | 有就觸發 | 5 分／10 |
-| PVE 儲存空間警告 | `message:"STORAGE_WARNING"`（4-1） | 5／5 | 有就觸發 | **24 小時**／10（10/16 由 5 分改為 24 小時） |
-| PVE 儲存設備離線 | `message:"STORAGE_UNAVAILABLE"`（4-1） | 5／5 | 有就觸發 | 5 分／10 |
+| PVE 儲存空間嚴重 | `message:"STORAGE_CRITICAL"`（4-1） | 5／5 | 每筆（10/19 由「有就觸發」改，第 8 節第八步） | 5 分／10 |
+| PVE 儲存空間警告 | `message:"STORAGE_WARNING"`（4-1） | 5／5 | 每筆（10/19 由「有就觸發」改，第 8 節第八步） | **24 小時**／10（10/16 由 5 分改為 24 小時） |
+| PVE 儲存設備離線 | `message:"STORAGE_UNAVAILABLE"`（4-1） | 5／5 | 每筆（10/19 由「有就觸發」改，第 8 節第八步） | 5 分／10 |
 | PVE 多次驗證失敗 | `device_type:"pve" AND event_category:"authentication" AND (message:failure OR message:failed)` | 5／5 | 同一台 `source` ≥ 3 次 | 5 分／50 |
 | PVE 服務異常 | `device_type:"pve" AND event_category:"system_error" AND message:"Failed with result"` | 5／5 | 每筆 | 5 分／50 |
 | Synology DSM 登入失敗 | `synology_auth_result:failed AND synology_service:DSM` | 5／5 | 同一台 NAS、同一來源 IP ≥ 3 次 | 5 分／10 |
@@ -258,7 +258,7 @@ node10 的 `/root/graylog-alert-test-all.sh`、`graylog-alert-test-remaining.sh`
 先加 node11（讓 node10 離線時也有人回報），再加 node12（讓三台設定一致；node12 額外的效益只在 node10、node11 同時離線時，那時 node12 失去 quorum，多半會送出 `PVE_NODE_MONITOR_ERROR`）。
 
 - 任一台離線時，另外兩台都會送 `PVE_NODE_OFFLINE`，由 5 分鐘 Grace 合併成一封信。
-- 三個儲存告警是「5 分鐘內有就觸發一次」，多台各送一筆仍只算一次事件。
+- 三個儲存告警 10/19 起是「每筆」：多台各送一筆會各產生一個事件，但 Grace 期間只寄一封信（第 8 節第八步）。
 
 部署步驟（在 node10 執行，以 node11 為例）：
 
@@ -1310,7 +1310,7 @@ EOF2
 | 告警類型（3-2「分組、門檻」欄） | 例子 | `${source.欄位}` |
 | --- | --- | --- |
 | 每筆 | PVE 任務失敗、Node 離線、服務異常、DSM 管理員登入、WireGuard | ✅ 可用 |
-| 有就觸發、≥ N 次（彙總） | Ceph、Corosync、儲存 ×3、每日健康回報、多次驗證失敗、DSM 登入失敗 | ❌ 只會得到 `count()=…`，改用固定說明文字 |
+| 有就觸發、≥ N 次（彙總） | 每日健康回報、多次驗證失敗、DSM 登入失敗（Ceph、Corosync、儲存 ×3 在第八步改成每筆） | ❌ 只會得到 `count()=…`，改用固定說明文字 |
 
 **最後的設定**（兩次 `summary-bulk.py`，JSON 用 `<<'EOF'` 寫入）：
 
@@ -1325,6 +1325,8 @@ EOF2
 | PVE 儲存空間嚴重 | `儲存空間超過 90%，請看下方「相關日誌」是哪一台、哪個儲存` |
 | PVE 儲存空間警告 | `儲存空間超過 80%，請看下方「相關日誌」是哪一台、哪個儲存` |
 | PVE 儲存設備離線 | `共用儲存狀態異常，請看下方「相關日誌」是哪一台、哪個儲存` |
+
+> 上表 Ceph、Corosync、儲存 ×3 的固定文字只用到 17:09，之後改成每筆並帶出原始訊息，見第八步。
 | 多次驗證失敗、DSM 登入失敗、每日健康回報 | 維持原本的固定文字 |
 
 「每筆」類型的四個沒有另外製造事件測試（和 PVE 任務失敗同一種機制），等自然觸發時確認：
@@ -1335,6 +1337,112 @@ EOF2
 | PVE Node 狀態離線、PVE 服務異常、WireGuard VPN 異常 | ⏳ 尚未觸發 | |
 
 **還原**：備份在 `/root/gl-eventdefs-backup-<時間>.json`（每次執行各一份），把其中的設定逐一 `PUT` 回 `/api/events/definitions/<id>?schedule=true` 即可。
+
+### 第八步：Ceph、Corosync、儲存 ×3 改成「每筆」
+
+這 5 個告警的門檻都是 `count() > 0`，也就是「有一筆就算」，和「每筆」的觸發時機一樣。改成每筆後摘要就能帶出原始訊息；寄信頻率仍由 Grace 控制（Ceph、Corosync、儲存嚴重、儲存離線 5 分鐘，儲存警告 24 小時），**不會多寄信**，只是事件數量變多（每筆日誌一個事件）。
+
+**① 比對兩種類型實際差在哪**（只讀取；拿已知是每筆的「PVE 任務失敗警報」當範本）：
+
+```bash
+cat > /root/gl-tpl/eventdef-compare.py <<'EOF2'
+import json, os, base64, urllib.request
+url = os.environ["GL_URL"].rstrip("/")
+auth = base64.b64encode(("admin:" + os.environ["GLPW"]).encode()).decode()
+req = urllib.request.Request(url + "/api/events/definitions?per_page=100",
+      headers={"Authorization": "Basic " + auth, "Accept": "application/json"})
+want = ["PVE 任務失敗警報", "Ceph 健康警告", "PVE Corosync 成員離線",
+        "PVE 儲存空間嚴重", "PVE 儲存空間警告", "PVE 儲存設備離線"]
+for e in json.load(urllib.request.urlopen(req, timeout=15))["event_definitions"]:
+    if e["title"] not in want:
+        continue
+    c = e["config"]
+    print("==", e["title"])
+    for k in ("type", "series", "conditions", "group_by", "event_limit", "search_within_ms", "execute_every_ms"):
+        print("   %-17s %s" % (k, json.dumps(c.get(k), ensure_ascii=False)))
+    n = e.get("notification_settings") or {}
+    print("   %-17s grace=%s 分, backlog=%s" % ("notification", (n.get("grace_period_ms") or 0)//60000, n.get("backlog_size")))
+EOF2
+python3 /root/gl-tpl/eventdef-compare.py
+```
+
+**看到的結果**：兩種都是 `aggregation-v1`，`group_by []`、`event_limit 100`、每 5 分鐘查 5 分鐘，只差兩個欄位：
+
+| 欄位 | 彙總（5 個） | 每筆（PVE 任務失敗） |
+| --- | --- | --- |
+| `series` | `[{"type": "count", "id": "count-", "field": null}]` | `[]` |
+| `conditions` | `count- > 0` | `{"expression": null}` |
+
+**② 轉換**（先備份全部告警，再改這兩個欄位和摘要）：
+
+```bash
+cat > /root/gl-tpl/to-filter.py <<'EOF2'
+import json, os, sys, base64, urllib.request, time
+url = os.environ["GL_URL"].rstrip("/")
+auth = base64.b64encode(("admin:" + os.environ["GLPW"]).encode()).decode()
+H = {"Authorization": "Basic " + auth, "Accept": "application/json",
+     "Content-Type": "application/json", "X-Requested-By": "cli"}
+def call(method, path, data=None):
+    body = None if data is None else json.dumps(data).encode()
+    req = urllib.request.Request(url + path, method=method, headers=H, data=body)
+    with urllib.request.urlopen(req, timeout=15) as r:
+        b = r.read()
+        return json.loads(b) if b else None
+NEW = json.load(open(sys.argv[1]))
+defs = call("GET", "/api/events/definitions?per_page=100")["event_definitions"]
+os.umask(0o077)
+bk = "/root/gl-eventdefs-backup-%s.json" % time.strftime("%Y%m%d-%H%M")
+json.dump(defs, open(bk, "w"), ensure_ascii=False, indent=1)
+print("已備份", len(defs), "個 →", bk)
+for e in defs:
+    if e["title"] in NEW:
+        e["config"]["series"] = []
+        e["config"]["conditions"] = {"expression": None}
+        e["event_summary_template"] = NEW[e["title"]]
+        call("PUT", "/api/events/definitions/" + e["id"] + "?schedule=true", e)
+        n = call("GET", "/api/events/definitions/" + e["id"])
+        print("已轉換：", e["title"], "| series =", n["config"]["series"], "| 摘要 =", n["event_summary_template"])
+EOF2
+
+cat > /root/gl-tpl/to-filter.json <<'EOF2'
+{
+ "Ceph 健康警告": "Ceph 健康警告：${source.message}",
+ "PVE Corosync 成員離線": "${source.source} 回報叢集成員離線：${source.message}",
+ "PVE 儲存空間嚴重": "儲存空間嚴重：${source.message}",
+ "PVE 儲存空間警告": "儲存空間警告：${source.message}",
+ "PVE 儲存設備離線": "儲存設備離線：${source.message}"
+}
+EOF2
+python3 /root/gl-tpl/to-filter.py /root/gl-tpl/to-filter.json
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `series = []` | 拿掉計數 |
+| `conditions = {"expression": None}` | 拿掉 `> 0`；Python 的 `None` 存成 JSON 的 `null` |
+| `?schedule=true` | 改完繼續排程（server.log 可能出現 `re-scheduling job trigger`，屬正常，見第 10 節） |
+
+**看到的結果**：`已備份 14 個`；5 行 `已轉換：… | series = [] | 摘要 = …`。
+
+**③ 用假訊息測試 4 個**（儲存警告不測：Grace 24 小時，會擋掉之後真的警告）：
+
+```bash
+logger -t ceph-mon "Health check failed: GRAYLOG-FILTER-TEST (TEST_ONLY)"
+logger -t corosync "[QUORUM] Members left: GRAYLOG-FILTER-TEST (TEST_ONLY)"
+logger -t pve-storage-monitor "STORAGE_CRITICAL host=node10 storage=TEST_ONLY type=filesystem usage=99% threshold=90%"
+logger -t pve-storage-monitor "STORAGE_UNAVAILABLE host=node10 storage=TEST_ONLY type=shared status=TEST_ONLY"
+```
+
+**看到的結果**：Graylog 17:09:42 收到 4 筆；4 封信的摘要都帶出原始訊息，不再是 `count()=1.0`：
+
+| 信 | 摘要 |
+| --- | --- |
+| 【Ceph 告警】Ceph 健康警告 | `Ceph 健康警告：node10 ceph-mon: Health check failed: GRAYLOG-FILTER-TEST (TEST_ONLY)` |
+| 【PVE Cluster 告警】PVE Corosync 成員離線 | `node10 回報叢集成員離線：node10 corosync: [QUORUM] Members left: GRAYLOG-FILTER-TEST (TEST_ONLY)` |
+| 【PVE Storage 嚴重】PVE 儲存空間嚴重 | `儲存空間嚴重：node10 pve-storage-monitor: STORAGE_CRITICAL host=node10 storage=TEST_ONLY type=filesystem usage=99% threshold=90%` |
+| 【PVE Storage 離線】PVE 儲存設備離線 | `儲存設備離線：node10 pve-storage-monitor: STORAGE_UNAVAILABLE host=node10 storage=TEST_ONLY type=shared status=TEST_ONLY` |
+
+**還原**：把 `/root/gl-eventdefs-backup-20261019-1709.json` 裡的設定逐一 `PUT` 回 `/api/events/definitions/<id>?schedule=true`。
 
 ## 9. postfix 改用新的加密參數（2026-10-19）
 
@@ -1427,7 +1535,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | --- | --- | --- |
 | 告警信看不出是哪台出問題 | 預設範本只把整筆訊息倒出來 | 10/19 已改中文範本，「相關日誌」直接列出主機（第 8 節）；腳本產生的訊息依 4-1 的表判讀 |
 | 收到【PVE 任務告警】，摘要寫「node10 的 vzstart 失敗（VM／CT 999）」 | 這是第 8 節第六步的結構化摘要：哪個節點、什麼任務、哪台 VM／CT | 完整錯誤在「相關日誌」那一行；到該節點 **Tasks** 看同一筆任務的日誌 |
-| 摘要出現 `count()=1.0` | 「有就觸發」的告警是彙總事件，`${source.…}` 拿不到原始日誌 | 改用固定說明文字，細節看「相關日誌」（第 8 節第七步） |
+| 摘要出現 `count()=1.0` | 「有就觸發」的告警是彙總事件，`${source.…}` 拿不到原始日誌 | 門檻是「有一筆就算」的告警，改成每筆（`series` 清空、`conditions` 設為 `{"expression": null}`，第 8 節第八步）；≥ N 次的告警只能用固定說明文字 |
 | 用 API 更新告警後，server.log 出現 `ERROR [EventProcessorExecutionJob] The end of the timerange to process is in the future, re-scheduling job trigger …` | `?schedule=true` 重新排程時，觸發時間比現在早一點，Graylog 發現範圍還沒走完，就自動延後重跑 | 自動修正的通知，告警不受影響；10/19 兩次批次修改（15:36、15:43）各出現 5 筆。到 Alerts → Event Definitions 確認都是 Enabled 即可 |
 | 信裡時間寫 `2026-10-19T15:36:40.000+08:00`，要不要再加 8 小時？ | 不用。`+08:00` 是**時區標記**（ISO 8601 格式），表示這已經是 UTC+8 的台灣時間；同一瞬間的 UTC 會寫成 `07:36:40.000Z` | 直接讀 `T` 後面的時間即可。決定維持這個格式，不另外改成 `yyyy-MM-dd HH:mm:ss`（改格式是否會把時區轉回 UTC 未確認） |
 | 收到【NAS 連不上】或 `[tokyo16]` 複寫失敗信 | NAS 或複寫出問題 | 依第 6 節「收到信時怎麼查」 |
@@ -1445,7 +1553,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 
 | 項目 | 說明 |
 | --- | --- |
-| 彙總型告警改成「每筆」 | Ceph、Corosync、儲存 ×3 改成每筆觸發後，摘要才能直接寫出哪台、哪個儲存（第 8 節第七步）；會改到告警判斷邏輯，要逐一重新測試，儲存警告的 Grace 是 24 小時 |
+| 「儲存空間警告」的新摘要 | 第八步沒有用假訊息測（Grace 24 小時會擋掉真的警告），自然觸發時確認摘要是 `儲存空間警告：… STORAGE_WARNING host=…` |
 | 「每筆」告警的新摘要 | DSM 管理員登入已確認（10/19）；Node 離線、服務異常、WireGuard 自然觸發時，確認摘要顯示正常 |
 | 每月看一次 Snapshot Replication | 補上第 6 節抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
 | 單節點故障演練 | 和 PVE HA 文件第 15 節一起做：一台失聯時，確認「節點離線」告警、另兩台第 5、6 節的監控與 postfix 寄信都正常，記錄收信時間 |
