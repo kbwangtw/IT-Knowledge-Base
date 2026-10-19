@@ -293,6 +293,35 @@ ssh root@node10 "pct exec 105 -- sh -c '
 
 **看到的結果**：重啟前 log 是 `2026-10-19T07:43:24.665Z`（`Z` = UTC），重啟後是 `2026-10-19T16:06:01.804+08:00`；約 10 秒就回 200、`active`；網頁 Search 在 16:02～16:06 持續有日誌，System → Inputs 兩個 Input 都是 RUNNING。
 
+### 7-2 LibreNMS 的 daily.sh 移到 05:19
+
+改時區後 `daily.sh` 從台灣 08:19 變成 00:19，落在 21:00～03:00 的備份時段。把 `/etc/cron.d/librenms` 那一行的「小時」欄位從 `0` 改成 `5`：
+
+```text
+19   5    * * *   librenms    /opt/librenms/daily.sh >> /dev/null 2>&1
+│    └─ 小時：0 → 5
+└─ 分鐘：19（不動）
+```
+
+```bash
+ssh root@node10 "pct exec 102 -- sh -c '
+  cp -a /etc/cron.d/librenms /root/librenms.cron.bak-20261019
+  sed -i \"s/^19   0    \\*/19   5    */\" /etc/cron.d/librenms
+  grep daily.sh /etc/cron.d/librenms
+  diff /root/librenms.cron.bak-20261019 /etc/cron.d/librenms
+  journalctl -u cron --since \"-5 min\" --no-pager | grep -E \"RELOAD|ERROR|bad\" | tail -3
+'" < /dev/null
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| 備份放 `/root/` | **不能**放在 `/etc/cron.d/` 裡，否則備份檔也會被當成排程執行 |
+| `s/^19   0    \*/19   5    */` | 直接比對完整的開頭字串再整段替換，空白原樣保留 |
+| `diff` | 確認只改到這一行 |
+| `journalctl -u cron` | cron 每分鐘檢查一次檔案；最後一筆應是 `RELOAD`，後面沒有 `ERROR` |
+
+**看到的結果**：`19   5    * * *   librenms …daily.sh`，`diff` 只差這一行；cron 16:13:01 `RELOAD (/etc/cron.d/librenms)`，沒有錯誤；poller 照常每 5 分鐘輪詢。
+
 ## 8. 常見問題
 
 | 現象 | 怎麼辦 |
@@ -304,16 +333,19 @@ ssh root@node10 "pct exec 105 -- sh -c '
 | 改時區後，排程的執行時間變了 | 固定時間的 cron／timer 照新時區算，會提早 8 小時；改之前先用步驟二盤點 |
 | 改了時區，服務的 log 還是 UTC | 已在執行的程式要重啟才會套用新時區（例如 Graylog，7-1） |
 | 重啟 MariaDB 後，LibreNMS `validate.php` 說 poller 沒在跑 | 重啟打斷了那一輪輪詢；等下一輪（cron 每 5 分鐘）再查 `pollers` 表的 `last_polled` |
+| 改 `/etc/cron.d/` 的檔案後，cron log 出現 `ERROR (Syntax error, this crontab file will be ignored)` | 檔案裡**任何一行**有語法錯誤，**整個檔案**都會被忽略（同檔的其他排程也停）。從備份還原再改；改完看 `journalctl -u cron` 最後一筆是 `RELOAD` 且沒有 `ERROR`（7-2） |
+| 用 `sed` 分組替換改 cron 欄位後，變成 `195    * * *` | 替換字串漏了保留空白的分組（例如 `\1` 和新值之間少了 `\2`），分鐘和小時黏在一起成為無效值；10/19 因此讓整個 `/etc/cron.d/librenms` 被忽略約 1 分鐘（沒碰到 poller 執行時間）。改用比對完整開頭字串的替換，並用 `diff` 和備份比對 |
 | 容器的時間（不是時區）不對 | 容器共用節點的時鐘，去查節點的 NTP：`timedatectl show -p NTPSynchronized --value` |
 
 ## 9. 待辦
 
 - [x] LibreNMS poller 在 MariaDB 重啟後已恢復（16:06:40 輪詢 16 台，validate OK）
 - [x] CT 105 Graylog 重啟，log 時間改為 `+08:00`（7-1）
-- [ ] LibreNMS `daily.sh` 現在在 00:19（備份時段內）執行；需要時把 `/etc/cron.d/librenms` 的小時欄位 `0` 改成 `5`（移到 05:19）
+- [x] LibreNMS `daily.sh` 移到 05:19（7-2）
+- [ ] 10/20 05:19 之後確認 `daily.sh` 有執行：`ls -l /opt/librenms/logs/daily.log` 的時間是 05:19 左右
 - [ ] 確認 LibreNMS 改時區前寫入的舊事件紀錄顯示時間是否差 8 小時（未確認；若資料庫欄位是 DATETIME，舊紀錄會以 UTC 數字顯示）
 - [ ] 以後新建 LXC 時，建好就設 `timedatectl set-timezone Asia/Taipei`；定期用 `/root/check-ct-tz.sh` 檢查
-- [ ] 約一週後刪除 `/etc/php/8.4/*/php.ini.bak-20261019`
+- [ ] 約一週後刪除 CT 102 的 `/etc/php/8.4/*/php.ini.bak-20261019`、`/root/librenms.cron.bak-20261019`
 
 ## 10. 延伸閱讀
 
