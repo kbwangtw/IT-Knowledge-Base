@@ -1336,7 +1336,12 @@ EOF2
 | PVE 儲存設備離線 | `共用儲存狀態異常，請看下方「相關日誌」是哪一台、哪個儲存` |
 | 多次驗證失敗、DSM 登入失敗、每日健康回報 | 維持原本的固定文字 |
 
-「每筆」類型的四個沒有另外製造事件測試（和 PVE 任務失敗同一種機制，推測沒問題），等自然觸發時確認。
+「每筆」類型的四個沒有另外製造事件測試（和 PVE 任務失敗同一種機制），等自然觸發時確認：
+
+| 告警 | 自然觸發 | 結果 |
+| --- | --- | --- |
+| Synology DSM 管理員登入 | 2026-10-19 16:39 | ✅ 摘要是 `DSM 管理員登入：tokyo16 Connection: User [<NAS 管理員帳號>] from [<IP>] signed in to [DSM] successfully via [OTP].`；「相關日誌」的主機欄同時顯示 `tokyo16` 和 jt-ipam 查到的來源主機名稱（`${message.fields.src_host}`，第 8 節第二步），一眼看出是從哪台登入 |
+| PVE Node 狀態離線、PVE 服務異常、WireGuard VPN 異常 | ⏳ 尚未觸發 | |
 
 **還原**：備份在 `/root/gl-eventdefs-backup-<時間>.json`（每次執行各一份），把其中的設定逐一 `PUT` 回 `/api/events/definitions/<id>?schedule=true` 即可。
 
@@ -1450,7 +1455,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | 項目 | 說明 |
 | --- | --- |
 | 彙總型告警改成「每筆」 | Ceph、Corosync、儲存 ×3 改成每筆觸發後，摘要才能直接寫出哪台、哪個儲存（第 8 節第七步）；會改到告警判斷邏輯，要逐一重新測試，儲存警告的 Grace 是 24 小時 |
-| 「每筆」告警的新摘要 | Node 離線、服務異常、DSM 管理員登入、WireGuard 自然觸發時，確認摘要顯示正常 |
+| 「每筆」告警的新摘要 | DSM 管理員登入已確認（10/19）；Node 離線、服務異常、WireGuard 自然觸發時，確認摘要顯示正常 |
 | 每月看一次 Snapshot Replication | 補上第 6 節抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
 | 單節點故障演練 | 和 PVE HA 文件第 14 節一起做：一台失聯時，確認「節點離線」告警、另兩台第 5、6 節的監控與 postfix 寄信都正常，記錄收信時間 |
 | 其他新告警的測試 | 每個新告警都安排安全、可控的測試事件，記錄原始訊息、欄位、事件、收信時間與 Grace 下的重複通知情形 |
