@@ -17,7 +17,7 @@ last_modified_at: 2026-10-19
 | 需要的權限 | PVE 或 PBS 主機的 root |
 | 花費時間 | 約 10 分鐘（含確認） |
 | 風險 | 低：只換信件文字，不影響備份本身；安裝前會自動備份，可以完整還原 |
-| 驗證程度 | PVE 9.2.11 已完整實測（2026-09-01）；PBS31 每天收到中文的 GC、Verify 成功信（2026-10-19 確認），失敗信格式與移除還原**尚未實測** |
+| 驗證程度 | PVE 9.2.11 已完整實測（2026-09-01）；PBS 4.2.8 已完整實測（2026-10-19）：成功信、GC／Verify 失敗信、移除還原、重新安裝 |
 
 ## 1. 先認識幾個名詞
 
@@ -147,7 +147,7 @@ find /etc/pve/notification-templates/default -maxdepth 1 -type f -name '*.hbs' -
 
 > 網頁 **Datacenter → Notifications** 的「測試通知」用的是另一種通用範本，不會用到備份範本，所以**不能**用它判斷備份信有沒有翻譯成功。
 
-## 6. 動手做：PBS（尚未完整實測）
+## 6. 動手做：PBS
 
 步驟和 PVE 相同，參數改成 `--pbs`：
 
@@ -156,14 +156,14 @@ curl -fsSL https://raw.githubusercontent.com/kbwangtw/IT-Knowledge-Base/main/too
 find /etc/proxmox-backup/notification-templates/default -maxdepth 1 -type f -name '*.hbs' -print   # 應有 18 個檔案
 ```
 
-接著等待 GC、Verify 等工作下一次執行，確認收到的信是中文。完成實測後，把結果補進本文。
+接著等待 GC、Verify 等工作下一次執行，或在網頁手動執行一次（Datastore → Prune & GC → Start Garbage Collection），確認收到的信是中文。想同時確認失敗信，見第 9-1 節的做法。
 
 ## 7. 想改回原本的英文
 
 ```bash
 # PVE
 curl -fsSL https://raw.githubusercontent.com/kbwangtw/IT-Knowledge-Base/main/tools/proxmox-zh-tw-notification/uninstall.sh | bash -s -- --pve
-# PBS（移除流程同樣尚未實測）
+# PBS
 curl -fsSL https://raw.githubusercontent.com/kbwangtw/IT-Knowledge-Base/main/tools/proxmox-zh-tw-notification/uninstall.sh | bash -s -- --pbs
 ```
 
@@ -186,8 +186,134 @@ curl -fsSL https://raw.githubusercontent.com/kbwangtw/IT-Knowledge-Base/main/too
 | 日期 | 產品 | 內容 | 結果 |
 | --- | --- | --- | --- |
 | 2026-09-01 | PVE 9.2.11 | 安裝 → 收到中文備份信 → 移除並還原 → 清掉 state 後重新安裝 | ✅ 全部正常 |
-| — | PBS 4.2.5 | 安裝、收信、移除 | ⏳ 尚未實測 |
+| 2026-10-19 | PBS 4.2.8 | 每日 GC、Verify 成功信為中文；在測試用 datastore 實測 GC 失敗、Verify 失敗、移除還原、重新安裝（做法見 9-1） | ✅ 全部正常 |
 | 2026-10-16 | 程式碼 | 併入知識庫 `tools/`；以測試目錄執行安裝、移除，原有自訂範本正確還原 | ✅ |
+
+### 9-1 PBS 失敗信與移除還原怎麼測（2026-10-19）
+
+**做什麼**：正式環境很少失敗，等不到失敗信。做法是在 PBS 本機磁碟建一個**測試用 datastore**（`zhtest`），在它身上故意製造失敗。正式的 datastore 全程不受影響。
+
+```text
+建 zhtest ─▶ 拿掉 .chunks 權限跑 GC ─▶ 【PBS 垃圾資料回收失敗】
+          ─▶ 做一份小備份、改壞一個 chunk、跑 Verify Job ─▶ 【PBS 備份驗證失敗】
+          ─▶ uninstall.sh ─▶ GC ─▶ 英文信 ─▶ install.sh ─▶ GC ─▶ 中文信
+          ─▶ 清理
+```
+
+| 名詞 | 白話解釋 |
+| --- | --- |
+| **datastore** | PBS 存放備份的地方，對應一個資料夾 |
+| **chunk** | 備份被切成的一小塊資料，存在 datastore 的 `.chunks/` 底下 |
+| **Verify Job** | 定期檢查備份資料有沒有損壞的排程；**只有 Verify Job 會寄驗證通知**，手動指令不會 |
+| **API token** | 給程式用的登入憑證，可以只給特定權限、設有效期限 |
+
+**① 建測試 datastore**（以下都在 PBS 主機上，以 root 執行）
+
+```bash
+proxmox-backup-manager datastore create zhtest /var/lib/zhtest-ds
+proxmox-backup-manager datastore list
+```
+
+應該看到：清單多出 `zhtest`，路徑是 `/var/lib/zhtest-ds`。
+
+**② GC 失敗信**
+
+```bash
+chmod 000 /var/lib/zhtest-ds/.chunks
+proxmox-backup-manager garbage-collection start zhtest; echo "exit=$?"
+chmod 750 /var/lib/zhtest-ds/.chunks
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `chmod 000 …/.chunks` | 拿掉存放 chunk 的資料夾權限，GC 寫不進去就會失敗 |
+| `chmod 750` | 測完立刻把權限改回來 |
+
+看到的結果：`TASK ERROR: atime safety check failed … EACCES: Permission denied`、`exit=255`，並收到**【PBS 垃圾資料回收失敗】zhtest**，「錯誤訊息」段落帶出完整的 `Permission denied` 內容。
+
+**③ 做一份小的測試備份**
+
+先建一個有效期限 1 天、只能操作 zhtest 的臨時 token（理由見第 10 節「`permission check failed`」）：
+
+```bash
+mkdir -p /tmp/zhtest-data
+head -c 2M /dev/urandom > /tmp/zhtest-data/random.bin
+
+umask 077
+proxmox-backup-manager user generate-token root@pam zhtest --expire $(( $(date +%s) + 86400 )) > /root/zhtest-token.txt
+export PBS_PASSWORD=$(grep -oP '"value"\s*:\s*"\K[^"]+' /root/zhtest-token.txt)
+echo "token 密鑰長度：${#PBS_PASSWORD}"
+
+proxmox-backup-manager acl update /datastore/zhtest DatastoreAdmin --auth-id 'root@pam!zhtest'
+export PBS_FINGERPRINT=$(proxmox-backup-manager cert info | awk '/Fingerprint/ {print $NF}')
+proxmox-backup-client backup zhtest.pxar:/tmp/zhtest-data --repository 'root@pam!zhtest@localhost:zhtest'
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `head -c 2M /dev/urandom` | 產生 2 MB 無意義的隨機資料當備份內容，不要拿真的設定檔來測 |
+| `--expire $(( $(date +%s) + 86400 ))` | token 1 天後自動失效，忘了刪也不會一直有效 |
+| `> /root/zhtest-token.txt` + `umask 077` | 密鑰存進只有 root 能讀的檔案，不顯示在畫面上 |
+| `grep -oP '"value"…'` | 從檔案取出密鑰放進 `PBS_PASSWORD`，`proxmox-backup-client` 會自動讀這個變數 |
+| `acl update /datastore/zhtest …` | 這個 token 只能碰 zhtest |
+| `PBS_FINGERPRINT` | 自動確認憑證，不用回答 y/n |
+
+看到的結果：`snapshot host/pbs31/2026-10-19T05:35:40Z  2.001 MiB`。
+
+**④ Verify 失敗信**
+
+改壞一個 chunk（路徑一定要是 `/var/lib/zhtest-ds/` 開頭）：
+
+```bash
+find /var/lib/zhtest-ds/.chunks -type f -mmin -60 -size +100k | head -3
+CHUNK=<上面列出的第一個路徑>
+printf 'CORRUPT' | dd of="$CHUNK" bs=1 seek=100 conv=notrunc
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `-size +100k` | 挑大一點的 chunk，確定是資料本體 |
+| `dd … seek=100 conv=notrunc` | 從第 100 個 byte 覆寫 7 個字元，檔案大小不變，模擬硬碟壞軌 |
+
+接著在網頁：**Datastore → zhtest → Verify Jobs → Add**（Job ID `zhtest-verify`，Schedule 隨意，Skip verified 不勾）→ 選取 → **Run now**。
+
+看到的結果：task log 出現 `zhtest.pxar.didx failed: chunks could not be verified`、`Failed to verify the following snapshots/groups: host/pbs31/2026-10-19T05:35:40Z`、`queued notification`，並收到**【PBS 備份驗證失敗】zhtest**，信裡列出同一筆 snapshot。
+
+**⑤ 移除還原，再重新安裝**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kbwangtw/IT-Knowledge-Base/main/tools/proxmox-zh-tw-notification/uninstall.sh | bash -s -- --pbs
+ls /etc/proxmox-backup/notification-templates/default/ 2>&1    # 應顯示 No such file or directory
+```
+
+網頁 **zhtest → Prune & GC → Start Garbage Collection**：收到英文的 `Garbage Collect Datastore 'zhtest' successful`。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kbwangtw/IT-Knowledge-Base/main/tools/proxmox-zh-tw-notification/install.sh | bash -s -- --pbs
+ls /etc/proxmox-backup/notification-templates/default/ | wc -l  # 應為 18
+```
+
+再跑一次 GC：收到中文的**【PBS 垃圾資料回收成功】zhtest**。
+
+> 這次 GC log 有一行 `warning: unable to access non-existent chunk …`：那是 ④ 被 Verify 標成 `.bad` 的 chunk，屬於預期中的警告。
+
+**⑥ 清理**
+
+```bash
+proxmox-backup-manager verify-job remove zhtest-verify
+proxmox-backup-manager user delete-token root@pam zhtest
+shred -u /root/zhtest-token.txt
+unset PBS_PASSWORD PBS_FINGERPRINT
+proxmox-backup-manager datastore remove zhtest
+rm -rf /var/lib/zhtest-ds /tmp/zhtest-data
+proxmox-backup-manager acl list | grep -i zhtest || echo "ACL 已清乾淨"
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `shred -u` | 先覆寫再刪除存有密鑰的檔案 |
+| `datastore remove` | 只刪設定，資料夾要另外 `rm -rf` |
+| 最後一行 | 確認 token 的權限設定也一起不見了 |
 
 ## 10. 常見問題
 
@@ -197,6 +323,9 @@ curl -fsSL https://raw.githubusercontent.com/kbwangtw/IT-Knowledge-Base/main/too
 | 出現 chmod 或權限錯誤 | `/etc/pve` 的權限由 pmxcfs 管理，不是一般資料夾；腳本對 PVE 已用一般複製處理，若仍出錯請回報 |
 | 裝好了還是英文 | ① 看的是不是安裝後的**新**信 ② 這種信有沒有在第 3 節的清單裡 ③ 範本是否放在正確產品的目錄 |
 | 自動判斷找不到產品 | 用 `--pve` 或 `--pbs` 明確指定 |
+| 用 `chmod 000` 拿掉整個 datastore 資料夾的權限後，PBS 網頁打不開 | 網頁會去讀每個 datastore 的備份清單，log 一直出現 `list groups error on datastore … EACCES`。改回 `chmod 750` 就恢復。製造 GC 失敗只要拿掉 `.chunks` 的權限（9-1 ②） |
+| `proxmox-backup-client` 用 root@pam 登入，密碼正確卻出現 `permission check failed` | 推測是 root@pam 開了兩步驟驗證，命令列無法輸入驗證碼。改用只給該 datastore 權限的臨時 API token（9-1 ③） |
+| `generate-token … --output-format json` 出現 `schema does not allow additional properties` | 這個子指令不支援 `--output-format`，拿掉即可；輸出本來就是 JSON |
 | 移除時說找不到安裝紀錄 | 檢查 `/var/lib/proxmox-zh-tw-notification/`；不要以為沒訊息就是還原成功，先對照第 8 節的備份 |
 
 ## 11. 升級 PVE／PBS 之後要注意
@@ -208,7 +337,7 @@ Proxmox 更新時，官方範本偶爾會**新增或改名變數**（`{{...}}` �
 ## 12. 待辦
 
 - [x] 封存原本的獨立 repository `kbwangtw/proxmox-zh-tw-notification`：README 最上方已加註搬家說明，並於 2026-10-19 封存（唯讀）。舊網址仍可下載，但抓到的是舊版；請一律使用本文的安裝指令
-- [ ] PBS 中文通知實測：PBS31 已在使用中文範本，每天收到【PBS 垃圾資料回收成功】、【PBS 備份驗證成功】（2026-10-19 確認）。剩下：遇到失敗時確認失敗信也是中文、資料正確；移除還原流程（第 7 節）尚未在 PBS 實測。PBS 任務失敗通知已確認會寄（見 Graylog 文件 11-8）
+- [x] PBS 中文通知實測（2026-10-19）：成功信、GC 失敗信、Verify 失敗信都是中文且資料正確；移除後變回英文、重新安裝後恢復中文（見 9-1）
 
 ## 13. 延伸閱讀
 

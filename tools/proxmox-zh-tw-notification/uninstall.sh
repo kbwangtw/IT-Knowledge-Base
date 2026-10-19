@@ -63,7 +63,7 @@ uninstall_product() {
     fi
   fi
 
-  if [[ -d "$original_dir" ]]; then
+  if [[ -d "$original_dir" ]] && [[ -n "$(ls -A -- "$original_dir")" ]]; then
     log "已還原首次安裝前的 ${product^^} 自訂模板。"
   fi
 

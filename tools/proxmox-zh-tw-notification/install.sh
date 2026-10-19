@@ -8,7 +8,7 @@ RAW_BASE="https://raw.githubusercontent.com/${REPOSITORY}/${BRANCH}/${SUBDIR}"
 BACKUP_ROOT="${PROXMOX_ZH_TW_BACKUP_ROOT:-/var/backups/proxmox-zh-tw-notification}"
 STATE_ROOT="${PROXMOX_ZH_TW_STATE_ROOT:-/var/lib/proxmox-zh-tw-notification}"
 ROOT_PREFIX="${PROXMOX_ZH_TW_ROOT:-}"
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd -P)"
 MODE="auto"
 tmp_dir=""
 
