@@ -81,7 +81,7 @@ Infrastructure Syslog 的實際索引名稱是 `infra_syslog_0`（Index Set `inf
 | NAS 快照複寫 | ✅ 10/19 複寫失敗、停止由 tokyo16 DSM 寄信；兩台 NAS 是否回應由三台 PVE 每 5 分鐘檢查（11-7） |
 | 備份 | ✅ PVE 備份、PBS GC／Verify 失敗本來就會寄信；10/19 加上每天 08:30 檢查每台 VM／CT 的最新備份與驗證結果（11-8） |
 | 看板 | 🔶「PVE 任務監控」八個 Widget 保留；整體基礎設施看板待完善 |
-| 告警信格式 | 🔶 預設格式難判讀，改為中文範本列入待辦 |
+| 告警信格式 | ✅ 10/19 十三個通知改用同一份中文範本，信裡直接列出時間、主機、原始訊息（11-9） |
 
 > 驗證的界線：告警都以 `logger` 產生的「合成測試訊息」驗證過完整鏈路（訊息 → 分類 → 事件 → 收到信），**沒有為了測試去弄壞真正的 VM、容器或 Ceph**。
 
@@ -643,7 +643,7 @@ openssl s_client -starttls smtp -connect smtp.gmail.com:587 -crlf   # 第 2 層�
 | Subject | `【Graylog 警報】${event_definition_title}` |
 | 寄件人／收件人 | 已核對正確的 Gmail 地址（公開文件不列） |
 | Time zone | Taipei，測試信顯示 +08:00 |
-| Body／HTML Body Template | 保留 Graylog 預設範本 |
+| Body／HTML Body Template | 當時保留 Graylog 預設範本；10/19 改為中文範本（11-9） |
 | 測試 | 2026-09-18 實際收到，信內時間 14:28:26.023+08:00 |
 
 收到測試信後，回到「PVE 任務失敗警報」→ Edit → **Notifications**，加入「PVE 任務失敗通知」，Grace Period 5 分鐘，最後按 **Update event definition**，看到 `Event Definition "PVE 任務失敗警報" was updated successfully.` 才算存好（只在下拉選單選到通知不算）。
@@ -702,7 +702,7 @@ rm /root/event-defs.json
 | Graylog 每日健康回報 | `"GRAYLOG_DAILY_HEARTBEAT"`（三台每天 08:00 送出；10/19 加入，見 11-6） | 5／5 | 有就觸發 | 60 分／3 |
 | System notification events | Graylog 內建 | — | — | — |
 
-- 每個告警都綁了一個 Email 通知（第 9 節）。
+- 每個告警都綁了一個 Email 通知（第 9 節），共 13 個；10/19 起內文都是中文範本（11-9）。
 - **Grace 5 分鐘**：同一告警 5 分鐘內最多寄一封。狀態持續時（節點一直離線、儲存一直超標）會每 5 分鐘再寄一封，直到恢復。
 - **NAS 登入失敗**：要「同一台 NAS、同一個 IP、5 分鐘內 ≥ 3 次」才通知；比較慢的嘗試由 DSM 的自動封鎖處理。
 - **NAS 管理員登入**：只涵蓋那一個管理員帳號。兩步驟驗證時只有最後的 `signed in ... successfully via [OTP]` 符合，一次登入只寄一封。
@@ -1531,6 +1531,196 @@ done
 
 三台各執行 `systemctl disable --now pbs-backup-check.timer`，刪除腳本與兩個 systemd 檔後 `daemon-reload`。
 
+### 11-9 告警信改成中文範本（2026-10-19）
+
+**為什麼要改**：Graylog 預設的告警信是英文，而且把整筆事件欄位倒出來（`--- [Event Definition] ---`…），`Source` 顯示的是 Graylog 自己，要往下翻很久才看得出是哪台出問題。
+
+| 名詞 | 白話解釋 |
+| --- | --- |
+| **Notification** | 告警觸發後「怎麼通知」：收件人、主旨、內文範本。每個 Event Definition 綁一個 |
+| **Body Template／HTML Body Template** | 內文的純文字版和網頁版。Gmail 優先顯示 HTML 版，**只改純文字版看到的還是英文** |
+| **Backlog** | 信裡附上的原始日誌（11-2 的 Backlog 欄位決定最多幾筆） |
+| `${…}` | 範本變數，寄信時換成實際內容；`${foreach backlog message}…${end}` 是「每筆日誌重複一次」 |
+
+```text
+13 個 Event Definition ──各綁一個──▶ 13 個 Notification ──▶ 同一份中文範本（純文字 + HTML）──▶ Gmail
+```
+
+#### 第一步：盤點（只讀取）
+
+用 admin 帳號讀 Notification 和 Event Definition，看各有幾個、誰綁誰、範本是不是預設的。11-6 的唯讀帳號 `pve-monitor` 是 Reader，推測讀不到 Notification，所以這裡用 admin（密碼用 `read -rsp` 輸入，單獨貼上）：
+
+```bash
+read -rsp "Graylog admin 密碼：" GLPW; echo
+```
+
+```bash
+cat > /root/gl-notif-inventory.py <<'EOF2'
+import json, os, sys, base64, urllib.request
+url = os.environ["GL_URL"].rstrip("/")
+auth = base64.b64encode(("admin:" + os.environ["GLPW"]).encode()).decode()
+def get(path):
+    req = urllib.request.Request(url + path, headers={"Authorization": "Basic " + auth, "Accept": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=15))
+n = get("/api/events/notifications?per_page=100")["notifications"]
+d = get("/api/events/definitions?per_page=100")["event_definitions"]
+use = {}
+for e in d:
+    for x in e.get("notifications") or []:
+        use.setdefault(x["notification_id"], []).append(e["title"])
+print("Notification 數量：", len(n))
+for x in n:
+    c = x["config"]
+    print("==", x["title"], "| type:", c.get("type"))
+    print("   subject:", c.get("subject"))
+    print("   收件人數:", len(c.get("email_recipients") or []), "| time_zone:", c.get("time_zone"))
+    print("   body 長度:", len(c.get("body_template") or ""), "| html 長度:", len(c.get("html_body_template") or ""))
+    print("   body 開頭:", (c.get("body_template") or "")[:60].replace("\n", "⏎"))
+    print("   被這些告警使用:", "、".join(use.get(x["id"], [])) or "（沒有）")
+EOF2
+. /root/.graylog-monitor.conf
+GL_URL="$GL_URL" GLPW="$GLPW" python3 /root/gl-notif-inventory.py
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `. /root/.graylog-monitor.conf` | 讀入 11-6 設定檔裡的 `GL_URL` |
+| `收件人數` | 只顯示數量，不印出信箱 |
+| `body 開頭` | 前 60 字，判斷是不是預設範本 |
+
+**看到的結果**：
+
+| 發現 | 代表什麼 |
+| --- | --- |
+| 13 個 Notification，每個告警各一個、沒有共用 | 改一個不會影響別的告警 |
+| 13 個 body 都是 1210 字、html 都是 2315 字，開頭 `--- [Event Definition] ---` | 全部是預設範本，可以共用同一份中文範本 |
+| 主旨大多已是中文（如 `【Ceph 告警】${event_definition_title}`） | 主旨保留不動 |
+| 「PVE 服務異常通知」time_zone 是 UTC | 信裡時間差 8 小時，一起改成 Asia/Taipei |
+| 「VPN 異常通知」主旨是 `【VPN 告警 】: …` | 多了空格與冒號，一起整理 |
+
+#### 第二步：寫入範本與工具（還不會改 Graylog）
+
+```bash
+mkdir -p /root/gl-tpl && chmod 700 /root/gl-tpl
+
+cat > /root/gl-tpl/body.txt <<'EOF2'
+${event_definition_title}
+========================================
+說明：${event_definition_description}
+時間：${event.timestamp}
+等級：${event.priority}（1 低／2 中／3 高）
+摘要：${event.message}
+
+相關日誌
+----------------------------------------
+${if backlog}${foreach backlog message}
+[${message.timestamp}] ${message.source}${if message.fields.src_host}（${message.fields.src_host}）${end}
+${message.message}
+${end}${else}這次沒有附上原始日誌（Message Backlog 為 0，或是測試通知）。
+${end}
+----------------------------------------
+此信由 Graylog 自動寄出。
+EOF2
+
+cat > /root/gl-tpl/body.html <<'EOF2'
+<div style="font-family:sans-serif;font-size:14px;max-width:760px">
+<div style="background:#1f3a5f;color:#fff;padding:10px 12px;font-size:16px;font-weight:bold">${event_definition_title}</div>
+<table style="border-collapse:collapse;width:100%;margin:8px 0">
+<tr><td style="padding:4px 12px;color:#666;width:4em">說明</td><td style="padding:4px 12px">${event_definition_description}</td></tr>
+<tr><td style="padding:4px 12px;color:#666">時間</td><td style="padding:4px 12px">${event.timestamp}</td></tr>
+<tr><td style="padding:4px 12px;color:#666">等級</td><td style="padding:4px 12px">${event.priority}（1 低／2 中／3 高）</td></tr>
+<tr><td style="padding:4px 12px;color:#666">摘要</td><td style="padding:4px 12px">${event.message}</td></tr>
+</table>
+<div style="font-weight:bold;margin:14px 0 6px">相關日誌</div>
+${if backlog}<table style="border-collapse:collapse;width:100%;font-size:13px">
+<tr style="background:#eee"><th align="left" style="padding:4px 8px">時間</th><th align="left" style="padding:4px 8px">主機</th><th align="left" style="padding:4px 8px">內容</th></tr>
+${foreach backlog message}<tr style="border-top:1px solid #ddd"><td style="padding:4px 8px;white-space:nowrap;vertical-align:top">${message.timestamp}</td><td style="padding:4px 8px;white-space:nowrap;vertical-align:top">${message.source}${if message.fields.src_host}<br>${message.fields.src_host}${end}</td><td style="padding:4px 8px;font-family:monospace">${message.message}</td></tr>
+${end}</table>${else}<p>這次沒有附上原始日誌（Message Backlog 為 0，或是測試通知）。</p>${end}
+<p style="color:#888;font-size:12px;margin-top:16px">此信由 Graylog 自動寄出。</p>
+</div>
+EOF2
+
+cat > /root/gl-tpl/notif.py <<'EOF2'
+import json, os, sys, base64, urllib.request
+url = os.environ["GL_URL"].rstrip("/")
+auth = base64.b64encode(("admin:" + os.environ["GLPW"]).encode()).decode()
+H = {"Authorization": "Basic " + auth, "Accept": "application/json",
+     "Content-Type": "application/json", "X-Requested-By": "cli"}
+def call(method, path, data=None):
+    body = None if data is None else json.dumps(data).encode()
+    req = urllib.request.Request(url + path, method=method, headers=H, data=body)
+    with urllib.request.urlopen(req, timeout=15) as r:
+        b = r.read()
+        return json.loads(b) if b else None
+mode, arg = sys.argv[1], sys.argv[2]
+if mode == "backup":
+    ns = call("GET", "/api/events/notifications?per_page=100")["notifications"]
+    os.umask(0o077)
+    json.dump(ns, open(arg, "w"), ensure_ascii=False, indent=1)
+    print("已備份", len(ns), "個 →", arg)
+elif mode == "apply":
+    body = open("/root/gl-tpl/body.txt").read()
+    html = open("/root/gl-tpl/body.html").read()
+    done = 0
+    for n in call("GET", "/api/events/notifications?per_page=100")["notifications"]:
+        if arg != "ALL" and n["title"] != arg:
+            continue
+        c = n["config"]
+        c["body_template"], c["html_body_template"], c["time_zone"] = body, html, "Asia/Taipei"
+        if c.get("subject", "").startswith("【VPN 告警 】"):
+            c["subject"] = "【VPN 告警】${event_definition_title}"
+        call("PUT", "/api/events/notifications/" + n["id"], n)
+        print("已更新：", n["title"]); done += 1
+    print("共更新", done, "個")
+elif mode == "restore":
+    who = sys.argv[3]
+    for n in json.load(open(arg)):
+        if who != "ALL" and n["title"] != who:
+            continue
+        call("PUT", "/api/events/notifications/" + n["id"], n)
+        print("已還原：", n["title"])
+EOF2
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `<<'EOF2'`（有引號） | `${…}` 原封不動寫進檔案，不被 bash 當成變數 |
+| `${if message.fields.src_host}` | 有 jt-ipam 補上的主機名稱（第 6 節）才顯示 |
+| `backup／apply／restore` | 備份全部、套用範本（指定名稱或 `ALL`）、從備份還原 |
+| `X-Requested-By` | Graylog 規定修改類 API 要帶這個標頭 |
+
+#### 第三步：備份，先改一個測試
+
+```bash
+export GL_URL GLPW
+BK=/root/gl-notifications-backup-$(date +%Y%m%d-%H%M).json
+python3 /root/gl-tpl/notif.py backup "$BK"
+python3 /root/gl-tpl/notif.py apply "每日健康回報通知"
+logger -t graylog-heartbeat "GRAYLOG_DAILY_HEARTBEAT host=$(hostname) test=zh-template"
+```
+
+拿「每日健康回報通知」測試：用 `logger` 就能安全觸發（11-6），會帶出真的 backlog。當天 08:00 那封的 60 分鐘 Grace 已過，所以會再寄一封。
+
+**看到的結果**：`已備份 13 個`、`共更新 1 個`；幾分鐘內收到中文的【每日健康回報】，HTML 表格顯示時間 `2026-10-19T14:29:00.000+08:00`、等級 `1`、主機 node10 與完整原始訊息。
+
+#### 第四步：套用到全部
+
+```bash
+python3 /root/gl-tpl/notif.py apply ALL
+GL_URL="$GL_URL" GLPW="$GLPW" python3 /root/gl-notif-inventory.py | grep -E '^==|time_zone|body 長度|subject'
+unset GLPW
+```
+
+**看到的結果**：`共更新 13 個`；13 個都是 `time_zone: Asia/Taipei`、`body 長度: 507 | html 長度: 1596`（Python 算的是字元數；`ls -l` 顯示的 615／1704 是位元組數，中文一個字佔 3 位元組），VPN 主旨變成 `【VPN 告警】${event_definition_title}`。
+
+**還原**（全部或指定一個；先重新 `read -rsp` 輸入密碼並 `export GLPW`）：
+
+```bash
+python3 /root/gl-tpl/notif.py restore /root/gl-notifications-backup-<日期時間>.json ALL
+```
+
+> 備份檔含收件人信箱，只有 root 能讀；觀察一週沒問題再刪。
+
 ## 12. 日常維運
 
 ### 12-1 把顯示時區改成台灣時間（2026-10-16）
@@ -1775,7 +1965,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | `curl` 打 API 回 `http=401` | admin 帳號或密碼錯誤 | 確認帳號（`root_username`，預設 admin）；或用暫時 token（11-1） |
 | jt-ipam 查不到主機名稱 | Data Adapter 欄位從 0 起算 | Key column 0、Value column 1（6-3） |
 | OpenSearch 重啟後是 red | 資料還在載入 | `wait_for_status=green` 等它（12-2） |
-| 告警信看不出是哪台出問題 | 預設範本只把整筆訊息倒出來 | 依 11-3 的表判讀；改中文範本列入待辦 |
+| 告警信看不出是哪台出問題 | 預設範本只把整筆訊息倒出來 | 10/19 已改中文範本，「相關日誌」直接列出主機（11-9）；腳本產生的訊息依 11-3 的表判讀 |
 | 重啟 Graylog 後少了一段日誌 | UDP 不重送 | 屬預期，重啟要避開重要時段 |
 | 收到【NAS 連不上】或 `[tokyo16]` 複寫失敗信 | NAS 或複寫出問題 | 依 11-7「收到信時怎麼查」 |
 | Graylog 搜不到快照複寫的紀錄 | 複寫日誌在套件自己的日誌頁，不在 DSM 記錄中心 | 到 Snapshot Replication → 日誌查看或匯出 CSV |
@@ -1792,7 +1982,6 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 
 | 項目 | 說明 |
 | --- | --- |
-| 中文通知信範本 | 預設信件把 Backlog 整筆欄位倒出，`Source` 顯示 Graylog 本身，看不出哪台出問題。改為中文自訂範本：Subject、Body Template、HTML Body Template，用 `${foreach backlog message}` 列出 `${message.source}` 與 `${message.message}`；先用 Execute Test Notification 測試，注意 `${message.timestamp}` 可能是 UTC。先確認 Alerts → Notifications 有幾個通知、各告警共用哪一個 |
 | 驗證 Summary Template | `PVE 任務失敗：${source.message}` 能否帶出原始訊息；補齊 node、task、VM／CT ID、UPID 與錯誤內容 |
 | 完善看板 | 沿用任務看板，再加入節點、服務、登入等統計與異常明細 |
 | PBS 的認證事件 | 確認 PBS 的登入與 sudo 是否也要分類 |
