@@ -1,7 +1,10 @@
+PBS 套件更新通知
+================
+
 Proxmox Backup Server 有可用的套件更新：
 
 {{#each available-updates}}
-    {{this.package-name}}：{{#if this.installed-version}}{{this.installed-version}} ->{{else}}新增套件，{{/if}} {{this.available-version}}
+    {{this.package-name}}：{{#if this.installed-version}}{{this.installed-version}} → {{else}}新增套件，{{/if}}{{this.available-version}}
 {{/each}}
 
 請至 PBS Web 介面執行更新：

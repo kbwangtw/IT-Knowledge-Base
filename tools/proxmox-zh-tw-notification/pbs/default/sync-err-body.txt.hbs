@@ -1,18 +1,22 @@
-PBS 資料同步執行結果
-====================
+PBS 備份同步失敗
+================
 
 執行狀態：失敗
-工作 ID：{{job-id}}
+工作名稱：{{job-id}}
 目的資料儲存區：{{datastore}}
+
 {{#if remote~}}
-遠端名稱：{{remote}}
+遠端 PBS：{{remote}}
 來源資料儲存區：{{remote-datastore}}
 {{else~}}
 本機來源資料儲存區：{{remote-datastore}}
 {{/if}}
 
-錯誤訊息：
+錯誤訊息
+--------
+
 {{error}}
 
-請至 PBS Web 介面查看詳細工作記錄：
+請登入 Proxmox Backup Server 檢查工作記錄：
+
 <{{base-url}}/#pbsServerAdministration:tasks>
