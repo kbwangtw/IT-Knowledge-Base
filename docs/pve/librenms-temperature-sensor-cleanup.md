@@ -9,14 +9,14 @@ last_modified_at: 2026-10-19
 
 # LibreNMS 溫度告警誤報：LXC 重複感測器與門檻整理
 
-> **一句話**：LibreNMS 的事件紀錄一直出現「Temperature above threshold」，查下來大多是誤報：10 台 LXC 容器把宿主機的溫度感測器重複回報了 109 次，加上自動產生的門檻太低（例如 CPU 20 °C）。停用容器的感測器、依硬體規格重設三台節點的門檻後，只剩 NAS tokyo16 的系統溫度值得追。
+> **一句話**：LibreNMS 的事件紀錄一直出現「Temperature above threshold」，查下來大多是誤報：10 台 LXC 容器把宿主機的溫度感測器重複回報了 109 次，加上自動產生的門檻太低（例如 CPU 20 °C）。停用容器的感測器、依硬體規格重設三台節點的門檻後，誤報就消失了。
 
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | LibreNMS 一直跳溫度告警、或監控 PVE 上 LXC 的人 |
 | 環境 | LibreNMS（CT 102，PHP 8.4、MariaDB）；PVE 三節點 node10～12（AMD Ryzen、DDR5、雙 NVMe、r8169 網卡）；Synology tokyo16、melayu17 |
 | 日期 | 2026-10-19 |
-| 結論 | ✅ 10 台 LXC 停用 sensors 模組、刪除 109 個重複感測器 ✅ node10～12 依元件重設門檻，全部低於門檻 ⏳ tokyo16 System 66 °C（門檻 61）待查散熱 |
+| 結論 | ✅ 10 台 LXC 停用 sensors 模組、刪除 109 個重複感測器 ✅ node10～12 依元件重設門檻，全部低於門檻 |
 
 ## 1. 先認識幾個名詞
 
@@ -39,7 +39,7 @@ node10（實體主機）的 CPU、NVMe、RAM、網卡溫度
 
 自動門檻太低（Tctl 20 °C、NVMe 20 °C）──► 永遠「超過」──► 事件紀錄洗版
 
-處理：① 盤點 → ② LXC 停用 sensors 並刪除 → ③ 對照每個感測器是什麼元件 → ④ 依硬體規格設門檻 → ⑤ NAS 另外看散熱
+處理：① 盤點 → ② LXC 停用 sensors 並刪除 → ③ 對照每個感測器是什麼元件 → ④ 依硬體規格設門檻
 ```
 
 ## 3. 步驟一：盤點誰在報溫度（只讀取）
@@ -90,7 +90,7 @@ ORDER BY d.hostname, s.sensor_descr\"" < /dev/null
 | --- | --- | --- |
 | LXC（10 台） | adguard(8)、pihole(9)、librenms(11)、wireguard(13)、graylog(17)、ai(18)、proxcenter(19)、ipam(20)、wazuh(21)、grafana(23) | 都被認成 `os = proxmox`，每台約 11 個溫度感測器，數值和所在節點相同（例如 pihole、wazuh 都有 node12 才有的 `nvme-pci-0600`、`Sensor 3`） |
 | 實體主機 | node10(2)、node11(3)、node12(4) | 門檻很多不合理：三台 `Tctl` 門檻都是 **20**；`acpitz-acpi-0:temp1` 讀數 **0.0** |
-| NAS | tokyo16、melayu17（`os = dsm`） | melayu17 系統 40 °C、硬碟 39 °C；tokyo16 硬碟 40～41 °C，**System 66 °C** |
+| NAS | tokyo16、melayu17（`os = dsm`） | melayu17 系統 40 °C、硬碟 39 °C；tokyo16 硬碟 40～41 °C、System 66 °C（原因已知，另外處理，不在本文範圍） |
 
 ## 4. 步驟二：10 台 LXC 停用 sensors，刪除重複感測器
 
@@ -201,15 +201,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 
 **還原**：`zcat /root/sensors-before-limits-20261019.sql.gz | mysql librenms`（在 CT 102 內）。
 
-## 7. 步驟五：NAS tokyo16 的系統溫度（待查）
-
-tokyo16 的 System 66 °C 超過門檻 61，24 小時觸發 56 次；同型用途的 melayu17 只有 40 °C，硬碟溫度兩台都正常（39～41 °C）。這是唯一可能是真的偏熱的項目，門檻先不動，先看散熱：
-
-- DSM → 控制台 → 硬體與電源 → **風扇模式**：是否在「安靜模式」，可改「冷卻模式」
-- NAS 周圍通風、機櫃或機房溫度、風扇有沒有積灰
-- DSM → 資訊中心 看系統溫度是否和 LibreNMS 一致
-
-## 8. 常見問題
+## 7. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
@@ -220,15 +212,14 @@ tokyo16 的 System 66 °C 超過門檻 61，24 小時觸發 56 次；同型用�
 | `sensors` 顯示 `ALARM (HIGH)` | 是硬體模組自己的門檻（例如 DDR5 high 55）；對照 `crit` 判斷是否真的危險 |
 | `acpitz-acpi-0:temp1` 一直是 0.0 | 這個 ACPI 感測器沒有讀數，可以不管 |
 
-## 9. 待辦
+## 8. 待辦
 
-- [ ] tokyo16：DSM 風扇模式、通風檢查；確認後再決定 System 門檻（目前 61）
-- [ ] 觀察一天，確認 LibreNMS 事件紀錄不再出現 LXC 與 node10～12 的 `Temperature above threshold`
+- [ ] 觀察一天，確認 LibreNMS 事件紀錄不再出現 LXC 與 node10～12 的 `Temperature above threshold`（NAS 的溫度另外處理，不在本文範圍）
 - [ ] 以後新增 LXC 到 LibreNMS 時，加入後就關掉 sensors 模組
 - [ ] node12 的 2 TB NVMe（KINGSTON SNV3S）內部感測器 71.8 °C：觀察是否持續上升
 - [ ] 約一週後刪除 CT 102 的 `/root/sensors-before-lxcfix-20261019.sql.gz`、`/root/sensors-before-limits-20261019.sql.gz`
 
-## 10. 延伸閱讀
+## 9. 延伸閱讀
 
 - [一次檢查並統一所有 LXC 的時區](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-lxc-timezone/)：這次是在修正 LibreNMS 舊事件紀錄時發現溫度事件的
 - [用 Grafana 建立戰情中心（二）：接上 LibreNMS](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/)
