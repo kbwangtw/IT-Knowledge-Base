@@ -383,7 +383,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 - [x] LibreNMS `daily.sh` 移到 05:19（7-2）
 - [ ] 10/20 05:19 之後確認 `daily.sh` 有執行：`ls -l /opt/librenms/logs/daily.log` 的時間是 05:19 左右
 - [x] LibreNMS 舊事件紀錄（`eventlog`，DATETIME）event_id ≤ 436510 共 12,560 筆已 +8 小時（步驟四④）
-- [ ] 一個感測器反覆出現 `Temperature above threshold: 68 °C (> 61 °C)`：查是哪台設備，判斷是真的偏熱還是門檻太低（和時區無關）
+- [x] 反覆出現的溫度門檻事件已追查，另寫一篇：[LibreNMS 溫度告警誤報](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/librenms-temperature-sensor-cleanup/)
 - [ ] 以後新建 LXC 時，建好就設 `timedatectl set-timezone Asia/Taipei`；定期用 `/root/check-ct-tz.sh` 檢查
 - [ ] 約一週後刪除 CT 102 的 `/etc/php/8.4/*/php.ini.bak-20261019`、`/root/librenms.cron.bak-20261019`、`/root/eventlog-before-tzfix-20261019.sql.gz`
 
