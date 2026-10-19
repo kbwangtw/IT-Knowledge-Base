@@ -44,6 +44,7 @@
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](docs/pve/pve-ha-service-error-after-reboot.md)
 - [ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？](docs/pve/proxcenter-ceph-rolling-update.md)
 - [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal.md)
+- [一次檢查並統一所有 LXC 的時區](docs/pve/pve-lxc-timezone.md)：從 node10 查全部容器、先盤點排程、改成 Asia/Taipei、LibreNMS 的 PHP 與 MariaDB
 - [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification.md)：程式在 [`tools/proxmox-zh-tw-notification/`](tools/proxmox-zh-tw-notification/)（2026-10-16 以新手角度改寫）
 
 ### 備份與還原
