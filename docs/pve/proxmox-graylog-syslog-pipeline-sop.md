@@ -77,7 +77,7 @@ tokyo16、melayu17 ── UDP 1515 → Input「Synology Syslog UDP」→ Stream�
 | PBS31 | UDP 1514 | rsyslog（需先安裝） | 4-2 |
 | tokyo16、melayu17 | UDP 1515 | DSM 記錄中心的「記錄傳送」 | 4-3 |
 
-Infrastructure Syslog 的實際索引名稱是 `infra_syslog_0`（Index Set `infra_syslog` 底下的第一個索引）。
+Infrastructure Syslog 的實際索引名稱是 `infra_syslog_` 加上編號（Index Set `infra_syslog` 底下的索引）。Graylog 會定期輪替成新索引，編號會一直增加：一開始是 `infra_syslog_0`，2026-10-19 已是 `infra_syslog_8`，這是正常的。
 
 ## 3. 目前做到哪裡
 
@@ -642,7 +642,7 @@ openssl s_client -starttls smtp -connect smtp.gmail.com:587 -crlf   # 第 2 層�
 | Event Limit | 100 |
 | Custom Fields | 第一版沒有新增 |
 
-當時填的 Event Summary Template 是 `PVE 任務失敗：${source.message}`，**還沒驗證這個變數能不能帶出原始訊息**。建好時 Last Matched 是 Never（當時沒有新的失敗），這不代表規則壞了，也不能當作告警已通過的證據；9/22 已用 5-5 節的合成訊息確認 Last Matched 更新並收到正式告警信。
+當時填的 Event Summary Template 是 `PVE 任務失敗：${source.message}`，當時還沒驗證這個變數能不能帶出原始訊息（10/19 已驗證可以，並改成結構化摘要，見下篇第 8 節第六步）。建好時 Last Matched 是 Never（當時沒有新的失敗），這不代表規則壞了，也不能當作告警已通過的證據；9/22 已用 5-5 節的合成訊息確認 Last Matched 更新並收到正式告警信。
 
 ### 10-2 建立通知並綁定
 
