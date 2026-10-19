@@ -16,7 +16,7 @@ last_modified_at: 2026-10-19
 | 適合誰看 | 容器裡的時間和節點差 8 小時、想一次檢查所有 LXC 的人 |
 | 環境 | PVE 9.2 三節點（node10～12）；10 台 LXC（Debian／Ubuntu） |
 | 日期 | 2026-10-19 |
-| 結論 | ✅ 10 台 LXC 都是 Asia/Taipei、`+0800` ✅ LibreNMS 的 PHP 與 MariaDB 時間一致 ⏳ MariaDB 重啟後的 poller 恢復狀態待確認 ⏳ Graylog 下次重啟才完全套用 |
+| 結論 | ✅ 10 台 LXC 都是 Asia/Taipei、`+0800` ✅ LibreNMS 的 PHP 與 MariaDB 時間一致，poller 已恢復 ✅ Graylog 重啟後 log 改為台灣時間 |
 
 ## 1. 先認識幾個名詞
 
@@ -231,7 +231,20 @@ ssh root@node10 "pct exec 102 -- sh -c '
 | `@@system_time_zone` | MariaDB 啟動時讀到的系統時區，應為 `CST`（台北） |
 | `@@time_zone` | 連線用的時區，`SYSTEM` 表示跟著系統 |
 
-看到的結果：`active`、`2026-10-19 15:55:54  CST  SYSTEM`、`[OK] MySQL and PHP time match`。同時出現 `[FAIL] The poller is not running. No poller ran in the last 300 seconds.` 和 `[FAIL] No active python wrapper pollers found`；推測是重啟 MariaDB 時剛好打斷那一輪輪詢，恢復狀態列在待辦。
+看到的結果：`active`、`2026-10-19 15:55:54  CST  SYSTEM`、`[OK] MySQL and PHP time match`。同時出現 `[FAIL] The poller is not running. No poller ran in the last 300 seconds.` 和 `[FAIL] No active python wrapper pollers found`：重啟 MariaDB 剛好打斷那一輪輪詢。
+
+**③ 確認 poller 恢復**：這台的 poller 是 cron 每 5 分鐘執行 `poller-wrapper.py`（不是 dispatcher 服務），等下一輪跑完再查：
+
+```bash
+ssh root@node10 "pct exec 102 -- sh -c '
+  grep -hE \"poller|dispatcher\" /etc/cron.d/librenms
+  systemctl is-active librenms.service
+  mysql -N librenms -e \"SELECT poller_name, last_polled, devices FROM pollers ORDER BY last_polled DESC LIMIT 3\"
+  su - librenms -s /bin/bash -c \"cd /opt/librenms && ./validate.php\" 2>&1 | grep -iE \"poller|FAIL\"
+'" < /dev/null
+```
+
+看到的結果（16:08）：cron 有 `*/5 * * * * librenms … poller-wrapper.py 16`，`librenms.service` 是 `inactive`（本來就沒用 dispatcher），`last_polled` 為 `2026-10-19 16:06:40`、16 台設備，`[OK] Active pollers found`、`[OK] Python poller wrapper is polling`。
 
 ## 7. 步驟五：再檢查一次
 
@@ -254,6 +267,32 @@ ssh root@node10 "pct exec 102 -- sh -c '
 | 113 | ai | Asia/Taipei（修正 `/etc/timezone` 後） | `+0800` |
 | 114 | grafana | Asia/Taipei | `+0800` |
 
+### 7-1 Graylog 重啟（讓 Java 套用新時區）
+
+Graylog 是 Java 程式，啟動時讀一次時區，改完 `/etc/timezone` 要重啟 `graylog-server` 才套用。重啟期間 UDP 日誌會漏收，選白天非備份時段；三台節點的外部健康檢查（[Graylog 下篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)第 5 節）若剛好在重啟時檢查，可能寄出一封【Graylog 異常】，屬預期。
+
+```bash
+ssh root@node10 "pct exec 105 -- sh -c '
+  echo \"server.log 最後一行（重啟前）：\"; tail -1 /var/log/graylog-server/server.log | cut -c1-80
+  systemctl restart graylog-server
+  GL=\$(hostname -I | awk \"{print \\\$1}\")
+  for i in \$(seq 1 36); do
+    sleep 5
+    c=\$(curl -s -o /dev/null -w \"%{http_code}\" http://\$GL:9000/api/system/lbstatus)
+    if [ \"\$c\" = \"200\" ]; then echo \"Graylog 已可服務（約 \$((i*5)) 秒）\"; break; fi
+  done
+  systemctl is-active graylog-server
+  echo \"server.log 最後一行（重啟後）：\"; tail -1 /var/log/graylog-server/server.log | cut -c1-80
+'" < /dev/null
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `tail -1 …/server.log` | 比較重啟前後 log 開頭的時間格式 |
+| `…/api/system/lbstatus` | 不用登入的健康檢查網址，回 200 代表可以服務 |
+
+**看到的結果**：重啟前 log 是 `2026-10-19T07:43:24.665Z`（`Z` = UTC），重啟後是 `2026-10-19T16:06:01.804+08:00`；約 10 秒就回 200、`active`；網頁 Search 在 16:02～16:06 持續有日誌，System → Inputs 兩個 Input 都是 RUNNING。
+
 ## 8. 常見問題
 
 | 現象 | 怎麼辦 |
@@ -263,13 +302,14 @@ ssh root@node10 "pct exec 102 -- sh -c '
 | LibreNMS `validate.php`：`Time between this server and the mysql database is off` | MariaDB 還在用舊時區；`systemctl restart mariadb` |
 | LibreNMS 時間差 8 小時，`php.ini` 沒有 `date.timezone` | PHP 預設 UTC；fpm 和 cli 兩份 `php.ini` 都設 `date.timezone = Asia/Taipei`，重啟 php-fpm |
 | 改時區後，排程的執行時間變了 | 固定時間的 cron／timer 照新時區算，會提早 8 小時；改之前先用步驟二盤點 |
-| 改了時區，服務的 log 還是 UTC | 已在執行的程式要重啟才會套用新時區 |
+| 改了時區，服務的 log 還是 UTC | 已在執行的程式要重啟才會套用新時區（例如 Graylog，7-1） |
+| 重啟 MariaDB 後，LibreNMS `validate.php` 說 poller 沒在跑 | 重啟打斷了那一輪輪詢；等下一輪（cron 每 5 分鐘）再查 `pollers` 表的 `last_polled` |
 | 容器的時間（不是時區）不對 | 容器共用節點的時鐘，去查節點的 NTP：`timedatectl show -p NTPSynchronized --value` |
 
 ## 9. 待辦
 
-- [ ] 確認 LibreNMS poller 在 MariaDB 重啟後已恢復：`pollers` 表的 `last_polled` 有 16:00 之後的時間，`validate.php` 沒有 poller FAIL
-- [ ] CT 105 Graylog 下次重啟 `graylog-server`（或重開容器）時，確認 Graylog 自己的 log 時間是台灣時間；重啟會漏收幾十秒 UDP 日誌，排在套件更新時順便做
+- [x] LibreNMS poller 在 MariaDB 重啟後已恢復（16:06:40 輪詢 16 台，validate OK）
+- [x] CT 105 Graylog 重啟，log 時間改為 `+08:00`（7-1）
 - [ ] LibreNMS `daily.sh` 現在在 00:19（備份時段內）執行；需要時把 `/etc/cron.d/librenms` 的小時欄位 `0` 改成 `5`（移到 05:19）
 - [ ] 確認 LibreNMS 改時區前寫入的舊事件紀錄顯示時間是否差 8 小時（未確認；若資料庫欄位是 DATETIME，舊紀錄會以 UTC 數字顯示）
 - [ ] 以後新建 LXC 時，建好就設 `timedatectl set-timezone Asia/Taipei`；定期用 `/root/check-ct-tz.sh` 檢查
