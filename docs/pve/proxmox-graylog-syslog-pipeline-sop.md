@@ -1238,7 +1238,7 @@ for h in node10 node11 node12; do ssh root@$h "systemctl start graylog-heartbeat
 | KB-GD | KB-GD | 約 03:10 |
 | ITBH-GD | ITBH-GD | 約 03:11 |
 
-`PVE_Backup` 的複寫在 2026-07-27 改用 `PBS_BK_Folder` 後已移除，PVE 也沒有使用這個共用資料夾（`grep -i pve_backup /etc/pve/storage.cfg` 無結果）。
+`PVE_Backup` 的複寫在 2026-07-27 改用 `PBS_BK_Folder` 後已移除，PVE 也沒有使用這個共用資料夾（`grep -i pve_backup /etc/pve/storage.cfg` 無結果）。10/19 從兩台的「控制台 → 共用資料夾」確認，`PVE_Backup` 共用資料夾在 tokyo16 與 melayu17 都已不存在（File Station 只列出目前帳號有權限的資料夾，要用控制台確認）。
 
 **日誌格式**（套件內的「日誌」頁，**不在 DSM 記錄中心，所以不會經「記錄傳送」進 Graylog**；在 Graylog 搜尋 7 天為 0 筆）：
 
@@ -1585,7 +1585,6 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | 完善看板 | 沿用任務看板，再加入節點、服務、登入等統計與異常明細 |
 | PBS 任務分類與失敗告警 | PBS 的任務日誌來自 proxmox-backup-proxy，格式和 PVE 不同，現有「PVE 任務失敗警報」不適用；依真實日誌建立分類與告警（或改用 PBS 內建通知） |
 | PBS 的認證事件 | 確認 PBS 的登入與 sudo 是否也要分類 |
-| 刪除 tokyo16 的 PVE_Backup | 7/27 起不再複寫、PVE 也沒使用；刪除前確認最後修改時間、melayu17 是否有舊複本（刪共用資料夾會連同快照一起刪） |
 | 每月看一次 Snapshot Replication | 補上 11-7 抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
 | DSM 日誌過濾器 | 確認兩台 NAS 送出哪些種類的日誌 |
 | 觀察磁碟用量 | 一週後決定是否也丟棄 PBS 的寫入紀錄 |
