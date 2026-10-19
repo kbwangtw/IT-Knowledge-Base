@@ -3,7 +3,7 @@ layout: default
 title: "把 PVE／PBS 通知改成繁體中文"
 date: 2026-09-01
 categories: [PVE, PBS, Notification]
-last_modified_at: 2026-10-16
+last_modified_at: 2026-10-19
 ---
 {% raw %}
 
@@ -84,7 +84,7 @@ PBS 的每種通知都有「成功」（`-ok`）和「失敗」（`-err`）兩�
 
 ## 4. 程式放在哪裡
 
-安裝腳本與範本放在本知識庫的 [`tools/proxmox-zh-tw-notification/`](https://github.com/kbwangtw/IT-Knowledge-Base/tree/main/tools/proxmox-zh-tw-notification)（2026-10-16 從原本的獨立 repository 併入，之後只維護這一份）：
+安裝腳本與範本放在本知識庫的 [`tools/proxmox-zh-tw-notification/`](https://github.com/kbwangtw/IT-Knowledge-Base/tree/main/tools/proxmox-zh-tw-notification)（2026-10-16 從原本的獨立 repository 併入，原 repository 已於 2026-10-19 封存，之後只維護這一份）：
 
 ```text
 tools/proxmox-zh-tw-notification/
@@ -207,10 +207,8 @@ Proxmox 更新時，官方範本偶爾會**新增或改名變數**（`{{...}}` �
 
 ## 12. 待辦
 
-| 項目 | 說明 |
-| --- | --- |
-| 封存原本的獨立 repository | 在 `kbwangtw/proxmox-zh-tw-notification` 的 README 最上方加註「已併入 IT-Knowledge-Base `tools/proxmox-zh-tw-notification/`，不再維護」，再到 Settings → Danger Zone → **Archive this repository**。封存後舊網址仍可下載，已寫在別處的舊指令不會失效 |
-| PBS 中文通知實測 | 在 PBS31 依第 6 節安裝 → 等 GC、Verify、Prune 等工作執行，確認收到中文信、資料正確 → 依第 7 節移除並確認還原 → 結果補進第 9 節。可與「PBS 任務失敗通知」一起規劃（PBS 本身能在工作失敗時寄信） |
+- [x] 封存原本的獨立 repository `kbwangtw/proxmox-zh-tw-notification`：README 最上方已加註搬家說明，並於 2026-10-19 封存（唯讀）。舊網址仍可下載，但抓到的是舊版；請一律使用本文的安裝指令
+- [ ] PBS 中文通知實測：在 PBS31 依第 6 節安裝 → 等 GC、Verify、Prune 等工作執行，確認收到中文信、資料正確 → 依第 7 節移除並確認還原 → 結果補進第 9 節。可與「PBS 任務失敗通知」一起規劃（PBS 本身能在工作失敗時寄信）
 
 ## 13. 延伸閱讀
 
