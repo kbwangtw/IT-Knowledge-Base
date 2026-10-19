@@ -350,7 +350,7 @@ Remv proxmox-kernel-7.0 [7.0.14-23]
 
 ## 13. 延伸閱讀
 
-- [備份監控：失敗通知與每日備份檢查](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-graylog-syslog-pipeline-sop/)（Graylog 文件 11-8）
+- [備份監控：失敗通知與每日備份檢查](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)（Graylog 告警與監控（二）第 7 節）
 - [從 PBS 還原 ProxCenter：先複製一台，再確認能用](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-pbs-restore-dr-runbook/)
 - [Ubuntu VM 從 PBS 還原：6 分 38 秒代表什麼？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ubuntu-vm112-pbs-disaster-recovery/)
 - [PBS 套件來源](https://pbs.proxmox.com/docs/installation.html#package-repositories)
