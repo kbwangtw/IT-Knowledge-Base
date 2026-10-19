@@ -1,17 +1,18 @@
-PBS 資料同步執行結果
+PBS 備份同步執行結果
 ====================
 
 執行狀態：成功
-工作 ID：{{job-id}}
+工作名稱：{{job-id}}
 目的資料儲存區：{{datastore}}
+
 {{#if remote~}}
-遠端名稱：{{remote}}
+遠端 PBS：{{remote}}
 來源資料儲存區：{{remote-datastore}}
 {{else~}}
 本機來源資料儲存區：{{remote-datastore}}
 {{/if}}
 
-資料同步已成功完成。
+備份同步工作已成功完成。
 
 詳細資訊：
-<{{base-url}}/#DataStore:{{datastore}}>
+<{{base-url}}/#DataStore-{{datastore}}>
