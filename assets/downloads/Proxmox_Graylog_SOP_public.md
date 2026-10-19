@@ -78,6 +78,7 @@ Infrastructure Syslog 的實際索引名稱是 `infra_syslog_0`（Index Set `inf
 | 雜訊過濾 | ✅ 10/16 丟棄 PBS 讀取 NAS 產生的大量紀錄，tokyo16 每天少了約 7 萬筆 |
 | 告警 | ✅ 14 個告警運作中，全部寄 Gmail；10/16 盤點並修正 3 項設定；10/19 加入「每日健康回報」 |
 | 監控 Graylog 本身 | ✅ 10/19 三台 PVE 每 5 分鐘從外部檢查，異常直接用 postfix 寄信；每日 08:00 健康回報驗證整條告警鏈（11-6） |
+| NAS 快照複寫 | ✅ 10/19 複寫失敗、停止由 tokyo16 DSM 寄信；兩台 NAS 是否回應由三台 PVE 每 5 分鐘檢查（11-7） |
 | 看板 | 🔶「PVE 任務監控」八個 Widget 保留；整體基礎設施看板待完善 |
 | 告警信格式 | 🔶 預設格式難判讀，改為中文範本列入待辦 |
 
@@ -152,7 +153,7 @@ logger -t GRAYLOG_TEST "PBS31 graylog forwarding test"
 | NAS | 角色 |
 | --- | --- |
 | **tokyo16** | 主要檔案伺服器兼備份伺服器；PBS31 的 Tokyo16 datastore 以 SMB 掛在這台 |
-| **melayu17** | tokyo16 的快照複寫目的地（最後一道防線） |
+| **melayu17** | tokyo16 的快照複寫目的地（最後一道防線；複寫與連線監控見 11-7） |
 
 **應該看到**：按 DSM 的「傳送測試日誌」後，訊息出現在 Synology Syslog Stream。兩台都已確認。
 
@@ -1206,6 +1207,195 @@ for h in node10 node11 node12; do ssh root@$h "systemctl start graylog-heartbeat
 
 三台各執行：`systemctl disable --now graylog-health-check.timer graylog-heartbeat.timer`，刪除 `/usr/local/sbin/graylog-health-check.sh`、四個 systemd 檔案、`/root/.graylog-monitor.conf`、`/var/lib/graylog-health/` 後 `daemon-reload`。Graylog 端刪除 Event Definition「Graylog 每日健康回報」、通知「每日健康回報通知」與 `pve-monitor` 帳號（連同它的 token）。
 
+### 11-7 NAS 快照複寫與連線監控（2026-10-19）
+
+**為什麼要做**：melayu17 是 tokyo16 的快照複寫目的地，也是**最後一道防線**。回查 Snapshot Replication 套件的日誌（2023-12 起），過去的複寫失敗都**連續好幾天沒被發現**：
+
+| 期間 | 失敗的任務 | 原因 |
+| --- | --- | --- |
+| 2026-08-30～08-31 | PBS_BK_Folder、No16、homes（兩天全部失敗） | `connection failed`：連不到 melayu17 的 DSM 埠 |
+| 2026-07-13～07-15 | No16、homes、PVE_Backup（連續三天） | 同上 |
+| 2026-07-01～07-02 | No16、homes、PVE_Backup | 同上 |
+| 2025 年 8～9 月 | 共 4 天 | 同上 |
+
+#### 目前的複寫任務（tokyo16 → melayu17，每天一次）
+
+| 來源 | 目的地 | 每天完成時間 |
+| --- | --- | --- |
+| PBS_BK_Folder | PBS_BK_Folder | 約 00:15～00:25 |
+| No16 | No16 | 約 02:00 |
+| homes | homes-replicated | 約 02:01 |
+| ActiveBackupforBusiness | ActiveBackupforBusiness-1 | 約 03:10 |
+| KB-GD | KB-GD | 約 03:10 |
+| ITBH-GD | ITBH-GD | 約 03:11 |
+
+`PVE_Backup` 的複寫在 2026-07-27 改用 `PBS_BK_Folder` 後已移除，PVE 也沒有使用這個共用資料夾（`grep -i pve_backup /etc/pve/storage.cfg` 無結果）。
+
+**日誌格式**（套件內的「日誌」頁，**不在 DSM 記錄中心，所以不會經「記錄傳送」進 Graylog**；在 Graylog 搜尋 7 天為 0 筆）：
+
+```text
+成功：Synced shared folder replication from [tokyo16:<來源>] to [melayu17:<目的地>] completed.
+失敗：Failed to sync shared folder replication from [tokyo16:<來源>] to [melayu17:<目的地>] due to [<原因>].
+```
+
+#### 要抓的情況與分工
+
+| 情況 | 例子 | 怎麼抓 |
+| --- | --- | --- |
+| 複寫失敗 | melayu17 連不上、空間滿 | DSM 內建通知（Warning 規則） |
+| 複寫被停止 | 任務被暫停或停用 | DSM 內建通知（自訂規則「快照複寫停止」） |
+| 任一台 NAS 當機或斷線 | tokyo16 整台掛掉時 DSM 自己寄不出信 | PVE 節點每 5 分鐘檢查兩台 DSM 是否回應 |
+
+#### 第一步：DSM 內建通知（tokyo16）
+
+tokyo16 的 **控制台 → 通知設定 → 電子郵件** 已設定 Gmail 寄信，標題前置文字 `[tokyo16]`。預設規則 **Warning**（不能修改）已包含：
+
+| Snapshot Replication 事件 | 層級 | Warning |
+| --- | --- | --- |
+| 執行初始複寫失敗 | 重大 | ✅ |
+| 執行排程複寫失敗 | 重大 | ✅ |
+| 無法為複寫任務啟用不可變快照 | 警告 | ✅ |
+| 複寫任務未於特定時間內完成 | 警告 | ✅ |
+| 複寫已停止 | 資訊 | ❌ |
+| 初始／排程複寫已完成 | 資訊 | ❌（不需要） |
+
+在「檢視規則」視窗的搜尋框輸入「複寫」，就能直接列出這些事件（不用展開類別）。
+
+補上「複寫已停止」：
+
+1. **規則 → 新增**：名稱 `快照複寫停止`，只勾 Snapshot Replication 的「複寫已停止」。
+2. **電子郵件 → 收件者設定檔 → 新增**：同一個 Gmail，規則選 `快照複寫停止`。**保留原本的 Warning 那一筆**（一個收件者設定檔只能套一條規則，兩筆並存才不會少收）。
+
+**看到的結果**：收件者設定檔有兩筆，分別套 Warning 與 快照複寫停止。
+
+#### 第二步：為什麼不用 DSM API 查「最新快照」
+
+原本想讓節點每小時用 DSM API 查 melayu17 上每個資料夾的最新快照（超過 26 小時沒有新的就告警）。實測結果：
+
+| 測試 | 結果 |
+| --- | --- |
+| `SYNO.API.Info` 查詢（不用登入） | ✅ 有 `SYNO.Core.Share.Snapshot`、`SYNO.DR.Plan` |
+| 管理員帳號登入後 `SYNO.Core.Share.Snapshot list` | ✅ 列得出每日快照（`time: GMT+08-2026.10.18-00.10.02`） |
+| 一般帳號（只開 DSM 權限）登入 | ✅（`session` 要用 `webui`；用自訂名稱回 402） |
+| 一般帳號讀快照、讀複寫任務 | ❌ 都回 `105`（沒有權限） |
+
+結論：**只有管理員帳號讀得到**。melayu17 是最後一道防線，不在 PVE 節點上存它的管理員帳密（節點被入侵時，最後一份備份也會被刪），所以改用「連線檢查」，測試用的一般帳號已刪除。這樣抓不到「排程被改掉、但沒觸發停止事件」這種少見情況，改以每月人工看一次 Snapshot Replication 狀態頁補上。
+
+#### 第三步：PVE 節點檢查兩台 NAS 是否回應
+
+檢查方式是呼叫 DSM 的 `query.cgi`（**不需要登入，節點上沒有任何 NAS 帳密**）。兩台的 DSM HTTPS 埠刻意設成不同號碼，文件中以 `<tokyo16 埠>`、`<melayu17 埠>` 代稱。
+
+設定檔 `/root/.nas-monitor.conf`（權限 600，收件人沿用 11-6 的設定）：
+
+```bash
+umask 077
+. /root/.graylog-monitor.conf
+cat > /root/.nas-monitor.conf <<EOF
+MAIL_TO=$MAIL_TO
+NAS_LIST="tokyo16=https://<tokyo16 IP>:<tokyo16 埠> melayu17=https://<melayu17 IP>:<melayu17 埠>"
+EOF
+umask 022
+```
+
+`/usr/local/sbin/nas-reach-check.sh`：
+
+```bash
+#!/bin/bash
+# NAS 連線檢查：DSM 是否有回應；異常用本機 postfix 直接寄信（不經過 Graylog）
+CONF=${CONF:-/root/.nas-monitor.conf}
+STATE_DIR=/var/lib/nas-reach
+FAIL_MIN=2      # 連續幾次沒回應才告警（每 5 分鐘一次 = 10 分鐘）
+REPEAT_MIN=60   # 持續異常時，每隔幾分鐘再寄一次
+. "$CONF" || exit 1
+mkdir -p "$STATE_DIR"
+H=$(hostname -s); NOW=$(date +%s)
+for item in $NAS_LIST; do
+  name=${item%%=*}; url=${item#*=}
+  ok=$(curl -sk -m 10 "$url/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query&query=SYNO.API.Auth" \
+       | python3 -c 'import json,sys; print("yes" if json.load(sys.stdin).get("success") else "no")' 2>/dev/null)
+  f="$STATE_DIR/$name"
+  read -r fails status last 2>/dev/null < "$f"
+  fails=${fails:-0}; status=${status:-OK}; last=${last:-0}
+  if [ "$ok" = yes ]; then
+    if [ "$status" = FAIL ]; then
+      printf '偵測主機：%s\n時間：%s\n\n%s 的 DSM 已恢復回應。\n請到 Snapshot Replication 確認今晚的複寫有正常完成。\n' \
+        "$H" "$(date '+%F %T')" "$name" | mail -s "【NAS 已恢復】$name（$H 偵測）" "$MAIL_TO"
+      logger -t nas-reach "NAS_RECOVERED nas=$name host=$H"
+    fi
+    echo "0 OK 0" > "$f"
+  else
+    fails=$((fails+1))
+    logger -t nas-reach "NAS_UNREACHABLE nas=$name host=$H fails=$fails"
+    if [ "$fails" -ge "$FAIL_MIN" ]; then
+      if [ "$status" = OK ] || [ $((NOW-last)) -ge $((REPEAT_MIN*60)) ]; then
+        printf '偵測主機：%s\n時間：%s\n\n%s 的 DSM 連續 %s 次（每 5 分鐘一次）沒有回應。\n\n影響：\n- tokyo16 連不上：PBS 備份與快照複寫都會失敗\n- melayu17 連不上：快照複寫會失敗（最後一道防線沒有更新）\n\n這封信由 PVE 節點直接寄出，不經過 Graylog。\n' \
+          "$H" "$(date '+%F %T')" "$name" "$fails" | mail -s "【NAS 連不上】$name（$H 偵測）" "$MAIL_TO"
+        last=$NOW
+      fi
+      status=FAIL
+    fi
+    echo "$fails $status $last" > "$f"
+  fi
+done
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `NAS_LIST="名稱=網址 …"` | 要檢查的 NAS；多一台就多加一組 |
+| 狀態檔 `連續失敗次數 狀態 上次寄信時間` | 每台 NAS 一個檔，在 `/var/lib/nas-reach/` |
+| `FAIL_MIN=2` | 連續 10 分鐘沒回應才寄信，避開 DSM 更新重開的短暫中斷 |
+| `logger -t nas-reach` | 每次失敗也寫 syslog，Graylog 事後查得到 |
+
+systemd 設定與 11-6 相同模式（`nas-reach-check.service` 為 oneshot，`nas-reach-check.timer` 為 `OnBootSec=5min`、`OnUnitActiveSec=5min`）。
+
+#### 第四步：模擬 melayu17 連不上（不碰真正的 NAS）
+
+```bash
+sed 's|:<melayu17 埠>|:39999|' /root/.nas-monitor.conf > /root/.nas-monitor-test.conf; chmod 600 /root/.nas-monitor-test.conf
+show() { for f in /var/lib/nas-reach/*; do echo "  $(basename $f)：$(cat $f)"; done; }
+CONF=/root/.nas-monitor-test.conf /usr/local/sbin/nas-reach-check.sh; show   # 第 1 次
+CONF=/root/.nas-monitor-test.conf /usr/local/sbin/nas-reach-check.sh; show   # 第 2 次
+CONF=/root/.nas-monitor-test.conf /usr/local/sbin/nas-reach-check.sh; show   # 第 3 次
+/usr/local/sbin/nas-reach-check.sh; show                                     # 第 4 次（正式設定）
+rm -f /root/.nas-monitor-test.conf
+```
+
+| 第幾次 | melayu17 狀態檔（10/19 實測） | 信件 |
+| --- | --- | --- |
+| 1 | `1 OK 0` | 不寄 |
+| 2 | `2 FAIL <時間戳>` | ✅ 收到【NAS 連不上】melayu17（node10 偵測） |
+| 3 | `3 FAIL <同一個時間戳>` | 不寄（60 分鐘內） |
+| 4 | `0 OK 0` | ✅ 收到【NAS 已恢復】melayu17（node10 偵測） |
+
+tokyo16 全程 `0 OK 0`。
+
+#### 第五步：部署到三台
+
+```bash
+systemctl enable --now nas-reach-check.timer
+for h in node11 node12; do
+  scp -p /usr/local/sbin/nas-reach-check.sh root@$h:/usr/local/sbin/
+  scp -p /etc/systemd/system/nas-reach-check.service /etc/systemd/system/nas-reach-check.timer root@$h:/etc/systemd/system/
+  scp -p /root/.nas-monitor.conf root@$h:/root/
+  ssh root@$h "chmod 600 /root/.nas-monitor.conf && systemctl daemon-reload && /usr/local/sbin/nas-reach-check.sh && systemctl enable --now nas-reach-check.timer"
+done
+```
+
+**看到的結果**：三台設定檔都是 `-rw-------`、腳本指紋相同、兩台 NAS 都是 `0 OK 0`、timer 已排程。同一個故障三台會各寄一封（主旨寫明偵測主機）。
+
+#### 收到信時怎麼查
+
+| 信件 | 先查什麼 |
+| --- | --- |
+| `[tokyo16]` 排程複寫失敗 | 失敗原因寫在信裡；`connection failed` → melayu17 是否開機、網路、DSM 埠；空間不足 → melayu17 儲存空間 |
+| `[tokyo16]` 複寫已停止 | 是不是有人手動暫停；確認後在 Snapshot Replication 恢復任務 |
+| 【NAS 連不上】tokyo16 | 主機是否當機；PBS 的 Tokyo16 datastore（CIFS）也會失效，見「PVE 儲存設備離線」告警 |
+| 【NAS 連不上】melayu17 | 開機、網路；恢復後到 Snapshot Replication 確認當晚複寫完成，必要時手動「立即同步」 |
+
+#### 還原
+
+三台各執行 `systemctl disable --now nas-reach-check.timer`，刪除腳本、兩個 systemd 檔、`/root/.nas-monitor.conf`、`/var/lib/nas-reach/` 後 `daemon-reload`。tokyo16 可刪除「快照複寫停止」規則與對應的收件者設定檔。
+
 ## 12. 日常維運
 
 ### 12-1 把顯示時區改成台灣時間（2026-10-16）
@@ -1368,6 +1558,10 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | OpenSearch 重啟後是 red | 資料還在載入 | `wait_for_status=green` 等它（12-2） |
 | 告警信看不出是哪台出問題 | 預設範本只把整筆訊息倒出來 | 依 11-3 的表判讀；改中文範本列入待辦 |
 | 重啟 Graylog 後少了一段日誌 | UDP 不重送 | 屬預期，重啟要避開重要時段 |
+| 收到【NAS 連不上】或 `[tokyo16]` 複寫失敗信 | NAS 或複寫出問題 | 依 11-7「收到信時怎麼查」 |
+| Graylog 搜不到快照複寫的紀錄 | 複寫日誌在套件自己的日誌頁，不在 DSM 記錄中心 | 到 Snapshot Replication → 日誌查看或匯出 CSV |
+| DSM API 登入回 402 | 一般帳號用了自訂的 `session` 名稱，或沒有 DSM 應用程式權限 | `session=webui`，並允許 DSM 權限 |
+| `read -s` 讀進來的密碼少一個字 | 沒加 `-r` 時反斜線會被吃掉 | 改用 `read -rs` |
 | 收到【Graylog 異常】信 | Graylog 本身出問題，信是節點直接寄的 | 依 11-6「收到異常信時怎麼查」 |
 | 早上沒收到【每日健康回報】 | 告警鏈某處斷了（含 Gmail 寄信失敗） | 先看有沒有【Graylog 異常】信；再到 Search 搜 `"GRAYLOG_DAILY_HEARTBEAT"`、看 Event Definition 的 Last Matched |
 | `read -s` 存進去的不是 token | `read -s` 那行和下一段指令一起貼上，下一行被當成輸入 | `read -s` 單獨貼上、輸入完再貼下一段；token 改用 API 建立直接寫檔（11-6） |
@@ -1382,7 +1576,8 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | 完善看板 | 沿用任務看板，再加入節點、服務、登入等統計與異常明細 |
 | PBS 任務分類與失敗告警 | PBS 的任務日誌來自 proxmox-backup-proxy，格式和 PVE 不同，現有「PVE 任務失敗警報」不適用；依真實日誌建立分類與告警（或改用 PBS 內建通知） |
 | PBS 的認證事件 | 確認 PBS 的登入與 sudo 是否也要分類 |
-| 快照複寫失敗告警 | melayu17 是最後防線；建議 DSM 內建通知，加上「24 小時沒有成功紀錄就通知」 |
+| 刪除 tokyo16 的 PVE_Backup | 7/27 起不再複寫、PVE 也沒使用；刪除前確認最後修改時間、melayu17 是否有舊複本（刪共用資料夾會連同快照一起刪） |
+| 每月看一次 Snapshot Replication | 補上 11-7 抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
 | DSM 日誌過濾器 | 確認兩台 NAS 送出哪些種類的日誌 |
 | 觀察磁碟用量 | 一週後決定是否也丟棄 PBS 的寫入紀錄 |
 | postfix 舊參數 | 三台 `main.cf` 的 `smtp_use_tls` 將被移除，改成 `smtp_tls_security_level = encrypt`；改前先寄測試信確認、改後再寄一次 |
