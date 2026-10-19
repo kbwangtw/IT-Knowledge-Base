@@ -1165,6 +1165,94 @@ unset GLPW
 
 **看到的結果**：`已更新：` 兩行（舊 → 新），盤點後 13 個主旨都不再出現 `【Graylog 警報】`。主旨只影響之後的信件標題，沒有另外觸發測試信，等這兩個告警自然觸發時確認。
 
+### 第六步：「PVE 任務失敗」的摘要改成一眼看懂
+
+中文範本裡的「摘要」（`${event.message}`）是告警的 **Event Summary Template** 組出來的。「PVE 任務失敗警報」原本是 `PVE 任務失敗：${source.message}`，從來沒有驗證過。
+
+**① 看目前的設定（只讀取）**：
+
+```bash
+cat > /root/gl-tpl/eventdef.py <<'EOF2'
+import json, os, sys, base64, urllib.request
+url = os.environ["GL_URL"].rstrip("/")
+auth = base64.b64encode(("admin:" + os.environ["GLPW"]).encode()).decode()
+req = urllib.request.Request(url + "/api/events/definitions?per_page=100",
+      headers={"Authorization": "Basic " + auth, "Accept": "application/json"})
+for e in json.load(urllib.request.urlopen(req, timeout=15))["event_definitions"]:
+    if e["title"] != sys.argv[1]:
+        continue
+    def walk(o, path=""):
+        if isinstance(o, dict):
+            for k, v in o.items(): walk(v, path + "." + k)
+        elif isinstance(o, list):
+            for i, v in enumerate(o): walk(v, path + "[%d]" % i)
+        elif isinstance(o, str) and ("${" in o or "summary" in path.lower() or "template" in path.lower()):
+            print(path, "=", o)
+    walk(e)
+    print("field_spec =", json.dumps(e.get("field_spec"), ensure_ascii=False))
+    print("backlog =", (e.get("notification_settings") or {}).get("backlog_size"),
+          "| grace(min) =", ((e.get("notification_settings") or {}).get("grace_period_ms") or 0) // 60000)
+EOF2
+python3 /root/gl-tpl/eventdef.py "PVE 任務失敗警報"
+```
+
+看到的結果：`.event_summary_template = PVE 任務失敗：${source.message}`、`field_spec = {}`、`backlog = 5 | grace(min) = 5`。
+
+**② 用合成訊息驗證原本的寫法**（VM 999 不存在，不會動到任何機器）：
+
+```bash
+logger -p daemon.warning "end task UPID:node10:TEST:TEST:TEST:vzstart:999:root@pam: GRAYLOG-SUMMARY-TEMPLATE-TEST"
+```
+
+看到的結果：Graylog 收到這筆，欄位有 `pve_event_type=task_failed`、`pve_task_name=vzstart`、`pve_task_node=node10`、`pve_vmid=999`；約 5 分鐘後收到【PVE 任務告警】PVE 任務失敗警報，摘要是 `PVE 任務失敗：node10 root: end task UPID:node10:TEST:TEST:TEST:vzstart:999:root@pam: GRAYLOG-SUMMARY-TEMPLATE-TEST`。**`${source.message}` 可以用**，但和下面「相關日誌」重複，重點埋在長字串裡。
+
+**③ 改成結構化摘要**：用 ② 確認存在的欄位，VM 編號用 `${if}` 有才顯示（`aptupdate` 這類任務沒有 VM）：
+
+```bash
+cat > /root/gl-tpl/summary.py <<'EOF2'
+import json, os, sys, base64, urllib.request
+url = os.environ["GL_URL"].rstrip("/")
+auth = base64.b64encode(("admin:" + os.environ["GLPW"]).encode()).decode()
+H = {"Authorization": "Basic " + auth, "Accept": "application/json",
+     "Content-Type": "application/json", "X-Requested-By": "cli"}
+def call(method, path, data=None):
+    body = None if data is None else json.dumps(data).encode()
+    req = urllib.request.Request(url + path, method=method, headers=H, data=body)
+    with urllib.request.urlopen(req, timeout=15) as r:
+        b = r.read()
+        return json.loads(b) if b else None
+title, new = sys.argv[1], sys.argv[2]
+for e in call("GET", "/api/events/definitions?per_page=100")["event_definitions"]:
+    if e["title"] == title:
+        os.umask(0o077)
+        json.dump(e, open("/root/gl-eventdef-backup-%s.json" % e["id"], "w"), ensure_ascii=False, indent=1)
+        print("舊：", e.get("event_summary_template"))
+        e["event_summary_template"] = new
+        call("PUT", "/api/events/definitions/" + e["id"] + "?schedule=true", e)
+        print("新：", call("GET", "/api/events/definitions/" + e["id"]).get("event_summary_template"))
+EOF2
+python3 /root/gl-tpl/summary.py "PVE 任務失敗警報" '${source.pve_task_node} 的 ${source.pve_task_name} 失敗${if source.pve_vmid}（VM／CT ${source.pve_vmid}）${end}'
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `gl-eventdef-backup-<id>.json` | 改之前把整份告警設定備份起來 |
+| 單引號 `'${source…}'` | 不讓 bash 把 `${…}` 當成自己的變數 |
+| `?schedule=true` | 更新後讓告警繼續排程 |
+| `${if source.pve_vmid}…${end}` | 有 VM／CT 編號才顯示括號那段 |
+
+看到的結果：`舊： PVE 任務失敗：${source.message}`、`新： ${source.pve_task_node} 的 ${source.pve_task_name} 失敗${if source.pve_vmid}（VM／CT ${source.pve_vmid}）${end}`。
+
+**④ 再測一次**：等上一封的 Grace（5 分鐘）過了才送，否則會被擋下：
+
+```bash
+logger -p daemon.warning "end task UPID:node10:TEST:TEST:TEST:vzstart:999:root@pam: GRAYLOG-SUMMARY-TEMPLATE-TEST-2"
+```
+
+看到的結果：摘要是 **`node10 的 vzstart 失敗（VM／CT 999）`**。欄位變數 `${source.欄位名}` 和 `${if}` 在 Summary Template 裡都能用。
+
+**還原**：`python3 /root/gl-tpl/summary.py "PVE 任務失敗警報" 'PVE 任務失敗：${source.message}'`。
+
 ## 9. postfix 改用新的加密參數（2026-10-19）
 
 **做什麼**：三台 PVE 和 PBS31 的 postfix 把舊參數 `smtp_use_tls` 換成 `smtp_tls_security_level = encrypt`。postfix 是所有告警信的出口（PVE 備份通知、PBS 通知、第 5～7 節的監控腳本），所以一次只改一台，改完立刻寄測試信。
@@ -1255,6 +1343,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | --- | --- | --- |
 | --- | --- | --- |
 | 告警信看不出是哪台出問題 | 預設範本只把整筆訊息倒出來 | 10/19 已改中文範本，「相關日誌」直接列出主機（第 8 節）；腳本產生的訊息依 4-1 的表判讀 |
+| 收到【PVE 任務告警】，摘要寫「node10 的 vzstart 失敗（VM／CT 999）」 | 這是第 8 節第六步的結構化摘要：哪個節點、什麼任務、哪台 VM／CT | 完整錯誤在「相關日誌」那一行；到該節點 **Tasks** 看同一筆任務的日誌 |
 | 收到【NAS 連不上】或 `[tokyo16]` 複寫失敗信 | NAS 或複寫出問題 | 依第 6 節「收到信時怎麼查」 |
 | Graylog 搜不到快照複寫的紀錄 | 複寫日誌在套件自己的日誌頁，不在 DSM 記錄中心 | 到 Snapshot Replication → 日誌查看或匯出 CSV |
 | DSM API 登入回 402 | 一般帳號用了自訂的 `session` 名稱，或沒有 DSM 應用程式權限 | `session=webui`，並允許 DSM 權限 |
@@ -1270,7 +1359,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 
 | 項目 | 說明 |
 | --- | --- |
-| 驗證 Summary Template | `PVE 任務失敗：${source.message}` 能否帶出原始訊息；補齊 node、task、VM／CT ID、UPID 與錯誤內容 |
+| 其他告警的摘要 | 第 8 節第六步確認 `${source.欄位名}` 可用後，視需要把「PVE 服務異常」「Synology DSM 登入失敗」等告警的摘要也改成「哪台、什麼事」的寫法 |
 | 每月看一次 Snapshot Replication | 補上第 6 節抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
 | 單節點故障演練 | 和 PVE HA 文件第 14 節一起做：一台失聯時，確認「節點離線」告警、另兩台第 5、6 節的監控與 postfix 寄信都正常，記錄收信時間 |
 | 其他新告警的測試 | 每個新告警都安排安全、可控的測試事件，記錄原始訊息、欄位、事件、收信時間與 Grace 下的重複通知情形 |
