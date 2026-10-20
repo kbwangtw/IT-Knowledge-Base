@@ -135,7 +135,7 @@ ha-manager status | grep -E 'ct:100|ct:101'
 | --- | --- |
 | Default (basic)／Basic (Resource Count) | 各節點 HA 服務的**數量** |
 | **Static Load** | 各服務**設定的** CPU、記憶體 |
-| Dynamic Load | 推測是即時負載；細節未查證，請看 Help |
+| Dynamic Load | 依節點的即時負載（10/20 查證，見第 15 節） |
 
 **本案設定**：
 
@@ -492,7 +492,7 @@ ssh root@node11 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | ProxCenter 搬移非 HA VM 時是否遵守 Affinity rules | 已改為 DC 加入 HA、由 PVE 規則保證，不再依賴 |
 | 逐台更新時 DC 規則全程有效、服務維護後是否自動搬回 | ✅ 2026-10-08：規則有效；服務不一定自動搬回，需手動（第 11 節） |
 | 單節點故障演練：實測 Ceph I/O latency、HA 恢復時間，並確認告警鏈（Graylog「節點離線」、另兩台的監控腳本與 postfix 寄信）在一台失聯時仍會寄信 | ⏳ 未演練（2026-10-19 列入待辦；需事先排時段、避開 21:00～03:00 備份） |
-| Dynamic Load 與 Automatic Rebalance 的實際行為 | ⏳ 未查證；目前全域未開啟（10/13 確認） |
+| Dynamic Load 與 Automatic Rebalance 的實際行為 | ✅ 10/20 查證（未找到官方 admin guide 章節，依開發者郵件論壇與官方論壇公告）：pve-ha-manager 5.2.0（pve-manager 9.1.8）起加入 Dynamic Load，可勾選 Automatic Rebalance 並設定不平衡門檻等參數，避免不必要的遷移；**只平衡 HA 資源**，且遷移一定遵守 node／resource affinity 規則；開發者標示為 technology preview，目標在 9.2 穩定。本叢集維持 `ha=static`、不開自動平衡（LXC 遷移會重啟） |
 | ProxCenter DRS 停用、規則改由 PVE 統一管理 | ✅ 2026-10-13（第 12 節） |
 | ProxCenter Operation mode 改為 Manual（保險） | ✅ 2026-10-19，Guest types 同時改為只留 VMs（第 12-2 節） |
 | HA 資源集中在 node10，是否再分散 | ✅ 2026-10-19 由 8／1／4 分散為 4／5／4（第 13 節） |
@@ -507,3 +507,4 @@ ssh root@node11 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 - [Ceph：Monitor／OSD 心跳與 down／out 設定](https://docs.ceph.com/en/latest/rados/configuration/mon-osd-interaction/)
 - [ProxCenter 文件：DRS](https://docs.proxcenter.io/automation/drs/)
 - [ProxLB（含與 PVE Dynamic Load Balancing 的比較）](https://github.com/credativ/ProxLB)
+- [Proxmox 論壇：pve-manager 9.1.8／pve-ha-manager 5.2.0 Dynamic load 介紹](https://forum.proxmox.com/goto/post?id=849718)、[pve-devel 郵件論壇：load balancer 文件 patch](https://lore.proxmox.com/all/20260409114224.323102-1-d.kral@proxmox.com)
