@@ -4,7 +4,7 @@ title: "GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題"
 permalink: /docs/gcp/gce-disk-full-log-cleanup-2026-10-05/
 date: 2026-10-05
 categories: [GCP, Debian, Logging, Security, Cloudflare]
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-20
 ---
 
 # GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題
@@ -436,8 +436,44 @@ gcloud compute snapshots list --filter="sourceDisk~<DISK>" \
 | 實際拍攝時間 | 每天 14:20 UTC（台灣 22:20） | 名稱裡的時間戳記和 `creationTimestamp` 一致 |
 
 - 快照是增量的：最舊一份約 3.3 GB，其他每天 0.1 到 0.5 GB；10/5 清 log 那天約 0.9 GB，合理。
-- 10/12 也有約 0.9 GB：區間內修改過的檔案只有約 20 MB，`systemctl list-timers` 顯示每週一執行的 `fstrim.timer` 在 10/12 00:47 UTC 跑過（10/5 也是週一），推測是 fstrim 讓快照多算了區塊，待 10/19 的快照驗證。
+- 10/12 也有約 0.9 GB：區間內修改過的檔案只有約 20 MB，`systemctl list-timers` 顯示每週一執行的 `fstrim.timer` 在 10/12 00:47 UTC 跑過（10/5 也是週一），推測是 fstrim 讓快照多算了區塊；10/20 用 10/19 的快照驗證，見下方。
 - **一顆磁碟同時只能套一個快照排程**，不要再另外建立。
+
+**10/20 驗證：週一的快照為什麼比較大**
+
+fstrim 是把「已刪除檔案佔用的區塊」告訴磁碟的指令；GCP 的增量快照會把這些被通知過的區塊也算成「有變動」。10/19 也是週一，拿它來驗證。
+
+在 Cloud Shell 列出最近的快照（`.date(…, tz=UTC)` 用 UTC 顯示，Cloud Shell 預設是美國太平洋時間，會顯示成 07:20）：
+
+```bash
+gcloud compute snapshots list --filter="sourceDisk~<DISK>" \
+  --format="table(creationTimestamp.date('%Y-%m-%d %H:%M', tz=UTC):label=拍攝時間UTC,status,storageBytes.size(units_out=M):label=MB)" \
+  --sort-by=~creationTimestamp --limit=15
+```
+
+在主機上看 fstrim 每次執行的紀錄：
+
+```bash
+systemctl list-timers fstrim.timer --all
+journalctl -u fstrim.service --since "2026-10-05" --no-pager | grep -E "Started|trimmed"
+```
+
+**看到的結果**（快照日期依排序推算，全部 `READY`）：
+
+| 日期 | 快照大小 | 當天 00:xx UTC 的 fstrim（`/`） |
+| --- | --- | --- |
+| 10/5（週一） | 約 0.9 GB | 592.6 MiB；當天另外清了大量 log |
+| 10/6～10/11 | 114～148 MB（10/6 未取得） | — |
+| 10/12（週一） | **894.9 MB** | **8.5 GiB** |
+| 10/13～10/18 | 117.6～208.8 MB | — |
+| 10/19（週一） | **479.1 MB** | **8 GiB** |
+
+**結論**：
+
+- ✅ 只有執行 fstrim 的週一，快照會明顯變大（平常日約 120～200 MB）；推測成立，屬正常現象，不用處理。快照只保留 14 天，多出來的空間有限。
+- fstrim 回報的數字（8.5 GiB、8 GiB）**和快照大小不成比例**：它回報的是被通知的空閒區塊總量，不是實際變動的資料量；週一的快照實際多出多少，還和那一週刪了多少檔案有關（10/5 清 log 後的那一週較多）。這部分是推測，未再細查。
+- fstrim 每週一約 00:00～00:50 UTC 執行（10/19 是 00:01），快照在 14:20 UTC，所以同一天的快照就會包含它的影響。
+
 
 ### 9-2 補上資料庫備份
 
@@ -702,7 +738,6 @@ gcloud compute snapshots create <DISK>-before-bt-update-$(date +%Y%m%d) \
 | 中 | 用快照建測試 VM，評估升級到 12.0.0 穩定版（驗證網站、計畫任務、PHP 7.4） |
 | 中 | 作業系統與 PHP 分開處理：寶塔的 PHP 自行編譯在 `/www/server/php/74`，不依賴 Debian 套件；Debian 11 升級前先拍快照，並確認寶塔支援新版本 |
 | 低 | 同一筆 syslog 在 Cloud Logging 出現兩次，確認是否為重複收集 |
-| 低 | 10/19 的快照若也接近 0.9 GB，確認是 fstrim 造成 |
 | 低 | 寶塔 LTS 內建 Python 3.7.9，等 LTS 新版換掉；可開啟「有更新時提醒我」 |
 | 低 | 評估長期方案：PHP 7.4 改放 container、主機升級作業系統；或購買 PHP 7.4 付費延長支援；或改寫網站 |
 | 低 | 設定 Cloudflare Authenticated Origin Pulls（防火牆只認 Cloudflare IP，別人透過自己的 Cloudflare 帳號仍可連到主機） |
