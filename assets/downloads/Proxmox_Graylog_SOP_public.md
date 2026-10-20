@@ -193,7 +193,7 @@ pct exec <Graylog CTID> -- ss -ulnp | grep -E ':151[45] '   # 1514 和 1515 都�
 | --- | --- |
 | PVE - Identify Cluster Nodes | source 是 node10～12 時，加上 `device_type=pve`、`pve_cluster=PVE-Cluster` |
 | PBS - Identify Backup Server | source 是 pbs31 時，加上 `device_type=pbs`、`pbs_server=pbs31`（10/08 新增） |
-| PVE-Authentication Events | 標記認證相關訊息（`event_category=authentication`） |
+| PVE-Authentication Events | 標記認證相關訊息（`event_category=authentication`）；PBS 的登入失敗另由 Stage 1 的規則補標（5-3） |
 | Infrastructure - System Errors | 找 DENIED、failed、error 等字樣，標記 `system_error` |
 
 PBS 的規則：
@@ -257,6 +257,40 @@ logger -p daemon.info -t systemd "Starting graylog-pipeline-test.service - Grayl
 logger -p daemon.info -t systemd "Stopping graylog-pipeline-test.service - Graylog Pipeline Test Service"
 logger -p daemon.info -t systemd "Reached target graylog-pipeline-test.target - Graylog Pipeline Test Target"
 ```
+
+**PBS 登入失敗（10/20 新增）**
+
+做什麼：PBS 的登入失敗有三種寫法，原本的認證規則只標到第一種，另外兩種沒有 `event_category=authentication`，告警也就抓不到：
+
+```text
+proxmox-backup-proxy[664]: authentication failure; rhost=[::ffff:127.0.0.1]:47768 msg=user account or token disabled or expired.
+proxmox-backup-api[569]: authentication failure; rhost=[::ffff:127.0.0.1]:52058 user=<PBS 帳號> msg=authentication error - AUTH_ERR (7)
+proxmox-backup-api: pam_unix(proxmox-backup-auth:auth): authentication failure; logname= uid=0 euid=0 tty= ruser= rhost=::ffff:127.0.0.1 user=<PBS 帳號>
+```
+
+怎麼做：在 Stage 1 加一條規則，只挑 PBS 訊息裡有「authentication failure」的。放 Stage 1 是因為 `device_type=pbs` 在 Stage 0 才加上，到下一關一定讀得到：
+
+```text
+rule "PBS - Authentication Failures"
+when
+    to_string($message.device_type) == "pbs"
+    &&
+    contains(to_string($message.message), "authentication failure", true)
+then
+    set_field("event_category", "authentication");
+end
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `device_type == "pbs"` | 只看 PBS31 的訊息 |
+| `contains(..., "authentication failure", true)` | 訊息有這段字（`true`＝不分大小寫）；CRON、SSH 的 `session opened` 不會被標到 |
+| `set_field("event_category", "authentication")` | 標成認證事件，下篇的「多次驗證失敗」告警才抓得到 |
+
+看到的結果：
+
+- Rule Simulation（JSON：`{"source":"pbs31","device_type":"pbs","message":"proxmox-backup-api: pam_unix(proxmox-backup-auth:auth): authentication failure; user=root"}`）多出 `event_category: authentication`。
+- 加入 Stage 1 後，在 PBS31 用 `logger` 送 3 筆假失敗（指令在下篇 3-2），`source:pbs31 AND event_category:authentication` 找到 3 筆，並收到【PVE／PBS 多次驗證失敗】信。
 
 ### 5-4 PVE 任務：從 UPID 拆出欄位
 
@@ -816,6 +850,7 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | jt-ipam 查不到主機名稱 | Data Adapter 欄位從 0 起算 | Key column 0、Value column 1（6-3） |
 | OpenSearch 重啟後是 red | 資料還在載入 | `wait_for_status=green` 等它（11-2） |
 | 重啟 Graylog 後少了一段日誌 | UDP 不重送 | 屬預期，重啟要避開重要時段 |
+| PBS31 出現 `authentication failure`，來源是 127.0.0.1 | 本機程式或 CLI 用了過期 token／錯誤帳密（10/19 13:32–13:33 的 4 筆來自測試時過期的 token 與 CLI 登入，不是攻擊） | 看 `user=` 與 `msg=` 找出是哪個帳號或 token；來源是外部 IP 才當成可疑登入處理 |
 
 告警、監控腳本、NAS 複寫與備份檢查相關的問題（收到某種告警信時怎麼查）在下篇第 10 節。
 
@@ -824,7 +859,6 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | 項目 | 說明 |
 | --- | --- |
 | 完善看板 | 沿用任務看板，再加入節點、服務、登入等統計與異常明細 |
-| PBS 的認證事件 | 確認 PBS 的登入與 sudo 是否也要分類 |
 | DSM 日誌過濾器 | 確認兩台 NAS 送出哪些種類的日誌 |
 | 觀察磁碟用量 | 一週後決定是否也丟棄 PBS 的寫入紀錄 |
 
