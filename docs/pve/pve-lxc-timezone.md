@@ -384,7 +384,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 - [x] 10/20 確認 `daily.sh` 照新時間執行：`daily.log` 時間為 `2026-10-20 05:19:13`
 - [x] LibreNMS 舊事件紀錄（`eventlog`，DATETIME）event_id ≤ 436510 共 12,560 筆已 +8 小時（步驟四④）
 - [x] 反覆出現的溫度門檻事件已追查，另寫一篇：[LibreNMS 溫度告警誤報](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/librenms-temperature-sensor-cleanup/)
-- [ ] 以後新建 LXC 時，建好就設 `timedatectl set-timezone Asia/Taipei`；定期用 `/root/check-ct-tz.sh` 檢查
+- [ ] 以後新建 LXC 時，建好就設 `timedatectl set-timezone Asia/Taipei`；定期用 `/root/check-ct-tz.sh` 檢查；Ubuntu 24.04 容器同時停用容器內的 rsyslogd AppArmor 規則（見 Wazuh 維運篇 11-2）
 - [x] 刪除 CT 102 的 `/etc/php/8.4/*/php.ini.bak-20261019`、`/root/librenms.cron.bak-20261019`、`/root/eventlog-before-tzfix-20261019.sql.gz`（2026-10-20）
 
 ## 10. 延伸閱讀
