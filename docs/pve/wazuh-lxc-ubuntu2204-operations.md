@@ -4,7 +4,7 @@ title: "Wazuh 維運（二）：資料保留、告警調校、弱點修補與整
 date: 2026-10-02
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-operations/
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-20
 ---
 {% raw %}
 
@@ -50,7 +50,7 @@ last_modified_at: 2026-10-17
 | # | 步驟 | 狀態 | 實測紀錄 |
 | --- | --- | --- | --- |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
-| 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；10/16 以子規則 100141 處理 31301（11-13） |
+| 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；10/16 以子規則 100141 處理 31301（11-13）；10/20 驗收登入失敗、人員 sudo、FIM 仍偵測得到（11-15） |
 | 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目；10/14 ubclient 套件更新並修正 logrotate 重複設定（12-6） |
 | 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
 | 14 | WireGuard VPN 健康監控 | 完成 | 2026-10-13：ct:109 內部檢查（100150）＋ Manager 外部檢查 ct:109（100151）；`syslog_output` 只把 wireguard 群組送 Graylog；兩種情況的 Gmail 告警都實測收到 |
@@ -1020,6 +1020,73 @@ pct exec 102 -- mysql librenms -e "SELECT g.name, d.hostname FROM device_group_d
 - 有自己 kernel 的 VM（例如 QEMU 的 Linux VM）不符合 Virtual_Group 規則，若日後納管需另加條件（例如 hostname）。
 - 檢查是否有 LibreNMS 告警規則綁定群組：`SELECT r.name, g.name FROM alert_group_map m JOIN alert_rules r ON r.id=m.rule_id JOIN device_groups g ON g.id=m.group_id;`。2026-10-16 查詢無輸出，沒有告警規則綁定群組，所有告警套用全部設備。
 
+### 11-15 驗收：重要事件仍然偵測得到（2026-10-20）
+
+**為什麼**：11-4～11-14 加了不少降級規則，寫得太寬的話，真正重要的事件也會被一起藏掉。抽三種關鍵事件各觸發一次，確認仍會產生告警。
+
+| 測試 | 觸發方式 | 預期規則 | 會不會被降級規則誤藏 |
+| --- | --- | --- | --- |
+| SSH 登入失敗 | `logger` 寫一筆假的 sshd 失敗紀錄（來源用 RFC 保留的測試位址） | 5710 | 沒有降級規則碰它，當對照組 |
+| 人員執行 sudo | root 執行 `sudo true` | 5402 | 100110 只排除 Debian-snmp，要確認人員的 sudo 還在 |
+| 檔案完整性 | 在 `/etc` 新增空檔，叫 Agent 立刻掃描 | 554 | 11-8 調過 `/etc/pve`，要確認 `/etc` 其他地方仍在監控 |
+
+**① 在 node10 觸發**：
+
+```bash
+date '+開始時間：%F %T'
+logger -p auth.warning -t sshd "Failed password for invalid user wazuhtest from 192.0.2.1 port 50000 ssh2"
+sudo true
+touch /etc/wazuh-fim-test-20261020.txt
+```
+
+| 指令 | 意思 |
+| --- | --- |
+| `logger -t sshd "Failed password for invalid user …"` | 格式和真的 sshd 一樣的失敗紀錄；`192.0.2.1` 是不存在的測試位址，Fail2Ban 讀到也無害 |
+| `sudo true` | 「什麼都不做」的 sudo，只為留下紀錄 |
+| `touch /etc/…` | 給 FIM 偵測的測試檔 |
+
+**② 叫 node10 的 Agent 立刻做 FIM 掃描**（預設 12 小時才掃一次；CT 112 在 node12）：
+
+```bash
+ssh root@node12 "pct exec 112 -- sh -c '
+  ID=\$(/var/ossec/bin/agent_control -l | grep -w node10 | grep -oP \"ID: \K[0-9]+\")
+  echo \"node10 的 Agent ID：\$ID\"
+  /var/ossec/bin/agent_control -r -u \$ID
+'" < /dev/null
+```
+
+看到的結果：`node10 的 Agent ID：002`、`Restarting Syscheck/Rootcheck on agent: 002`。
+
+**③ 查告警**（直接讀 Manager 的 `alerts.json`，不用 Indexer 密碼）：
+
+```bash
+ssh root@node12 "pct exec 112 -- python3 -c '
+import json
+want = {\"5710\", \"5402\", \"554\"}
+for line in open(\"/var/ossec/logs/alerts/alerts.json\", errors=\"ignore\").readlines()[-20000:]:
+    try: a = json.loads(line)
+    except: continue
+    r = a.get(\"rule\", {})
+    if r.get(\"id\") in want and a.get(\"agent\", {}).get(\"name\") == \"node10\":
+        print(a.get(\"timestamp\",\"\")[:19], r.get(\"id\"), \"level\", r.get(\"level\"), \"|\", r.get(\"description\"), \"|\", (a.get(\"full_log\") or a.get(\"syscheck\",{}).get(\"path\",\"\"))[:80])
+'" < /dev/null | tail -10
+```
+
+**看到的結果**（開始時間 09:26:04）：
+
+| 時間 | 規則 | 等級 | 內容 | 判讀 |
+| --- | --- | --- | --- | --- |
+| 09:26:06 | 5710 | 5 | sshd: Attempt to login using a non-existent user（`wazuhtest`） | ✅ 登入失敗偵測得到 |
+| 09:26:06 | 5402 | 3 | Successful sudo to ROOT executed（`root : TTY=pts/1 …`） | ✅ 人員 sudo 沒被藏掉 |
+| 09:26:23 | 554 | 5 | File added to the system：`/etc/wazuh-fim-test-20261020.txt`，`Mode: scheduled` | ✅ FIM 仍監控 `/etc`，下指令後約 17 秒就偵測到 |
+
+**順帶看到**：
+
+- 同一段時間還有每天 08:03 左右的 5402，執行者是 `ceph`（`ceph : PWD=/ ; USER=root ; COMMAND=/us…`）。推測是 Ceph mgr 的磁碟健康檢查以 sudo 執行 `smartctl`，屬正常排程；量不大，暫不降級。
+- `full_log` 裡的時間是 `Oct 20 01:26:04`（UTC），告警的 `timestamp` 是 09:26（台灣時間）。推測是 Agent 從 journald 讀取時以 UTC 格式化，判讀時以 `timestamp` 為準。
+
+**④ 清掉測試檔**：`rm -f /etc/wazuh-fim-test-20261020.txt`（下次 FIM 掃描會出現一筆 553 File deleted，屬預期）。
+
 ## 12. 弱點偵測結果與修補（2026-10-03）
 
 ### 12-1 查詢目前的弱點
@@ -1407,7 +1474,7 @@ Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警�
 
 ## 待辦
 
-- [ ] 驗收「重要事件仍然偵測得到」：調校後，抽幾條關鍵規則（登入失敗、FIM、sudo）實際觸發一次
+- [x] 驗收「重要事件仍然偵測得到」：2026-10-20 登入失敗（5710）、人員 sudo（5402）、FIM（554）都偵測得到（11-15）
 - [ ] jt-ipam、Grafana 匯入 Wazuh CA 後開啟 TLS 驗證
 - [ ] node10 的 AppArmor DENIED（52002）告警調校
 - [ ] 定期檢查索引佔用與保留是否正常（10-5）
