@@ -3,7 +3,7 @@ layout: default
 title: "把 PVE／PBS 通知改成繁體中文"
 date: 2026-09-01
 categories: [PVE, PBS, Notification]
-last_modified_at: 2026-10-19
+last_modified_at: 2026-10-20
 ---
 {% raw %}
 
@@ -323,7 +323,7 @@ proxmox-backup-manager acl list | grep -i zhtest || echo "ACL 已清乾淨"
 | 出現 chmod 或權限錯誤 | `/etc/pve` 的權限由 pmxcfs 管理，不是一般資料夾；腳本對 PVE 已用一般複製處理，若仍出錯請回報 |
 | 裝好了還是英文 | ① 看的是不是安裝後的**新**信 ② 這種信有沒有在第 3 節的清單裡 ③ 範本是否放在正確產品的目錄 |
 | 自動判斷找不到產品 | 用 `--pve` 或 `--pbs` 明確指定 |
-| 用 `chmod 000` 拿掉整個 datastore 資料夾的權限後，PBS 網頁打不開 | 網頁會去讀每個 datastore 的備份清單，log 一直出現 `list groups error on datastore … EACCES`。改回 `chmod 750` 就恢復。製造 GC 失敗只要拿掉 `.chunks` 的權限（9-1 ②） |
+| 用 `chmod 000` 拿掉整個 datastore 資料夾的權限後，PBS 網頁打不開 | 網頁會去讀每個 datastore 的備份清單，log 一直出現 `list groups error on datastore … EACCES`。改回 `chmod 750` 就恢復。⚠️ 這行錯誤每秒約 2 萬筆，10/19 13:26～13:31 一共送了約 648 萬筆到 Graylog（[Graylog（一）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-graylog-syslog-pipeline-sop/) 8-4）。製造 GC 失敗只要拿掉 `.chunks` 的權限（9-1 ②） |
 | `proxmox-backup-client` 用 root@pam 登入，密碼正確卻出現 `permission check failed` | 推測是 root@pam 開了兩步驟驗證，命令列無法輸入驗證碼。改用只給該 datastore 權限的臨時 API token（9-1 ③） |
 | `generate-token … --output-format json` 出現 `schema does not allow additional properties` | 這個子指令不支援 `--output-format`，拿掉即可；輸出本來就是 JSON |
 | 移除時說找不到安裝紀錄 | 檢查 `/var/lib/proxmox-zh-tw-notification/`；不要以為沒訊息就是還原成功，先對照第 8 節的備份 |

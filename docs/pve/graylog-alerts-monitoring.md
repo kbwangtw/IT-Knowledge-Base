@@ -1065,6 +1065,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | 失敗信混在每天的成功信裡沒看到 | PVE、PBS 成功也會寄信 | Gmail 篩選器：主旨含「失敗」→ 加星號、標示為重要 |
 | 收到【Graylog 異常】信 | Graylog 本身出問題，信是節點直接寄的 | 依第 5 節「收到異常信時怎麼查」 |
 | 【每日健康回報】的「相關日誌」只列一台 | 三台的心跳不會同一秒送出（10/20 實測 node11 08:00:06、node12 08:00:17、node10 08:00:44），告警檢查時只看到先到的那筆就寄信，之後 60 分鐘 Grace 內不再寄 | 正常，收到信就代表告警鏈通了；要確認三台都有送，到 Search 搜 `"GRAYLOG_DAILY_HEARTBEAT"`（Today）應有 3 筆 |
+| 搬移或重開 ct:109 後收到 1 封【VPN 告警】 | 容器開機時 wg0 先起來，WGDashboard 還在啟動，wg-health 看到 `dashboard=activating`（不是 active）就觸發（10/19 17:00:35 遷移到 node11 時實測） | 計畫性搬移時屬預期；幾分鐘後 `wg0=up dashboard=active` 就好。一直停在 activating 才要查 |
 | 早上沒收到【每日健康回報】 | 告警鏈某處斷了（含 Gmail 寄信失敗） | 先看有沒有【Graylog 異常】信；再到 Search 搜 `"GRAYLOG_DAILY_HEARTBEAT"`、看 Event Definition 的 Last Matched |
 | `read -s` 存進去的不是 token | `read -s` 那行和下一段指令一起貼上，下一行被當成輸入 | `read -s` 單獨貼上、輸入完再貼下一段；token 改用 API 建立直接寫檔（第 5 節） |
 | 每秒處理量常常是 0 | 日誌是一陣一陣進來的 | 判斷「有沒有在收」改用累計數字（第 5 節） |
@@ -1075,7 +1076,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | --- | --- |
 | 每月看一次 Snapshot Replication | 補上第 6 節抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
 | 單節點故障演練 | 和 PVE HA 文件第 15 節一起做：一台失聯時，確認「節點離線」告警、另兩台第 5、6 節的監控與 postfix 寄信都正常，記錄收信時間 |
-| 「多次驗證失敗」信的文字 | 10/20 加入 PBS 後，信裡的「說明」還寫「Proxmox VE 主機」、「摘要」還是「PVE 多次驗證失敗」，改成 PVE／PBS |
+| 日誌量暴增告警 | 10/19 pbs31 5 分鐘送了約 648 萬筆，看圖才發現（上篇 8-4）。考慮新增「同一台主機 5 分鐘 > 10 萬筆」的告警，正式 datastore 出現權限問題時能當下知道 |
 | 其他新告警的測試 | 每個新告警都安排安全、可控的測試事件，記錄原始訊息、欄位、事件、收信時間與 Grace 下的重複通知情形 |
 
 ## 12. 延伸閱讀與下載
