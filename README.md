@@ -62,6 +62,7 @@
 
 - [jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理](docs/network/jt-ipam-adoption-itbh.md)
 - [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering.md)：須指定 210.69.1.1；過濾機制未向中華電信確認
+- [Zyxel Nebula VLAN 設定：防火牆介面、交換器 Trunk／Access、AP SSID 一次搞懂](docs/network/zyxel-nebula-switch-vlan.md)：整理自原廠教學，未實機驗證
 
 ### 雲端、超融合與硬體
 

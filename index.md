@@ -114,6 +114,7 @@ last_modified_at: 2026-10-19
 | --- | --- |
 | [jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理](docs/network/jt-ipam-adoption-itbh/) | 想用工具管理 IP 位址，不再用 Excel |
 | [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | ping 得到外網，網址卻打不開 |
+| [Zyxel Nebula VLAN 設定：防火牆介面、交換器 Trunk／Access、AP SSID 一次搞懂](docs/network/zyxel-nebula-switch-vlan/) | 第一次用 Nebula 切 VLAN：防火牆介面、交換器埠、員工／訪客 Wi-Fi |
 
 ### 4-6 雲端、超融合與硬體
 
