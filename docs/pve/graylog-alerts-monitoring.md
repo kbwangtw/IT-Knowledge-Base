@@ -16,7 +16,7 @@ last_modified_at: 2026-10-20
 | 適合誰看 | 已經把日誌送進 Graylog、想知道告警怎麼設、怎麼確認它真的會寄信的人 |
 | 上篇 | [把 PVE、PBS 與 NAS 的日誌集中到 Graylog（一）：收集、分類與寄信設定](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-graylog-syslog-pipeline-sop/)（收集、Pipeline、jt-ipam、Gmail 寄信、第一個告警、日常維運） |
 | 第三篇 | [Graylog 告警與監控（三）：中文告警信與摘要](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)（中文範本、主旨、摘要） |
-| 環境 | Graylog 7.1.9（CT 105）；PVE 三台節點 node10～12；PBS31；Synology NAS tokyo16、melayu17 |
+| 環境 | Graylog 7.1.11（CT 105；10/20 由 7.1.9 升級）；PVE 三台節點 node10～12；PBS31；Synology NAS tokyo16、melayu17 |
 | 目前狀態 | ✅ 14 個告警（13 個 Email 通知）運作中，告警信 10/19 改為中文（第三篇） ✅ Graylog 本身、NAS 複寫與連線、每晚備份都有外部檢查 ⏳ 其他告警的實際事件測試、單節點故障演練 |
 | 紀錄期間 | 2026-10-16 盤點起，最後更新 2026-10-19 |
 

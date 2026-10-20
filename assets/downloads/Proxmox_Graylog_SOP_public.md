@@ -6,7 +6,7 @@
 | --- | --- |
 | 適合誰看 | 第一次接觸「集中式日誌」與 Graylog 的人；或要維護這套環境的人 |
 | 收集對象 | PVE 三台節點（node10～12）、PBS31、兩台 Synology NAS（tokyo16、melayu17） |
-| 環境 | Graylog 7.1.9，裝在 PVE 叢集上的 LXC 容器（CT 105，Debian 12） |
+| 環境 | Graylog 7.1.11（10/20 由 7.1.9 升級，11-2），裝在 PVE 叢集上的 LXC 容器（CT 105，Debian 12） |
 | 目前狀態 | 收集、分類、主機名稱查表、Gmail 寄信都已運作並驗證；14 個告警與各項監控見下篇；看板 10/20 盤點修正並新增「趨勢與明細」分頁（第 8 節） |
 | 下篇 | [Graylog 告警與監控（二）：告警清單與監控腳本](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)：全部告警、PVE 監控腳本、監控 Graylog 本身、NAS 複寫與備份監控、中文告警信、postfix |
 | 第三篇 | [Graylog 告警與監控（三）：中文告警信與摘要](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)：13 個通知的中文範本、主旨、每個告警的摘要寫法 |
@@ -887,6 +887,69 @@ curl -s http://<Graylog 位址>:9000/api/system/lbstatus  # ALIVE
 ```
 
 **結果**：OpenSearch 2.19.6、`green`、分片 100%；Graylog `ALIVE`，啟動後沒有新的 ERROR；`apt-mark showhold` 仍是 graylog-server、opensearch；沒有待更新套件。確認正常後，10/04 刪除兩個快照（`pct delsnapshot 105 <名稱>`）。
+
+**2026-10-20：Graylog 7.1.9 → 7.1.11，同時更新 MongoDB 與 Debian 安全性套件**
+
+做什麼：同一條 7.1 線的修補版（10/19 發佈）；同一次停機一起更新 MongoDB 8.0.32 → 8.0.34 與 pcre2、perl、python3.11 的安全性更新，只建一次快照。
+
+升級前檢查（在 CT 105 所在節點；10/20 是 node11）：
+
+```bash
+pct exec 105 -- systemctl is-active graylog-server mongod opensearch
+pct exec 105 -- curl -s 'http://127.0.0.1:9200/_cluster/health?pretty' | grep -E '"status"|number_of_nodes'
+pct exec 105 -- apt-mark showhold
+pct exec 105 -- apt-get update -qq
+pct exec 105 -- apt-cache policy graylog-server | head -4
+pct exec 105 -- apt-get -s install graylog-server | grep -E '^(Inst|Conf|Remv)'
+pct exec 105 -- apt list --upgradable 2>/dev/null
+```
+
+看到的結果：三個 active、`green`、hold 是 graylog-server 與 opensearch；Installed `7.1.9-1`、Candidate `7.1.11-1`；模擬只有 `Inst`／`Conf graylog-server` 兩行（`-s` 只模擬，不安裝）。
+
+升級（先 `pct snapshot 105 pre-graylog-7111 --description "Before graylog 7.1.11, mongodb 8.0.34, debian security"`，再 `pct enter 105`）：
+
+```bash
+systemctl stop graylog-server
+DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade
+systemctl restart mongod
+systemctl is-active mongod
+mongod --version | head -1
+apt-mark unhold graylog-server
+DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install graylog-server
+apt-mark hold graylog-server
+apt-mark showhold
+systemctl start graylog-server
+GL=$(hostname -I | awk '{print $1}')
+for i in $(seq 1 30); do s=$(curl -s http://$GL:9000/api/system/lbstatus); echo "$i $s"; [ "$s" = ALIVE ] && break; sleep 10; done
+journalctl -u graylog-server --since "10 min ago" --no-pager | grep -c ERROR
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `apt-get … upgrade` | 只更新沒被 hold 的套件（17 個：MongoDB 與安全性更新）；graylog-server 顯示 kept back |
+| `restart mongod` | 套用新版 MongoDB（graylog-server 已先停） |
+| `unhold` → `install graylog-server` → `hold` | 暫時解鎖、只升這一個、立刻鎖回 |
+| `for … lbstatus` | 每 10 秒問一次，最多 5 分鐘，等到 `ALIVE` |
+
+看到的結果：mongod `v8.0.34`；`server.conf` 出現「Keeping old config file as default」（`--force-confold` 保留現有設定，新版預設檔另存為 `server.conf.dpkg-dist`）；啟動後第 2 次檢查（約 10 秒）就 `ALIVE`，ERROR 0 行；之後 `apt-get upgrade` 沒有待更新套件。
+
+升級後確認：
+
+```bash
+dpkg-query -W graylog-server mongodb-org-server opensearch
+curl -s http://$GL:9000/api/ ; echo
+```
+
+| 項目 | 結果 |
+| --- | --- |
+| 版本 | graylog-server `7.1.11-1`、mongodb-org-server `8.0.34`、opensearch `2.19.6`（未變） |
+| API 回報 | `"version":"7.1.11+080dbb0"` |
+| 服務 | 三個 active；hold 仍是 graylog-server、opensearch |
+| 停機 | 停 graylog-server 到 `ALIVE` 約 1～2 分鐘 |
+
+- apt 執行時出現 `perl: warning: Setting locale failed`：容器沒有產生 `en_US.UTF-8` 語系，不影響升級與 Graylog。
+- `dpkg -l graylog-server | grep ^ii` 這次沒有輸出，改用 `dpkg-query -W` 確認版本。
+- 快照 `pre-graylog-7111` 觀察一天正常後刪除（⏳）。
 
 ### 11-3 要不要升級到 Debian 13？（10/04 查證、10/06 測試）
 
