@@ -1046,6 +1046,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | 收到【備份檢查異常】信 | 有 VM／CT 太久沒備份、驗證失敗或沒被備份 | 依第 7 節「收到信時怎麼查」 |
 | 失敗信混在每天的成功信裡沒看到 | PVE、PBS 成功也會寄信 | Gmail 篩選器：主旨含「失敗」→ 加星號、標示為重要 |
 | 收到【Graylog 異常】信 | Graylog 本身出問題，信是節點直接寄的 | 依第 5 節「收到異常信時怎麼查」 |
+| 【每日健康回報】的「相關日誌」只列一台 | 三台的心跳不會同一秒送出（10/20 實測 node11 08:00:06、node12 08:00:17、node10 08:00:44），告警檢查時只看到先到的那筆就寄信，之後 60 分鐘 Grace 內不再寄 | 正常，收到信就代表告警鏈通了；要確認三台都有送，到 Search 搜 `"GRAYLOG_DAILY_HEARTBEAT"`（Today）應有 3 筆 |
 | 早上沒收到【每日健康回報】 | 告警鏈某處斷了（含 Gmail 寄信失敗） | 先看有沒有【Graylog 異常】信；再到 Search 搜 `"GRAYLOG_DAILY_HEARTBEAT"`、看 Event Definition 的 Last Matched |
 | `read -s` 存進去的不是 token | `read -s` 那行和下一段指令一起貼上，下一行被當成輸入 | `read -s` 單獨貼上、輸入完再貼下一段；token 改用 API 建立直接寫檔（第 5 節） |
 | 每秒處理量常常是 0 | 日誌是一陣一陣進來的 | 判斷「有沒有在收」改用累計數字（第 5 節） |
