@@ -16,7 +16,7 @@ last_modified_at: 2026-10-20
 | 適合誰看 | 雲端主機磁碟突然滿了、不知道從哪裡查起的人 |
 | 環境 | GCE VM（15G 系統碟）、Debian 11、寶塔面板（Apache + PHP 7.4 + MariaDB）、Google Cloud Ops Agent 2.64.0；網站在 Cloudflare 後面 |
 | 日期 | 2026-10-05 處理；10/14～10/15 回頭確認並補強 |
-| 結論 | ✅ 磁碟 100% → 44%；✅ log 輪替與上限；✅ Ops Agent、憑證、防火牆、資料庫備份都已處理；✅ 爬蟲陷阱拆除、KindEditor 封鎖；⏳ 網站只能跑 PHP 7.4，外圍防護持續補強 |
+| 結論 | ✅ 磁碟 100% → 44%；✅ log 輪替與上限（10/20 改每小時檢查）；✅ 磁碟 80% 告警；✅ Ops Agent、憑證、防火牆、資料庫備份都已處理；✅ 爬蟲陷阱拆除、KindEditor 封鎖；⏳ 網站只能跑 PHP 7.4，外圍防護持續補強 |
 
 > 文中的專案 ID、IP、網域與帳號都已替換成範例值（例如 `example.com`）。
 
@@ -31,6 +31,7 @@ last_modified_at: 2026-10-20
 | **Access scope** | VM 層級的權限上限；和 IAM 是兩道門，都要開 |
 | **logrotate** | 定期把 log 切檔、壓縮、刪掉舊的，避免無限長大 |
 | **journald** | systemd 的系統日誌；可以設定最多用多少空間 |
+| **稀疏檔（sparse file）** | 檔案中間有「空洞」，`ls` 顯示很大，實際佔用的磁碟空間（`du`）很小 |
 | **Cloudflare Origin Certificate** | Cloudflare 發給主機用的憑證，只有 Cloudflare 信任，可用 15 年 |
 | **爬蟲陷阱（crawler trap）** | 網站不斷產生新網址，讓爬蟲永遠抓不完 |
 | **crash-consistent 快照** | 像直接拔電源那一瞬間的狀態；資料庫不一定一致 |
@@ -43,6 +44,8 @@ last_modified_at: 2026-10-20
 | 網站 error log | 4.5G，同一行 PHP 警告 | 不再寫入 deprecated 訊息 | ✅ 2 分鐘內維持 0 bytes |
 | 網站 log 輪替 | 無 | logrotate：每天、保留 14 份、200M 提早輪替 | ✅ 10/15 確認每天 00:00 正常輪替 |
 | systemd journal | 873M | 上限 200M、保留 1 個月 | ✅ 96M |
+| logrotate 頻率 | 每天一次 | 每小時檢查（`maxsize` 每小時生效） | ✅ 10/20 下一次為整點 |
+| 磁碟告警 | 無 | Cloud Monitoring：任一分割區超過 80% 持續 5 分鐘寄信 | ✅ 10/20 建立，目前 44% |
 | Ops Agent | 403，log 送不出去 | 補上 IAM 角色 | ✅ 10/14 Logs Explorer 搜得到測試訊息 |
 | 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | ✅ Cloudflare 為「完整（嚴格）」 |
 | 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | ✅ 14 份都是 READY |
@@ -311,6 +314,90 @@ journalctl --disk-usage
 ```
 
 用 drop-in 檔（`journald.conf.d/` 底下）設定，不改主設定檔，升級時不會被覆蓋。
+
+### 6-3 logrotate 改成每小時檢查（10/20）
+
+`maxsize 200M` 只在 logrotate 執行時才檢查，而 `logrotate.timer` 預設每天 00:00 UTC 才跑一次；如果哪天又有新的錯誤狂寫，一天內可能長到好幾 GB。改成每小時跑，`daily` 的檔案仍是一天輪替一次，只是每小時多檢查一次大小：
+
+```bash
+sudo mkdir -p /etc/systemd/system/logrotate.timer.d
+sudo tee /etc/systemd/system/logrotate.timer.d/hourly.conf > /dev/null <<'EOF'
+[Timer]
+OnCalendar=
+OnCalendar=hourly
+AccuracySec=1m
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart logrotate.timer
+systemctl list-timers logrotate.timer --all | head -3
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `logrotate.timer.d/hourly.conf` | drop-in 檔，不改原檔，升級不會被覆蓋 |
+| `OnCalendar=`（空白） | 先清掉原本的每日設定，否則會疊加 |
+| `OnCalendar=hourly` | 每小時整點執行 |
+
+**看到的結果**：`NEXT` 從隔天 00:00 變成下一個整點（01:00 UTC）。
+
+### 6-4 磁碟使用率告警（10/20）
+
+上面都是「不讓它滿」，這一步是「快滿時一定有人知道」：這台主機不在內網 Graylog 的監控範圍，沒有告警的話要等網站掛掉才會發現。Ops Agent 已經在送監控數據（4-4），直接用 Cloud Monitoring 建立告警。在 Cloud Shell 執行（信箱用 `read` 輸入，單獨貼上）：
+
+```bash
+read -p "收告警的 Email：" MAILTO
+```
+
+```bash
+CH=$(gcloud beta monitoring channels create \
+  --display-name="告警信箱" --type=email \
+  --channel-labels=email_address="$MAILTO" \
+  --format="value(name)")
+echo "通知管道：$CH"
+
+cat > /tmp/disk-alert.json <<EOF
+{
+  "displayName": "GCE 磁碟超過 80%",
+  "combiner": "OR",
+  "conditions": [{
+    "displayName": "磁碟使用率 > 80%（持續 5 分鐘）",
+    "conditionThreshold": {
+      "filter": "resource.type = \"gce_instance\" AND metric.type = \"agent.googleapis.com/disk/percent_used\" AND metric.labels.state = \"used\"",
+      "comparison": "COMPARISON_GT",
+      "thresholdValue": 80,
+      "duration": "300s",
+      "aggregations": [{"alignmentPeriod": "300s", "perSeriesAligner": "ALIGN_MEAN"}],
+      "trigger": {"count": 1}
+    }
+  }],
+  "notificationChannels": ["$CH"]
+}
+EOF
+gcloud alpha monitoring policies create --policy-from-file=/tmp/disk-alert.json --format="value(name,displayName)"
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `channels create --type=email` | 建立 Email 通知管道，ID 存進 `CH` |
+| `agent.googleapis.com/disk/percent_used`、`state = "used"` | Ops Agent 回報的磁碟已使用百分比 |
+| `> 80`、`duration 300s` | 超過 80% 持續 5 分鐘才告警，避免瞬間波動 |
+| 沒有限定裝置 | Ops Agent 的裝置名稱格式（`sda1` 或 `/dev/sda1`）未確認，寫錯就永遠不會觸發；不限定時任何分割區超過 80% 都會通知，更保險 |
+| `<<EOF`（沒加引號） | 讓 `$CH` 換成實際的通知管道 ID |
+
+**看到的結果**：`projects/<專案>/alertPolicies/<ID>  GCE 磁碟超過 80%`。目前 44%，不會觸發；也可以在 Console 搜尋 `Alerting` 看到這個 policy。Console 操作的路徑是 Alerting → **+ CREATE POLICY** → Select a metric（關掉 **Active** 開關才找得到）→ VM Instance › Disk › Disk utilization → filter `state = used` → Above threshold 80 → 通知管道選 Email。
+
+> Cloud Monitoring 告警可能產生少量費用，以 Console 顯示為準。
+
+### 6-5 10/20 健康檢查
+
+```bash
+df -h /
+sudo find / -xdev -type f -size +100M -exec ls -lh {} + 2>/dev/null | awk '{print $5, $9}' | sort -h
+sudo du -sh /www/wwwlogs /www/server/panel/logs /www/server/data /var/log 2>/dev/null
+journalctl --disk-usage
+```
+
+**看到的結果**：使用率 44%（和 10/15 相同）；網站 log 99M、寶塔面板 log 5.9M、journal 161M；MySQL 的 `ib_logfile0`（128M）是固定大小的 InnoDB redo log，正常。另有一個 Ops Agent 在 10/5 失敗期間留下的舊檔 `/var/log/google-cloud-ops-agent/subagents/logging-module-2026-10-05T…log`，`ls` 顯示 390M，但 `du` 只佔 216K（稀疏檔，中間是空洞），已刪除；`df` 不變。
 
 ## 7. 順便查出：主機憑證已過期，續簽卻每天「Successful」
 
@@ -729,7 +816,6 @@ gcloud compute snapshots create <DISK>-before-bt-update-$(date +%Y%m%d) \
 | 優先 | 項目 |
 | --- | --- |
 | 中 | 檢查 `$_GET['pid']`、`$_GET['news']`、`$_GET['n']` 是否直接放進 SQL（SQL injection） |
-| 中 | GCP Monitoring 設定磁碟使用率超過 80% 寄信 |
 | 中 | 修正 `DB` 的 constructor（改成 `__construct()`，保留 `DB()` 呼叫它）；改完就不必再關掉 `E_DEPRECATED` |
 | 中 | 寶塔資料庫備份設定「失敗時通知」（要先設定通知管道） |
 | 中 | 外圍防護：Cloudflare WAF managed rules；`php.ini` 的 `disable_functions` 停用 `exec`、`system` 等（先確認網站沒用到）；寶塔開啟 `open_basedir` |
