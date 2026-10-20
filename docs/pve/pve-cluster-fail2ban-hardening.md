@@ -366,7 +366,7 @@ for n in node10 node11 node12; do ssh root@$n 'journalctl -u ssh -u sshd --since
 
 - [ ] 約 10/29 刪除已停用的 `hermesagent` token
 - [ ] 各裝置改用金鑰後，關閉 SSH 密碼登入
-- [ ] （可選）Hermes 改用只能執行唯讀指令的帳號
+- [x] ~~（可選）Hermes 改用只能執行唯讀指令的帳號~~：2026-10-20 決定不做（目前沒有需求；SSH 金鑰已加 `from=` 來源限制）
 
 ## 14. 延伸閱讀
 

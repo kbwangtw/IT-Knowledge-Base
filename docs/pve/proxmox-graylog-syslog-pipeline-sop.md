@@ -836,7 +836,6 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | PBS 的認證事件 | 確認 PBS 的登入與 sudo 是否也要分類 |
 | DSM 日誌過濾器 | 確認兩台 NAS 送出哪些種類的日誌 |
 | 觀察磁碟用量 | 一週後決定是否也丟棄 PBS 的寫入紀錄 |
-| TP-Link 整合 | 尚未列入 |
 
 告警相關的待辦（Summary Template、新告警測試、單節點故障演練、每月看 Snapshot Replication）在下篇第 11 節。
 
