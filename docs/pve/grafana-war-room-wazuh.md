@@ -253,7 +253,7 @@ unset PW
 | --- | --- |
 | URL | `https://192.0.2.32:9201` |
 | Basic auth | **開啟**，User `grafana` |
-| Skip TLS Verify | 開啟（Indexer 是自簽憑證，而且憑證寫的是 127.0.0.1；連線仍有加密） |
+| Skip TLS Verify | 當時開啟（憑證只寫 127.0.0.1）；**10/20 已改為驗證憑證**，URL 也改成 `https://127.0.0.1:9201`，見 7-1 |
 | PPL enabled | 關閉（唯讀角色沒開放 PPL） |
 | Logs → Level field name | **留空** |
 | Version | 按 Get Version and Save，顯示 `OpenSearch (compatibility mode)` |
@@ -268,6 +268,93 @@ unset PW
 - Wazuh Alerts 的 Logs → Message field name 可以填 `full_log`。
 
 > ⚠️ **Level field name 不要填 `rule.level`**：Grafana 會把數字當成 syslog 嚴重等級翻譯（3→ERROR、7→DEBUG）。但 Wazuh 是數字越大越嚴重，syslog 剛好相反，低等級的 AppArmor 告警會被標成 ERROR，造成誤判。
+
+### 7-1 開啟 TLS 驗證（2026-10-20）
+
+**為什麼原本不能驗證**：Indexer 的憑證是 Wazuh root CA 簽發的，但 SAN（憑證接受的名稱）只有 `IP:127.0.0.1`。Grafana 用 `https://192.0.2.32:9201` 連線，名稱對不上，所以當初只能 Skip TLS Verify。
+
+| 驗證要過的兩關 | 這次怎麼過 |
+| --- | --- |
+| ① 信任：是不是信任的 CA 簽的 | 在資料來源貼上 Wazuh 的 `root-ca.pem` |
+| ② 名稱：SAN 和連線位址一樣嗎 | 在 Grafana 容器加一個本機轉送，讓 Grafana 改連 `https://127.0.0.1:9201`，名稱就對上了 |
+
+> 這版 Grafana 的資料來源畫面，**ServerName** 欄位只在打開 **TLS Client Auth** 後才出現，而且會要求 Client Cert／Key，所以不用它，改用本機轉送。
+
+```text
+Grafana ──https://127.0.0.1:9201──▶ CT 114 的 socat ──▶ 192.0.2.32:9201（CT 112 的 socat）──▶ Indexer 127.0.0.1:9200
+          憑證名稱 127.0.0.1 ✓          兩段 socat 都只轉送 TCP，TLS 仍是 Grafana 與 Indexer 端到端加密
+```
+
+**① 複製 CA 並用 curl 預演**（node10 執行；`root-ca.pem` 是公開憑證，不是私鑰）：
+
+```bash
+ssh root@node12 "pct exec 112 -- cat /etc/wazuh-indexer/certs/root-ca.pem" < /dev/null \
+  | ssh root@node11 "pct exec 114 -- tee /root/wazuh-root-ca.pem > /dev/null"
+ssh root@node11 "pct exec 114 -- curl -s -o /dev/null -w 'http=%{http_code} verify=%{ssl_verify_result}\n' --max-time 5 \
+  --cacert /root/wazuh-root-ca.pem --connect-to 127.0.0.1:9201:192.0.2.32:9201 https://127.0.0.1:9201/" < /dev/null
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `--cacert` | 只信任 Wazuh root CA，真的做驗證（不加 `-k`） |
+| `--connect-to 127.0.0.1:9201:192.0.2.32:9201` | 網址寫 127.0.0.1（拿去比對憑證），實際連到 Wazuh |
+
+看到的結果：`http=401 verify=0`（驗證通過；401 是沒帶帳密）。
+
+**② 在 CT 114 建立本機轉送**：
+
+```bash
+ssh root@node11 "pct exec 114 -- sh -c '
+  command -v socat >/dev/null || (apt-get update -qq && apt-get install -y -qq socat)
+  cat > /etc/systemd/system/wazuh-indexer-local.service <<EOF
+[Unit]
+Description=Local forward 127.0.0.1:9201 to Wazuh Indexer proxy (so Grafana can verify the cert name 127.0.0.1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=nobody
+ExecStart=/usr/bin/socat TCP4-LISTEN:9201,bind=127.0.0.1,reuseaddr,fork TCP4:192.0.2.32:9201
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now wazuh-indexer-local.service
+  curl -s -o /dev/null -w \"http=%{http_code} verify=%{ssl_verify_result}\n\" --max-time 5 --cacert /root/wazuh-root-ca.pem https://127.0.0.1:9201/
+'" < /dev/null
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `bind=127.0.0.1` | 只有容器自己連得到 |
+| `User=nobody`、`Restart=always` | 最低權限；停了 5 秒後自動重啟 |
+
+看到的結果：`http=401 verify=0`。Wazuh 那邊的 nftables 不用改（來源仍是 Grafana 的 IP）。
+
+**③ 三個資料來源都改**（Connections → Data sources）：
+
+| 欄位 | 改成 |
+| --- | --- |
+| URL | `https://127.0.0.1:9201` |
+| Skip TLS Verify | **關閉** |
+| With CA Cert | **開啟**，TLS/SSL Auth Details 的 CA Cert 貼上 `root-ca.pem` 全文（含 BEGIN／END 兩行） |
+
+**④ 確認設定真的生效**（唯讀打開 Grafana 設定資料庫）：
+
+```bash
+ssh root@node11 "pct exec 114 -- python3 -c '
+import sqlite3, json
+db = sqlite3.connect(\"file:/var/lib/grafana/grafana.db?mode=ro\", uri=True)
+for name, url, jd in db.execute(\"select name, url, json_data from data_source where type like \x27%opensearch%\x27 order by name\"):
+    j = json.loads(jd or \"{}\")
+    print(\"%-22s url=%-24s skipVerify=%s  withCACert=%s\" % (name, url, j.get(\"tlsSkipVerify\", False), j.get(\"tlsAuthWithCACert\", False)))
+'" < /dev/null
+```
+
+看到的結果：三個資料來源都是 `url=https://127.0.0.1:9201  skipVerify=False  withCACert=True`；Grafana log 的 `Plugin Request Completed` 為 `status=ok`，戰情中心有資料。
 
 ## 8. 步驟六：第一版戰情中心
 
@@ -327,6 +414,8 @@ unset PW
 | 新面板 `invalid query, missing metrics and aggregations` | 新增空白面板不會自動帶入 Count 與 Date Histogram；改從正常面板 Duplicate |
 | 改了 Lucene query 數字沒變 | 輸入後要點欄位外讓查詢生效，再 Refresh |
 | Interval 改了沒效果 | `10m` 誤填到 Min Doc Count（只能填數字）；Interval 在展開後的下拉選單 |
+| 開啟驗證後 Save & test 出現 `Unable to fetch fields from the datasource: unknown error` | 看 `journalctl -u grafana-server` 的 `Plugin Request Completed`；這次是 URL 還是舊 IP（憑證名稱對不上），改成 `https://127.0.0.1:9201` 後 `status=ok` |
+| 改完 CA，查詢成功，但其實沒在驗證 | Skip TLS Verify 沒關時，CA 會被忽略；用 7-1 ④ 確認 `skipVerify=False` |
 | `pct enter` 後連同 `exit` 和節點指令一起貼上，指令沒執行 | 容器 shell 關閉時後續輸入會被丟掉；先 `exit`、確認提示字元再貼 |
 
 ## 11. 想撤掉 Grafana 的存取時（還原）
@@ -342,13 +431,15 @@ curl "${A[@]}" https://127.0.0.1:9200/_plugins/_security/api/internalusers/grafa
 curl "${A[@]}" https://127.0.0.1:9200/_plugins/_security/api/roles/grafana_wazuh_read
 ```
 
+Grafana 容器內的本機轉送一併移除：`systemctl disable --now wazuh-indexer-local.service && rm /etc/systemd/system/wazuh-indexer-local.service`。
+
 nftables 備份要選**建立 `wazuh_indexer` 之前**的那一份；如果之後又改過 nftables，改成手動刪除 `table inet wazuh_indexer` 區塊。
 
 ## 12. 日後維運注意
 
 - **Wazuh 升級後**檢查：`indexer-proxy` 是 active、9201 仍只允許 Grafana、`grafana` 帳號能登入，以及原有的 `api.yaml` host 與 55000 規則（見 [Wazuh 維運篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-operations/) §13）。
 - 如果用 `wazuh-passwords-tool` 重設 Indexer 密碼，工具可能用設定檔覆蓋目前的帳號清單，`grafana` 帳號可能消失（未實測）；重新執行 `/root/grafana-indexer-user.sh` 補回，並更新 Grafana 三個資料來源的密碼。
-- Skip TLS Verify：只有 Grafana 能連 9201、帳號唯讀，風險有限；待改善為匯入 Wazuh CA（同 jt-ipam）。
+- TLS 驗證：10/20 起驗證 Indexer 憑證（7-1）。CT 114 多了 `wazuh-indexer-local.service`，要維持 active；Wazuh 重新簽發 Indexer 憑證或更換 root CA 時，要更新三個資料來源的 CA。
 - 資料來源顯示 compatibility mode：Wazuh Indexer 對外回報相容版本，目前查詢正常；日後出現查詢錯誤再回頭檢查。
 
 ## 13. 待辦
@@ -360,6 +451,7 @@ nftables 備份要選**建立 `wazuh_indexer` 之前**的那一份；如果之�
 | 階段 3：Prometheus、Ceph prometheus 模組、PVE exporter | ⏳ 未做 |
 | 階段 4：Graylog／PBS（Graylog 的 OpenSearch 可能沒有帳號保護，要另外評估） | ⏳ 未做 |
 | 階段 5：專用電腦 kiosk（`?kiosk`、開機自動開啟、Viewer 帳號、不休眠） | ⏳ 未做 |
+| 資料來源改為驗證憑證（不再 Skip TLS Verify） | ✅ 2026-10-20（7-1） |
 | node10 AppArmor DENIED 告警調校 | ✅ 2026-10-20：來源就是 Grafana 容器（CT 114，Ubuntu 24.04）的 rsyslogd 規則，停用後歸零，容器 syslog 也恢復寫入（Wazuh 維運篇 11-2） |
 
 ## 14. 延伸閱讀

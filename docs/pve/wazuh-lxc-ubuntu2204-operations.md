@@ -1431,7 +1431,7 @@ cp -a $(ls -t /etc/nftables.conf.bak-* | head -1) /etc/nftables.conf && nft -f /
 
 ### 13-3 jt-ipam 設定與結果
 
-jt-ipam → Wazuh → 新增：API URL `https://<Wazuh IP>:55000`、使用者 `jtipam`、`verify_tls` 關閉（Wazuh API 為自簽憑證；連線仍加密，只是不驗證對方身分，帳號僅能讀取 Agent，風險有限；之後可匯入 Wazuh CA 再開啟）。
+jt-ipam → Wazuh → 新增：API URL `https://<Wazuh IP>:55000`、使用者 `jtipam`、`verify_tls` 關閉（Wazuh API 為自簽憑證；連線仍加密，只是不驗證對方身分，帳號僅能讀取 Agent，風險有限；2026-10-20 檢查：API 憑證是安裝時自動產生的自簽憑證，SAN 只有 `DNS:localhost`，要驗證就得換一張含 IP 的憑證並重啟 Manager；評估後**決定維持不驗證**：連線已加密、只在內網、nftables 只允許 jt-ipam、帳號只能讀取 Agent）。
 
 新增設定後若剛好錯過排程同步（每 5 分鐘），可手動執行 `pct exec 103 -- systemctl start jt-ipam-sync.service` 或按網頁上的同步。
 
@@ -1447,7 +1447,7 @@ jt-ipam → Wazuh → 新增：API URL `https://<Wazuh IP>:55000`、使用者 `j
 
 之後此頁面若出現新的 IP，才是真正需要評估是否安裝 Agent 的主機。
 
-待改善：匯入 Wazuh CA 後開啟 TLS 驗證；Wazuh 升級後確認 `api.yaml` 的 `host` 設定與 nftables 規則仍在。
+待改善：Wazuh 升級後確認 `api.yaml` 的 `host` 設定與 nftables 規則仍在。
 
 ## 14. WireGuard VPN 健康監控（2026-10-13）
 
@@ -1499,7 +1499,7 @@ Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警�
 | nftables `table inet wazuh_indexer` | 9201 只允許 Grafana 主機，其他來源丟棄 |
 | Indexer 角色 `grafana_wazuh_read`、帳號 `grafana` | 只能讀 `wazuh-alerts-*`、`wazuh-monitoring-*`、`wazuh-states-vulnerabilities-*`；以管理員憑證建立（`/root/grafana-indexer-user.sh`） |
 
-升級 Wazuh 後，除了第 13 節的 `api.yaml` host 與 55000 規則，也確認 `indexer-proxy` 為 active、9201 規則仍在、`grafana` 帳號能登入。完整建置、驗證與還原見 [用 Grafana 建立戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)。
+升級 Wazuh 後，除了第 13 節的 `api.yaml` host 與 55000 規則，也確認 `indexer-proxy` 為 active、9201 規則仍在、`grafana` 帳號能登入。10/20 起 Grafana 驗證 Indexer 憑證（SAN 只有 127.0.0.1，Grafana 透過 CT 114 的本機轉送連 `https://127.0.0.1:9201`）；重新簽發 Indexer 憑證或更換 root CA 時，要更新 Grafana 資料來源的 CA。完整建置、驗證與還原見 [用 Grafana 建立戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)。
 
 ## 常見問題
 
@@ -1516,7 +1516,7 @@ Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警�
 ## 待辦
 
 - [x] 驗收「重要事件仍然偵測得到」：2026-10-20 登入失敗（5710）、人員 sudo（5402）、FIM（554）都偵測得到（11-15）
-- [ ] jt-ipam、Grafana 匯入 Wazuh CA 後開啟 TLS 驗證
+- [x] TLS 驗證（2026-10-20）：Grafana 改為驗證 Indexer 憑證（[戰情中心（一）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/) 7-1）；jt-ipam 評估後維持不驗證（13-3）
 - [x] node10 的 AppArmor DENIED（52002）告警調校：2026-10-20 來源是 Grafana（CT 114），停用容器內 rsyslogd 規則後歸零（11-2）
 - [ ] 定期檢查索引佔用與保留是否正常（10-5）
 - [ ] 2027 年初規劃把容器升級到 Ubuntu 24.04（升級前先快照與 PBS 備份）
