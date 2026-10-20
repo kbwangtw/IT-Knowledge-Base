@@ -49,7 +49,7 @@ last_modified_at: 2026-10-20
 | Ops Agent | 403，log 送不出去 | 補上 IAM 角色 | ✅ 10/14 Logs Explorer 搜得到測試訊息 |
 | 主機 SSL 憑證 | Let's Encrypt，9/8 已過期 | Cloudflare Origin Certificate，到 2041 年 | ✅ Cloudflare 為「完整（嚴格）」 |
 | 磁碟快照 | 以為沒有 | 早就有 `default-schedule-1`：每天一份、保留 14 天 | ✅ 14 份都是 READY |
-| 資料庫備份 | 從來沒有 | 寶塔計畫任務：每天 14:00 UTC、保留 7 份 | ✅ 備份檔完整（9 個 table、Dump completed） |
+| 資料庫備份 | 從來沒有 | 寶塔計畫任務：每天 14:00 UTC、保留 7 份 | ✅ 備份檔完整（9 個 table、Dump completed）；10/20 確認已累積 7 份 |
 | access log 暴增 | 每分鐘約 3,500 筆，爬蟲陷阱 | 連結拿掉 `time()`；Cloudflare 只質詢舊格式網址 | ✅ 每分鐘 7 筆，真人不被質詢 |
 | KindEditor 上傳 API | 未登入可瀏覽、上傳 | Cloudflare 封鎖 `/cms/plugin/kindeditor/php/` | ✅ 回 403；未發現入侵跡象 |
 | GCP 防火牆 | RDP、SSH、面板、80/443 全對全世界開放 | RDP 刪除；SSH、面板限定來源；80/443 只允許 Cloudflare | ✅ 直連逾時、經 Cloudflare 回 200；面板與 SSH 可登入 |
@@ -595,6 +595,14 @@ sudo sh -c 'ls /www/server/data/<DB>/*.frm | wc -l'       # 實際資料表數�
 | 結尾 | `-- Dump completed` |
 
 `/www/server/data` 有 219 MB，但網站資料庫本身只有 724 KB，其餘是 MariaDB 自己的檔案，所以 18 KB 的備份是完整的。
+
+**10/20 確認每日備份有在累積**：
+
+```bash
+sudo sh -c 'ls -lh --time-style=long-iso /www/backup/database/mysql/crontab_backup/*/'
+```
+
+10/14 手動執行 1 份，加上 10/14～10/19 每天 14:00 UTC 各 1 份，共 7 份，每份都是 18K。剛好達到「保留 7 份」，之後每天新增一份、刪除最舊一份。
 
 ## 10. access log 每天翻倍：網站自己做出的爬蟲陷阱（10/14）
 
