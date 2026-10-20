@@ -209,7 +209,7 @@ unset GLPW
 python3 /root/gl-tpl/notif.py restore /root/gl-notifications-backup-<日期時間>.json ALL
 ```
 
-> 備份檔含收件人信箱，只有 root 能讀；觀察一週沒問題再刪。
+> 備份檔含收件人信箱，只有 root 能讀。這次的備份已於 2026-10-20 刪除；之後要再修改，先重新 `backup` 一份。
 
 ## 7. 第五步：統一主旨
 
@@ -421,7 +421,7 @@ EOF2
 | Synology DSM 管理員登入 | 2026-10-19 16:39 | ✅ 摘要是 `DSM 管理員登入：tokyo16 Connection: User [<NAS 管理員帳號>] from [<IP>] signed in to [DSM] successfully via [OTP].`；「相關日誌」的主機欄同時顯示 `tokyo16` 和 jt-ipam 查到的來源主機名稱（`${message.fields.src_host}`，第 4 節），一眼看出是從哪台登入 |
 | PVE Node 狀態離線、PVE 服務異常、WireGuard VPN 異常 | ⏳ 尚未觸發 | |
 
-**還原**：備份在 `/root/gl-eventdefs-backup-<時間>.json`（每次執行各一份），把其中的設定逐一 `PUT` 回 `/api/events/definitions/<id>?schedule=true` 即可。
+**還原**：備份在 `/root/gl-eventdefs-backup-<時間>.json`（每次執行各一份；這次的已於 2026-10-20 刪除），把其中的設定逐一 `PUT` 回 `/api/events/definitions/<id>?schedule=true` 即可。
 
 ## 10. 第八步：Ceph、Corosync、儲存 ×3 改成「每筆」
 
@@ -527,7 +527,7 @@ logger -t pve-storage-monitor "STORAGE_UNAVAILABLE host=node10 storage=TEST_ONLY
 | 【PVE Storage 嚴重】PVE 儲存空間嚴重 | `儲存空間嚴重：node10 pve-storage-monitor: STORAGE_CRITICAL host=node10 storage=TEST_ONLY type=filesystem usage=99% threshold=90%` |
 | 【PVE Storage 離線】PVE 儲存設備離線 | `儲存設備離線：node10 pve-storage-monitor: STORAGE_UNAVAILABLE host=node10 storage=TEST_ONLY type=shared status=TEST_ONLY` |
 
-**還原**：把 `/root/gl-eventdefs-backup-20261019-1709.json` 裡的設定逐一 `PUT` 回 `/api/events/definitions/<id>?schedule=true`。
+**還原**：把 `/root/gl-eventdefs-backup-20261019-1709.json`（這次的備份已於 2026-10-20 刪除）裡的設定逐一 `PUT` 回 `/api/events/definitions/<id>?schedule=true`。
 
 ## 11. 常見問題
 

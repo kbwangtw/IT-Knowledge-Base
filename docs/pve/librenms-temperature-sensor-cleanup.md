@@ -128,7 +128,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 
 **到網頁確認**：裝置 → 打開任一台容器（例如 pihole）→ 右上角齒輪 → **模組**，Filter 輸入 `sensors`：DISCOVERY、POLLING 都是關閉，標示黃色 **Device override**（`Use default (on)` 是恢復預設的連結）。上方的 `Overrides only (1)` 把同一模組的探索與輪詢算成 1 個。
 
-**還原**：`zcat /root/sensors-before-lxcfix-20261019.sql.gz | mysql librenms`（在 CT 102 內），或在網頁點 `Use default`。
+**還原**：`zcat /root/sensors-before-lxcfix-20261019.sql.gz | mysql librenms`（在 CT 102 內）（這次的備份已於 2026-10-20 刪除）；也可以在網頁點 `Use default` 恢復模組，感測器會在下次 discovery 時加回來。
 
 ## 5. 步驟三：對照每個感測器是什麼元件（只讀取）
 
@@ -199,7 +199,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 
 **看到的結果**：三台共 36 個感測器，除了 3 個 `acpitz` 以外「自訂」都是 `Yes`，**狀態欄全部空白**。例如 node10 `Tctl 57.5 / 85`、node11 `nvme-pci-0100:Composite 53.8 / 70`、node12 `Sensor 2 71.8 / 85`。
 
-**還原**：`zcat /root/sensors-before-limits-20261019.sql.gz | mysql librenms`（在 CT 102 內）。
+**還原**：`zcat /root/sensors-before-limits-20261019.sql.gz | mysql librenms`（在 CT 102 內）（這次的備份已於 2026-10-20 刪除）；之後要改門檻，直接在網頁 Health → Temperature 修改。
 
 ## 7. 常見問題
 
@@ -217,7 +217,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 - [ ] 觀察一天，確認 LibreNMS 事件紀錄不再出現 LXC 與 node10～12 的 `Temperature above threshold`（NAS 的溫度另外處理，不在本文範圍）
 - [ ] 以後新增 LXC 到 LibreNMS 時，加入後就關掉 sensors 模組
 - [ ] node12 的 2 TB NVMe（KINGSTON SNV3S）內部感測器 71.8 °C：觀察是否持續上升
-- [ ] 約一週後刪除 CT 102 的 `/root/sensors-before-lxcfix-20261019.sql.gz`、`/root/sensors-before-limits-20261019.sql.gz`
+- [x] 刪除 CT 102 的 `/root/sensors-before-lxcfix-20261019.sql.gz`、`/root/sensors-before-limits-20261019.sql.gz`（2026-10-20）
 
 ## 9. 延伸閱讀
 
