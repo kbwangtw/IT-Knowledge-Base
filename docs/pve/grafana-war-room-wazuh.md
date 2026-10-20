@@ -360,7 +360,7 @@ nftables 備份要選**建立 `wazuh_indexer` 之前**的那一份；如果之�
 | 階段 3：Prometheus、Ceph prometheus 模組、PVE exporter | ⏳ 未做 |
 | 階段 4：Graylog／PBS（Graylog 的 OpenSearch 可能沒有帳號保護，要另外評估） | ⏳ 未做 |
 | 階段 5：專用電腦 kiosk（`?kiosk`、開機自動開啟、Viewer 帳號、不休眠） | ⏳ 未做 |
-| node10 AppArmor DENIED 告警調校 | ⏳ 待查 |
+| node10 AppArmor DENIED 告警調校 | ✅ 2026-10-20：來源就是 Grafana 容器（CT 114，Ubuntu 24.04）的 rsyslogd 規則，停用後歸零，容器 syslog 也恢復寫入（Wazuh 維運篇 11-2） |
 
 ## 14. 延伸閱讀
 

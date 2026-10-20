@@ -50,7 +50,7 @@ last_modified_at: 2026-10-20
 | # | 步驟 | 狀態 | 實測紀錄 |
 | --- | --- | --- | --- |
 | 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
-| 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；10/16 以子規則 100141 處理 31301（11-13）；10/20 驗收登入失敗、人員 sudo、FIM 仍偵測得到（11-15） |
+| 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；10/16 以子規則 100141 處理 31301（11-13）；10/20 驗收登入失敗、人員 sudo、FIM 仍偵測得到（11-15）；10/20 Grafana 容器的 52002 歸零（11-2） |
 | 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目；10/14 ubclient 套件更新並修正 logrotate 重複設定（12-6） |
 | 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
 | 14 | WireGuard VPN 健康監控 | 完成 | 2026-10-13：ct:109 內部檢查（100150）＋ Manager 外部檢查 ct:109（100151）；`syslog_output` 只把 wireguard 群組送 Graylog；兩種情況的 Gmail 告警都實測收到 |
@@ -284,6 +284,47 @@ pct exec 113 -- tail -3 /var/log/syslog      # 最後一行出現 wazuhtest 即�
 ```
 
 本案結果：syslog 出現 03:27（UTC）rsyslog 啟動紀錄與測試訊息，停擺三天的 syslog 恢復寫入。之後追蹤 node10 的 kernel 日誌，最後一筆 DENIED 發生在重啟當下的 11:27:09（台灣時間），之後不再出現，52002 告警歸零。rsyslog 啟動時的 `imklog: cannot open kernel log (/proc/kmsg): Permission denied` 是非特權容器的正常限制。
+
+**10/20 第二次：Grafana（CT 114）同樣的問題**
+
+10/14 建 Grafana 戰情中心後，node10 又持續出現低等級的 52002。盤點三台節點過去 24 小時（node10 執行，只讀取）：
+
+```bash
+for n in node10 node11 node12; do
+  echo "=================== $n ==================="
+  ssh -o BatchMode=yes root@$n 'journalctl -k --since "24 hours ago" --no-pager | grep "apparmor=\"DENIED\"" \
+    | sed -E "s/.*namespace=\"root\/\/([^\"]*)\".*/\1 &/; s/^([^ ]*) .*operation=\"([^\"]*)\".*profile=\"([^\"]*)\".*name=\"([^\"]*)\".*comm=\"([^\"]*)\".*/\1 | \2 | \3 | \4 | \5/" \
+    | sort | uniq -c | sort -rn | head -8'
+done
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| 第一個 `sed` | 取出 `namespace="root//lxc-<編號>_…"`，看是哪個容器 |
+| 第二個 `sed` | 整理成「容器 \| 操作 \| profile \| 目標 \| 程式」 |
+
+**看到的結果**：只有一個來源，`lxc-114 | sendmsg | rsyslogd | /run/systemd/journal/dev-log | systemd-journal`；node10 551 筆（10/19 搬走前）、node11 1,484 筆（搬過去後）、node12 0。Grafana 是 Ubuntu 24.04.5，和 ai 一樣；容器內 `/var/log/syslog` 最後一行停在 10/19 16:57:52（搬到 node11 開機時），約 16 小時沒寫入（日誌仍在 journald）。
+
+**處理**（CT 114 所在的節點；和上面 ai 的做法相同，一次做完含重啟 journald）：
+
+```bash
+ssh root@node11 "pct exec 114 -- sh -c '
+  ln -sf /etc/apparmor.d/usr.sbin.rsyslogd /etc/apparmor.d/disable/usr.sbin.rsyslogd
+  apparmor_parser -R /etc/apparmor.d/usr.sbin.rsyslogd 2>&1 | grep -v \"doesn.t exist\"
+  systemctl restart systemd-journald
+  systemctl restart syslog.socket rsyslog
+  sleep 2
+  logger -t wazuhtest \"grafana rsyslog test after apparmor fix\"
+  sleep 1
+  echo \"rsyslogd 規則載入中：\$(grep -c rsyslogd /sys/kernel/security/apparmor/profiles)\"
+  echo \"rsyslog：\$(systemctl is-active rsyslog)\"
+  tail -2 /var/log/syslog | cut -c1-100
+'" < /dev/null
+```
+
+**看到的結果**：rsyslog `active`，09:39 syslog 恢復寫入（測試訊息出現）；10 分鐘後 `journalctl -k --since "2026-10-20 09:39:12" | grep -c 'apparmor="DENIED"'` 為 **0**，`rsyslogd 規則載入中：0`。修正前 node11 每小時約 60～90 筆。
+
+> **新建 Ubuntu 24.04 LXC 時**：建好就照上面停用容器內的 rsyslogd 規則並重啟 journald，否則 syslog 不會寫入、主機會持續出現 52002。
 
 ### 11-3 自訂降級規則的寫法與注意事項
 
@@ -1476,7 +1517,7 @@ Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警�
 
 - [x] 驗收「重要事件仍然偵測得到」：2026-10-20 登入失敗（5710）、人員 sudo（5402）、FIM（554）都偵測得到（11-15）
 - [ ] jt-ipam、Grafana 匯入 Wazuh CA 後開啟 TLS 驗證
-- [ ] node10 的 AppArmor DENIED（52002）告警調校
+- [x] node10 的 AppArmor DENIED（52002）告警調校：2026-10-20 來源是 Grafana（CT 114），停用容器內 rsyslogd 規則後歸零（11-2）
 - [ ] 定期檢查索引佔用與保留是否正常（10-5）
 - [ ] 2027 年初規劃把容器升級到 Ubuntu 24.04（升級前先快照與 PBS 備份）
 
