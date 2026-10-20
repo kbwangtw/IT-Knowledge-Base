@@ -16,7 +16,7 @@ last_modified_at: 2026-10-20
 | 適合誰看 | 第一次接觸「集中式日誌」與 Graylog 的人；或要維護這套環境的人 |
 | 收集對象 | PVE 三台節點（node10～12）、PBS31、兩台 Synology NAS（tokyo16、melayu17） |
 | 環境 | Graylog 7.1.9，裝在 PVE 叢集上的 LXC 容器（CT 105，Debian 12） |
-| 目前狀態 | 收集、分類、主機名稱查表、Gmail 寄信都已運作並驗證；14 個告警與各項監控見下篇；整體看板仍待完善（見第 13 節） |
+| 目前狀態 | 收集、分類、主機名稱查表、Gmail 寄信都已運作並驗證；14 個告警與各項監控見下篇；看板 10/20 盤點修正並新增「趨勢與明細」分頁（第 8 節） |
 | 下篇 | [Graylog 告警與監控（二）：告警清單與監控腳本](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)：全部告警、PVE 監控腳本、監控 Graylog 本身、NAS 複寫與備份監控、中文告警信、postfix |
 | 第三篇 | [Graylog 告警與監控（三）：中文告警信與摘要](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)：13 個通知的中文範本、主旨、每個告警的摘要寫法 |
 | 紀錄期間 | 2026-09-17 起陸續建置，最後更新 2026-10-19 |
@@ -66,7 +66,7 @@ tokyo16、melayu17 ── UDP 1515 → Input「Synology Syslog UDP」→ Stream�
                                        → 存入預設索引 graylog_*
 
                     ↓ 存好的訊息可以：
-                    ├─ 搜尋、看「PVE 任務監控」看板
+                    ├─ 搜尋、看「PVE 任務監控」「PVE 基礎架構監控」看板
                     └─ 由 14 個 Event Definition 檢查 → 符合條件 → Gmail 告警
 ```
 
@@ -92,7 +92,7 @@ Infrastructure Syslog 的實際索引名稱是 `infra_syslog_` 加上編號（In
 | 監控 Graylog 本身 | ✅ 10/19 三台 PVE 每 5 分鐘從外部檢查，異常直接用 postfix 寄信；每日 08:00 健康回報驗證整條告警鏈（下篇第 5 節） |
 | NAS 快照複寫 | ✅ 10/19 複寫失敗、停止由 tokyo16 DSM 寄信；兩台 NAS 是否回應由三台 PVE 每 5 分鐘檢查（下篇第 6 節） |
 | 備份 | ✅ PVE 備份、PBS GC／Verify 失敗本來就會寄信；10/19 加上每天 08:30 檢查每台 VM／CT 的最新備份與驗證結果（下篇第 7 節） |
-| 看板 | 🔶「PVE 任務監控」八個 Widget 保留；整體基礎設施看板待完善 |
+| 看板 | ✅「PVE 任務監控」8 個 Widget；10/20「PVE 基礎架構監控」修正 5 個查詢、補 3 個數字，新增「趨勢與明細」分頁（第 8 節） |
 | 告警信格式 | ✅ 10/19 十三個通知改用同一份中文範本，信裡直接列出時間、主機、原始訊息（[第三篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)） |
 
 > 驗證的界線：告警都以 `logger` 產生的「合成測試訊息」驗證過完整鏈路（訊息 → 分類 → 事件 → 收到信），**沒有為了測試去弄壞真正的 VM、容器或 Ceph**。
@@ -578,9 +578,17 @@ end
 
 > 查詢時間範圍要注意時區（第 11-1 節）：改時區後，原本以 UTC 填的 Absolute 範圍會被平移 8 小時。
 
-## 8. 看板：「PVE 任務監控」
+## 8. 看板
 
-9/17 建立了八個 Widget；之後的工作聚焦在告警，沒有再逐項驗收看板。
+| 看板 | 用途 | Widget |
+| --- | --- | --- |
+| PVE 任務監控 | PVE 工作（備份、遷移、開機…）的成功／失敗 | 8 個（8-1） |
+| PVE 基礎架構監控 | 「現在有沒有事」＋「這週發生過什麼」 | 兩個分頁共 17 個（8-2～8-4） |
+| Sources | Graylog 內建的日誌量看板 | 不用管 |
+
+### 8-1 「PVE 任務監控」
+
+9/17 建立了八個 Widget；10/20 用 API 盤點，查詢與 Stream 都正確，維持原樣。
 
 | 區塊 | 內容 |
 | --- | --- |
@@ -599,6 +607,121 @@ end
 
 - 分組用 `pve_task_node` 或 `pve_task_name`，略過空值。
 - 最近異常用 `pve_task_status:warning OR pve_task_status:failed`，依時間新到舊，顯示時間、節點、任務、VMID、使用者與狀態。VMID 空白不一定是解析失敗，有些任務本來就沒有 VMID。
+
+### 8-2 用 API 盤點每個 Widget 的查詢（2026-10-20）
+
+**做什麼**：看板是 9 月建的，之後告警的查詢改過好幾次。一個一個點 Edit 太慢，改用 API 一次列出所有 Widget 的查詢、Stream 數與時間範圍（唯讀）。
+
+**怎麼做**（在 node10；密碼用 `read -rsp` 單獨貼上）：
+
+```bash
+read -rsp "Graylog admin 密碼：" GLPW; echo
+```
+
+```bash
+cat > /root/gl-dash-inventory.py <<'EOF2'
+import json, os, base64, urllib.request
+url = os.environ["GL_URL"].rstrip("/")
+auth = base64.b64encode(("admin:" + os.environ["GLPW"]).encode()).decode()
+def get(path):
+    req = urllib.request.Request(url + path, headers={"Authorization": "Basic " + auth, "Accept": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=15))
+r = get("/api/dashboards?per_page=100")
+for s in r.get("views") or r.get("elements") or []:
+    v = get("/api/views/" + s["id"])
+    print("######", v["title"])
+    for qid, st in (v.get("state") or {}).items():
+        titles = (st.get("titles") or {})
+        print("  分頁:", titles.get("tab", {}).get("title", qid))
+        for w in st.get("widgets") or []:
+            q = (w.get("query") or {}).get("query_string", "")
+            tr = w.get("timerange") or {}
+            print("  ==", titles.get("widget", {}).get(w["id"], "(無標題)"), "|", w.get("type"))
+            print("     查詢:", q or "（空白）")
+            print("     Stream 數:", len(w.get("streams") or []), "| 範圍:", tr.get("type"), tr.get("range", ""))
+EOF2
+. /root/.graylog-monitor.conf
+GL_URL="$GL_URL" GLPW="$GLPW" python3 /root/gl-dash-inventory.py
+unset GLPW
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `/api/dashboards` | 看板清單，**只有標題和 ID**，沒有 Widget 設定 |
+| `/api/views/<ID>` | 用 ID 讀完整設定，`state` 裡才有每個分頁的 Widget |
+| `query_string` | Widget 自己的查詢，拿來和告警的 Search Query 比對 |
+| `Stream 數` | 0 代表搜尋全部 Stream |
+
+**看到的結果**：「PVE 基礎架構監控」10 個數字 Widget 裡有 5 個和告警（下篇 3-2）對不上，其中 4 個**永遠是 0**，會讓人誤以為一切正常：
+
+| Widget | 原本的查詢 | 改成（和告警相同） |
+| --- | --- | --- |
+| PVE 儲存設備離線數 | `message:"STORAGE_OFFLINE"`（腳本根本不會送這個字） | `message:"STORAGE_UNAVAILABLE"` |
+| PVE 多次驗證失敗數 → **PVE/PBS 驗證失敗數** | `message:"AUTH_FAILURE"` | `device_type:("pve" OR "pbs") AND event_category:"authentication" AND (message:failure OR message:failed)` |
+| PVE 服務異常數 | `message:"PVE_SERVICE_FAILED"` | `device_type:"pve" AND event_category:"system_error" AND message:"Failed with result"` |
+| DSM 登入失敗數 | 比對 `failed to sign in to`… 文字 | `synology_auth_result:failed AND synology_service:DSM`（Stream：Synology Syslog） |
+| PVE Node 離線數 | `"PVE_NODE_OFFLINE"` | `"PVE_NODE_OFFLINE" OR "PVE_NODE_MONITOR_ERROR"` |
+
+改法：Widget 右上角 **⋮ → Edit** → 改查詢 → **Update widget**；全部改完按看板右上角 **Save**（沒按 Save 不會保存，API 也讀不到）。改完再跑一次腳本確認。
+
+> 之後改告警的 Search Query 時，要一起改看板上對應的 Widget；改完跑這支腳本對照。
+
+### 8-3 第一頁「IT 基礎架構監控」：現在有沒有事（全部 1 天）
+
+10/20 補上告警清單有、看板沒有的 3 個，共 13 個數字（Visualization：Single Number）：
+
+| Widget | 查詢 | Stream | 正常值 |
+| --- | --- | --- | --- |
+| WireGuard VPN 異常數 | `source:wazuh AND "WireGuard ct:109"` | 全部 | 0 |
+| DSM 管理員登入數 | `message:"User [<NAS 管理員帳號>]" AND message:"signed in to [DSM] successfully"` | Synology Syslog | 自己登入的次數 |
+| Graylog 每日心跳數 | `"GRAYLOG_DAILY_HEARTBEAT"` | 全部 | **3**（少於 3：有節點沒送；多於 3：有人手動測試） |
+
+其餘 10 個（Ceph、Corosync、Node 離線、任務失敗、儲存 ×3、服務異常、驗證失敗、DSM 登入失敗）的查詢和下篇 3-2 的告警相同。
+
+- 第一頁回答「現在有沒有事」：**心跳 3、其他 0** 就是正常。
+- 數字算的是**訊息筆數**，不是告警次數。例如驗證失敗數算每一筆失敗，告警則要「同一台 5 分鐘 ≥ 3 次」才觸發。
+- 要臨時換時間範圍，用看板最上方的 **No Override** 時間選擇器，整頁一起換；看完切回 No Override，不要存檔。
+
+### 8-4 第二頁「趨勢與明細」：這週發生過什麼（全部 7 天）
+
+**做什麼**：第一頁看到非 0，到這一頁看是哪台、什麼時候、哪一筆。同一頁統一用 7 天，標題都加上「（7 天）」。
+
+**怎麼做**：點分頁列「IT 基礎架構監控 ▾」右邊的 **＋** 新增分頁，▾ → **Edit Title** 改名；確認停在新分頁，再從左側 **＋ → Message Count**（或 Message Table）新增 Widget。
+
+| Widget | 查詢 | 分組（Group By） | 圖表 |
+| --- | --- | --- | --- |
+| 各主機日誌量趨勢 | （空白，全部 Stream） | timestamp（Row，Interval Auto）＋ source（Column，Limit 20） | Line Chart |
+| 驗證失敗趨勢 | 同第一頁的驗證失敗 | timestamp（Row）＋ source（Column） | Bar Chart |
+| DSM 登入失敗來源 | `synology_auth_result:failed AND synology_service:DSM`（Synology Syslog） | 同一個 Group By 放 synology_src_ip、source（Row）；Sort：Message Count Descending | Data Table |
+| 最近異常明細 | 所有告警條件用 OR 串起來（下方） | —（Message Table，欄位 timestamp、source，訊息另起一行） | — |
+
+```text
+"PVE_NODE_OFFLINE" OR "PVE_NODE_MONITOR_ERROR" OR "STORAGE_CRITICAL" OR "STORAGE_WARNING" OR "STORAGE_UNAVAILABLE" OR pve_event_type:task_failed OR (message:corosync AND message:"Members left:") OR (message:"Health check failed:" AND NOT message:"cmd=" AND NOT message:"dispatch" AND NOT message:"finished") OR (device_type:"pve" AND event_category:"system_error" AND message:"Failed with result") OR (device_type:("pve" OR "pbs") AND event_category:"authentication" AND (message:failure OR message:failed)) OR (synology_auth_result:failed AND synology_service:DSM) OR (source:wazuh AND "WireGuard ct:109")
+```
+
+| 介面位置（Graylog 7.1.9） | 說明 |
+| --- | --- |
+| Group By 的 **＋** | 在 Group By 那一行最右邊；Visualization 是 Single Number 時不會出現，先改成 Line／Bar Chart 或 Data Table |
+| Metrics 的 Field | 維持空白（Count 算筆數）；時間要放在 Group By，不是 Metrics |
+| Sort 的 **＋** | 新增後才會出現 Field（選 Message Count）和 Direction（Descending） |
+
+**看到的結果（10/20）**：第一頁的非 0 數字全部在「最近異常明細」找到原因，**沒有真的異常**：
+
+| 第一頁 | 原因 |
+| --- | --- |
+| Ceph 2、Corosync 1、儲存空間嚴重 1 | 10/19 15:36、17:09 改「每筆」與摘要時的 `TEST_ONLY` 測試訊息 |
+| WireGuard 1 | 10/19 17:00:35 ct:109 遷移到 node11，WGDashboard 還在啟動（`wg0=up dashboard=activating`） |
+| 驗證失敗 6 | 10/20 PBS 認證規則的 logger 測試（5-3） |
+| 心跳 4 | 10/19 14:29 範本測試手動送的 1 筆＋當天 3 筆排程 |
+| DSM 登入失敗來源：melayu17 9 次 | 10/19 從 node10 測試 DSM API 登入（下篇第 6 節）與一次手動登入 |
+
+「各主機日誌量趨勢」另外抓到 **pbs31 在 10/19 13:26～13:31 送了約 648 萬筆**（每秒約 2 萬筆，是同時段一台 PVE 節點的 350 倍）。縮小時間範圍到 10 秒後，全是同一行：
+
+```text
+proxmox-backup-proxy[664]: list groups error on datastore zhtest - EACCES: Permission denied
+```
+
+原因是測試中文通知時，把測試用 datastore 的資料夾權限拿掉（見 [中文通知文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-zh-tw-notification/)常見問題）；權限改回、zhtest 刪除後就停了，不會再發生。這批資料會隨索引輪替（14～18 天）消失；在那之前，點圖例的 pbs31 可以暫時隱藏它。
 
 ## 9. 告警（一）：讓 Graylog 能寄 Gmail
 
@@ -852,6 +975,8 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 | 規則加了，後面的處理卻消失 | 放進「全部符合才繼續」的 Stage | 新規則放在 None or more rules match 的 Stage（5-1） |
 | `src_host:*` 出現 `'*' or '?' not allowed as first character in WildcardQuery` | 萬用字元不能放開頭 | 改用 `_exists_:src_host` |
 | Rule Simulation 每一筆都顯示 Not stored | 模擬本來就不寫入索引 | 用 `set_field("would_drop", "yes")` 測試（7-3） |
+| 看板數字一直是 0，但告警有寄信 | Widget 的查詢和告警不同（例如告警改過、看板沒跟著改） | 用 8-2 的腳本列出 Widget 查詢，和下篇 3-2 對照 |
+| 「各主機日誌量趨勢」某台突然暴增到幾百萬筆 | 程式反覆寫同一條錯誤（10/19 pbs31 的 `list groups error … EACCES`） | 把 Search 時間縮到 10 秒看是哪一行；先修好原因，這批資料隨索引輪替消失 |
 | 時間差 8 小時 | admin 帳號時區是 UTC | 照 11-1 改時區 |
 | 改時區後，查詢結果怪怪的 | 舊的 Absolute 範圍被自動平移 8 小時 | 重新填台灣時間 |
 | `curl` 打 API 回 `http=000` | Graylog 監聽容器 IP，不是 127.0.0.1 | 用 `GL=$(hostname -I \| awk '{print $1}')` |
@@ -867,7 +992,6 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 
 | 項目 | 說明 |
 | --- | --- |
-| 完善看板 | 沿用任務看板，再加入節點、服務、登入等統計與異常明細 |
 | DSM 日誌過濾器 | 確認兩台 NAS 送出哪些種類的日誌 |
 | 觀察磁碟用量 | 一週後決定是否也丟棄 PBS 的寫入紀錄 |
 
