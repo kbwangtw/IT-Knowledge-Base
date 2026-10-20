@@ -966,7 +966,7 @@ done
 | 改主旨 | 第 7 節 |
 | 讓摘要寫出「哪台、什麼事」 | 第 8～10 節 |
 
-## 9. postfix 改用新的加密參數（2026-10-19）
+## 9. postfix 加密參數與 IPv4 優先（2026-10-19～20）
 
 **做什麼**：三台 PVE 和 PBS31 的 postfix 把舊參數 `smtp_use_tls` 換成 `smtp_tls_security_level = encrypt`。postfix 是所有告警信的出口（PVE 備份通知、PBS 通知、第 5～7 節的監控腳本），所以一次只改一台，改完立刻寄測試信。
 
@@ -975,6 +975,8 @@ done
 | **`smtp_use_tls = yes`** | 舊寫法，等於「對方支援就加密，不支援就用明碼」；postfix 3.10 會出現 `will be removed` 警告 |
 | **`smtp_tls_security_level`** | 新寫法；`may` 和舊寫法一樣，`encrypt` 是「一定要加密，否則不寄」 |
 | **`smtp_sasl_security_options =`（空白）** | 允許用明碼方式送帳密；搭配 `may` 時，若加密被中途拿掉，Gmail 帳密可能以明碼送出 |
+
+### 9-1 改用 `smtp_tls_security_level`（2026-10-19）
 
 **盤點結果**（四台都一樣）：postfix 3.10.13，`relayhost = smtp.gmail.com:587`、`smtp_use_tls = yes`、`smtp_sasl_auth_enable = yes`、`smtp_sasl_security_options =`。
 
@@ -1052,6 +1054,58 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 
 這次四台的 `main.cf.bak-20261019` 已於 2026-10-20 刪除；之後要改回，手動 `postconf -X smtp_tls_security_level` 再 `postconf -e "smtp_use_tls = yes"`，或改成 `smtp_tls_security_level = may`（效果相同）。
 
+### 9-2 寄信優先使用 IPv4（2026-10-20）
+
+**問題**：Graylog 搜 `message:postfix AND message:"Network is unreachable"`，四台都有（10/19～20 共 5 筆）：
+
+```text
+postfix/smtp[…]: connect to smtp.gmail.com[2404:6800:…]:587: Network is unreachable
+```
+
+**原因**：四台都**沒有 IPv6 對外路由與位址**（`ip -6 route show default`、`ip -6 addr show scope global` 都沒有輸出），但 postfix 預設 `inet_protocols = all`。Gmail 同時有 IPv4、IPv6 位址，postfix 偶爾先挑到 IPv6，失敗後才改走 IPv4。**信都有寄到**，只是多一次失敗、慢幾秒。
+
+| 選項 | 設定 | 生效 | 取捨 |
+| --- | --- | --- | --- |
+| **A. 優先 IPv4（採用）** | `smtp_address_preference = ipv4` | `reload` | 只改「寄信先試哪一種」；以後有 IPv6 也不用改回 |
+| B. 完全不用 IPv6 | `inet_protocols = ipv4` | `restart` | 連 postfix 監聽位址一起改，`mynetworks` 的 `[::1]` 要另外檢查 |
+| 系統層關掉 IPv6 | sysctl／開機參數 | — | ❌ 不採用：pveproxy 等服務預設監聽 IPv6，可能啟動失敗 |
+
+**怎麼做**：先改 node10：
+
+```bash
+cp -a /etc/postfix/main.cf /etc/postfix/main.cf.bak-$(date +%Y%m%d)-ipv4
+ip -6 route show default; echo "IPv6 路由（空白＝沒有）"
+postconf -e 'smtp_address_preference = ipv4'
+postfix check && echo "CHECK-OK"
+postconf smtp_address_preference
+systemctl reload postfix
+TO=$(grep -oP '^MAIL_TO="?\K[^"]+' /root/.graylog-monitor.conf)
+echo "postfix 改為優先使用 IPv4，來自 $(hostname)" | mail -s "【測試】$(hostname) postfix 優先 IPv4" "$TO"
+sleep 15; journalctl --since "1 min ago" --no-pager | grep -E 'postfix/.*(status=|unreachable)' | tail -3
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `.bak-日期-ipv4` | 備份檔名加 `-ipv4`，不和 9-1 的備份同名 |
+| `ip -6 route show default` | 確認沒有 IPv6 路由；有輸出就先停下來 |
+| `smtp_address_preference = ipv4` | 寄信時先用 IPv4 |
+| `systemctl reload postfix` | 這個參數 reload 就生效，不中斷服務 |
+
+node11、node12 從 node10 用 9-1 同樣的 `for h in node11 node12; do ssh … done` 迴圈執行（`postfix check` 失敗就自動還原並停止）；PBS31 到本機執行，收件人用 `read -p "收件 Gmail：" TO` 單獨貼上。
+
+**看到的結果**：
+
+| 主機 | IPv6 路由 | 測試信（13:46～13:48） |
+| --- | --- | --- |
+| node10 | 無 | ✅ 走 IPv4 `173.194.174.109`，`status=sent` |
+| node11 | 無 | ✅ 走 IPv4，`status=sent` |
+| node12 | 無 | ✅ 走 IPv4，`status=sent` |
+| pbs31 | 無 | ✅ 走 IPv4，`status=sent` |
+
+原本就只是偶爾發生，一封測試信沒出現不代表修好；真正的驗證是幾天後搜同一個查詢、時間從 10/20 13:48 起，應為 0 筆（⏳）。
+
+還原：`cp -a /etc/postfix/main.cf.bak-<日期>-ipv4 /etc/postfix/main.cf && systemctl reload postfix`，或 `postconf -X smtp_address_preference`。
+
 ## 10. 常見問題
 
 | 現象 | 原因 | 怎麼辦 |
@@ -1066,6 +1120,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | 收到【Graylog 異常】信 | Graylog 本身出問題，信是節點直接寄的 | 依第 5 節「收到異常信時怎麼查」 |
 | 【每日健康回報】的「相關日誌」只列一台 | 三台的心跳不會同一秒送出（10/20 實測 node11 08:00:06、node12 08:00:17、node10 08:00:44），告警檢查時只看到先到的那筆就寄信，之後 60 分鐘 Grace 內不再寄 | 正常，收到信就代表告警鏈通了；要確認三台都有送，到 Search 搜 `"GRAYLOG_DAILY_HEARTBEAT"`（Today）應有 3 筆 |
 | 搬移或重開 ct:109 後收到 1 封【VPN 告警】 | 容器開機時 wg0 先起來，WGDashboard 還在啟動，wg-health 看到 `dashboard=activating`（不是 active）就觸發（10/19 17:00:35 遷移到 node11 時實測） | 計畫性搬移時屬預期；幾分鐘後 `wg0=up dashboard=active` 就好。一直停在 activating 才要查 |
+| postfix log 出現 `connect to smtp.gmail.com[2404:…]:587: Network is unreachable` | 主機沒有 IPv6，postfix 卻先試 Gmail 的 IPv6 位址 | 10/20 四台已設 `smtp_address_preference = ipv4`（9-2）；信其實有寄到 |
 | 早上沒收到【每日健康回報】 | 告警鏈某處斷了（含 Gmail 寄信失敗） | 先看有沒有【Graylog 異常】信；再到 Search 搜 `"GRAYLOG_DAILY_HEARTBEAT"`、看 Event Definition 的 Last Matched |
 | `read -s` 存進去的不是 token | `read -s` 那行和下一段指令一起貼上，下一行被當成輸入 | `read -s` 單獨貼上、輸入完再貼下一段；token 改用 API 建立直接寫檔（第 5 節） |
 | 每秒處理量常常是 0 | 日誌是一陣一陣進來的 | 判斷「有沒有在收」改用累計數字（第 5 節） |
