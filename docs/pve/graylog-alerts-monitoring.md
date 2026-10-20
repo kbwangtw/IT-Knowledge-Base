@@ -4,7 +4,7 @@ title: "Graylog 告警與監控（二）：告警清單與監控腳本"
 date: 2026-10-19
 categories: [PVE, Graylog, Monitoring]
 permalink: /docs/pve/graylog-alerts-monitoring/
-last_modified_at: 2026-10-19
+last_modified_at: 2026-10-20
 ---
 
 # Graylog 告警與監控（二）：告警清單與監控腳本
@@ -106,7 +106,7 @@ rm /root/event-defs.json
 | PVE 儲存空間嚴重 | `message:"STORAGE_CRITICAL"`（4-1） | 5／5 | 每筆（10/19 由「有就觸發」改，第三篇第 10 節） | 5 分／10 |
 | PVE 儲存空間警告 | `message:"STORAGE_WARNING"`（4-1） | 5／5 | 每筆（10/19 由「有就觸發」改，第三篇第 10 節） | **24 小時**／10（10/16 由 5 分改為 24 小時） |
 | PVE 儲存設備離線 | `message:"STORAGE_UNAVAILABLE"`（4-1） | 5／5 | 每筆（10/19 由「有就觸發」改，第三篇第 10 節） | 5 分／10 |
-| PVE 多次驗證失敗 | `device_type:"pve" AND event_category:"authentication" AND (message:failure OR message:failed)` | 5／5 | 同一台 `source` ≥ 3 次 | 5 分／50 |
+| PVE／PBS 多次驗證失敗 | `device_type:("pve" OR "pbs") AND event_category:"authentication" AND (message:failure OR message:failed)`（10/20 加入 PBS） | 5／5 | 同一台 `source` ≥ 3 次 | 5 分／50 |
 | PVE 服務異常 | `device_type:"pve" AND event_category:"system_error" AND message:"Failed with result"` | 5／5 | 每筆 | 5 分／50 |
 | Synology DSM 登入失敗 | `synology_auth_result:failed AND synology_service:DSM` | 5／5 | 同一台 NAS、同一來源 IP ≥ 3 次 | 5 分／10 |
 | Synology DSM 管理員登入 | `message:"User [<NAS 管理員帳號>]" AND message:"signed in to [DSM] successfully"` | 5／5 | 每筆 | 5 分／10 |
@@ -117,6 +117,16 @@ rm /root/event-defs.json
 - 每個告警都綁了一個 Email 通知（上篇第 9 節），共 13 個；10/19 起內文都是中文範本（第三篇）。
 - 「每筆」和「有就觸發／≥ N 次」決定了信裡「摘要」能不能帶出原始日誌的欄位（第三篇第 9 節）。
 - **Grace 5 分鐘**：同一告警 5 分鐘內最多寄一封。狀態持續時（節點一直離線、儲存一直超標）會每 5 分鐘再寄一封，直到恢復。
+- **PVE／PBS 多次驗證失敗**：10/20 以前只看 `device_type:"pve"`，PBS 的登入失敗不會通知。改法：上篇 5-3 補上 PBS 的認證規則，再把查詢改成 `("pve" OR "pbs")`、標題改成「PVE／PBS 多次驗證失敗」。實測（在 PBS31 執行，192.0.2.1 是文件專用位址）：
+
+  ```bash
+  for i in 1 2 3; do
+    logger -t proxmox-backup-proxy "authentication failure; rhost=[::ffff:192.0.2.1]:50000 user=test@pam msg=GRAYLOG-PBS-AUTH-TEST $i"
+    sleep 2
+  done
+  ```
+
+  10:35:48–10:35:52 送出，10:35:54 產生事件並寄出中文告警信，「相關日誌」主機是 pbs31。⚠️ Event Definition 改完要到 Summary 按 **Update event definition** 才生效；存檔前 Filter Preview 有結果不代表已啟用。
 - **NAS 登入失敗**：要「同一台 NAS、同一個 IP、5 分鐘內 ≥ 3 次」才通知；比較慢的嘗試由 DSM 的自動封鎖處理。
 - **NAS 管理員登入**：只涵蓋那一個管理員帳號。兩步驟驗證時只有最後的 `signed in ... successfully via [OTP]` 符合，一次登入只寄一封。
 - **WireGuard**：檢查範圍 5 分鐘比間隔 1 分鐘長，同一筆訊息會被抓到好幾次，靠 30 分鐘的 Grace 避免重複寄信（建置過程見 [WireGuard 文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)第 12 節）。
@@ -1046,7 +1056,6 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 
 | 現象 | 原因 | 怎麼辦 |
 | --- | --- | --- |
-| --- | --- | --- |
 | 告警信看不出是哪台出問題 | 預設範本只把整筆訊息倒出來 | 10/19 已改中文範本，「相關日誌」直接列出主機（第三篇）；腳本產生的訊息依 4-1 的表判讀 |
 | 收到【NAS 連不上】或 `[tokyo16]` 複寫失敗信 | NAS 或複寫出問題 | 依第 6 節「收到信時怎麼查」 |
 | Graylog 搜不到快照複寫的紀錄 | 複寫日誌在套件自己的日誌頁，不在 DSM 記錄中心 | 到 Snapshot Replication → 日誌查看或匯出 CSV |
@@ -1066,6 +1075,7 @@ cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload
 | --- | --- |
 | 每月看一次 Snapshot Replication | 補上第 6 節抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
 | 單節點故障演練 | 和 PVE HA 文件第 15 節一起做：一台失聯時，確認「節點離線」告警、另兩台第 5、6 節的監控與 postfix 寄信都正常，記錄收信時間 |
+| 「多次驗證失敗」信的文字 | 10/20 加入 PBS 後，信裡的「說明」還寫「Proxmox VE 主機」、「摘要」還是「PVE 多次驗證失敗」，改成 PVE／PBS |
 | 其他新告警的測試 | 每個新告警都安排安全、可控的測試事件，記錄原始訊息、欄位、事件、收信時間與 Grace 下的重複通知情形 |
 
 ## 12. 延伸閱讀與下載
