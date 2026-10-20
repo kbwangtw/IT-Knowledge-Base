@@ -381,7 +381,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 - [x] LibreNMS poller 在 MariaDB 重啟後已恢復（16:06:40 輪詢 16 台，validate OK）
 - [x] CT 105 Graylog 重啟，log 時間改為 `+08:00`（7-1）
 - [x] LibreNMS `daily.sh` 移到 05:19（7-2）
-- [ ] 10/20 05:19 之後確認 `daily.sh` 有執行：`ls -l /opt/librenms/logs/daily.log` 的時間是 05:19 左右
+- [x] 10/20 確認 `daily.sh` 照新時間執行：`daily.log` 時間為 `2026-10-20 05:19:13`
 - [x] LibreNMS 舊事件紀錄（`eventlog`，DATETIME）event_id ≤ 436510 共 12,560 筆已 +8 小時（步驟四④）
 - [x] 反覆出現的溫度門檻事件已追查，另寫一篇：[LibreNMS 溫度告警誤報](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/librenms-temperature-sensor-cleanup/)
 - [ ] 以後新建 LXC 時，建好就設 `timedatectl set-timezone Asia/Taipei`；定期用 `/root/check-ct-tz.sh` 檢查
