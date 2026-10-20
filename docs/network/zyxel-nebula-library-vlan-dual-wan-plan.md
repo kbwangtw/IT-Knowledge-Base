@@ -48,7 +48,7 @@ last_modified_at: 2026-10-20
 
 | 項目 | 現況 |
 | --- | --- |
-| 兩條 FTTB 分工 | 館員電腦走 ge1（WAN A），讀者電腦走 ge2（WAN B），推測是 Policy Route 依來源 IP 判斷（未確認） |
+| 兩條 FTTB 分工 | Policy Route 兩條：Incoming `ge3`（LAN1）＋來源物件「館員電腦群組」→ ge1（WAN A）；「讀者電腦範圍」→ ge2（WAN B），SNAT 都是 Outgoing-interface。不在物件裡的（Wi-Fi 使用者、網路設備）走預設路由 |
 | 館員電腦固定 IP | LAN1 的靜態 DHCP 表用 MAC 綁 IP |
 | DHCP 租約 | 1 天 |
 
@@ -113,7 +113,7 @@ last_modified_at: 2026-10-20
 | 4 | 館員設備改連 `<SSID>-staff`，並在設備上「忘記」`<SSID>` | 館員短暫斷線 | 館員設備都在 VLAN 10 |
 | 5 | 100H 加安全政策（第 6 節） | 無 | — |
 | 6 | `<SSID>` 的 VLAN ID 改成 20，按**儲存** | 讀者斷線重連 | 讀者拿到 VLAN 20 的 IP，ping 不到館內網段 |
-| 7 | 在現有的分流規則上加入 VLAN 10、20（第 7 節） | 短暫 | 讀者查外網 IP＝WAN B；館員＝WAN A |
+| 7 | 新增規則 0、3、4（第 7 節），規則 1、2 不動 | 短暫 | 讀者 Wi-Fi 外網 IP＝WAN B；館員 Wi-Fi＝WAN A，且**能列印到 VLAN 1 的印表機**；有線電腦外網 IP 不變 |
 | 8 | 拔 WAN B 的線測試 | 讀者短暫斷線 | 讀者是否自動改走 WAN A（**未確認**） |
 
 > ⚠️ **為什麼步驟 3、4 要在步驟 6 前面**：館員原本也連 `<SSID>`。先把 `<SSID>` 改到 VLAN 20 的話，館員的筆電會被擋在讀者網段，連不到館內印表機和系統。
@@ -133,12 +133,18 @@ last_modified_at: 2026-10-20
 
 ## 7. 兩條 FTTB 分流
 
-| 規則 | 來源 | 走 |
-| --- | --- | --- |
-| 現有 | 依目前設定 | 館員電腦 → WAN A（ge1）、讀者電腦 → WAN B（ge2） |
-| 新增 | VLAN 20（讀者 Wi-Fi） | WAN B（`203.0.113.x`） |
-| 新增 | VLAN 10（館員 Wi-Fi） | WAN A（`198.51.100.x`）——沒加的話，可能被現有的預設規則送去 WAN B |
-| 第二階段 | VLAN 30（讀者公用電腦） | WAN B |
+現有兩條規則的 Incoming 都是 `ge3`（LAN1）。新 VLAN 的流量從 `vlan10`／`vlan20` 進來，**不會被現有規則抓到**，所以只要新增規則，現有的不用動：
+
+| # | Incoming | Source | Destination | Next-Hop | SNAT | 說明 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 | Any | Any | 內網各網段 | 依路由表（欄位未確認） | 不做 | 新增：內網互通不送外網 |
+| 1 | ge3 | 館員電腦群組 | Any | ge1（WAN A，`198.51.100.x`） | Outgoing-interface | 現有 |
+| 2 | ge3 | 讀者電腦範圍 | Any | ge2（WAN B，`203.0.113.x`） | Outgoing-interface | 現有 |
+| 3 | vlan10 | Any | Any | ge1 | Outgoing-interface | 新增：館員 Wi-Fi |
+| 4 | vlan20 | Any | Any | ge2 | Outgoing-interface | 新增：讀者 Wi-Fi |
+| 第二階段 | vlan30 | Any | Any | ge2 | Outgoing-interface | 讀者公用電腦搬完、測試後停用規則 2 |
+
+> **規則 0 的原因（推測，未確認）**：Destination 是 Any 的 Policy Route，可能把館員 Wi-Fi 到館內印表機（VLAN 1）的流量也送去外網。原本全部在同一網段、不經過路由，所以沒遇到；切 VLAN 之後就要防。實作後**一定要測館員 Wi-Fi 能不能列印**。
 
 Nebula 位置：**整個站點 > 設定 > 防火牆 > 路由**（依 Zyxel 支援文件；100H 的實際選單**未確認**）。
 
@@ -155,7 +161,8 @@ Nebula 位置：**整個站點 > 設定 > 防火牆 > 路由**（依 Zyxel 支�
 | 改完 `<SSID>` 後，館員連不到印表機 | 館員設備還連在 `<SSID>`（現在是讀者網段），請改連 `<SSID>-staff` |
 | 讀者連上但拿不到 IP | 依 [SOP 8-5](../zyxel-nebula-switch-vlan/#8-5-確認整條路徑都設好了) 檢查：接 AP 的埠是否 Trunk、允許清單是否有 20、`vlan20` 介面是否開了 DHCP |
 | 交換器或 AP 從 Nebula 離線 | Trunk 的允許清單漏了 `1`（管理 VLAN），把 `1` 加回去 |
-| 館員 Wi-Fi 的流量跑到 WAN B | 現有分流規則沒有涵蓋 VLAN 10，把 VLAN 10 加進走 WAN A 的規則 |
+| 館員 Wi-Fi 的流量跑到 WAN B | 現有規則的 Incoming 是 `ge3`，抓不到 `vlan10`；要另外新增 Incoming＝`vlan10` 的規則 |
+| 館員 Wi-Fi 上得了網，卻印不到館內印表機 | Policy Route 的 Destination 是 Any，內網流量被送去外網（推測）；加上規則 0，或把 Destination 改成「非內網」 |
 | 館員筆電搬到 VLAN 10 後 IP 不固定 | LAN1 的 MAC 綁定不會帶到 VLAN 10，要在 `vlan10` 重建；並確認設備對這個 SSID 關掉「隨機 MAC 位址」 |
 | 靜態 DHCP 表有兩筆同名 | 只是名稱重複，不影響發 IP，但查 log 會混淆，建議更正（本案現況就有一筆） |
 | 讀者還是 ping 得到館內設備 | 第 6 節的安全政策沒有生效，或規則順序不對 |
@@ -165,7 +172,7 @@ Nebula 位置：**整個站點 > 設定 > 防火牆 > 路由**（依 Zyxel 支�
 - [ ] 補上每條連線的埠號（設備與連線關係已從 Nebula 拓撲圖確認）
 - [ ] 確認新網段沒有和 VPN 或其他網段重疊
 - [ ] 統計讀者尖峰同時上線人數，確認 /23 夠不夠用
-- [ ] 截圖目前的分流規則，確認用什麼條件分 WAN A／B
+- [ ] 確認預設路由走哪條 WAN、Policy Route 有沒有「依路由表」的 Next-Hop
 - [ ] 盤點讀者公用電腦台數與接埠（第二階段用）
 - [ ] 實作後補上實測結果與截圖，把結論改成 ✅
 - [ ] 實測 Policy Route 在單線斷線時的行為
