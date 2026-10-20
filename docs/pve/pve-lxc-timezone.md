@@ -4,7 +4,7 @@ title: "一次檢查並統一所有 LXC 的時區"
 date: 2026-10-19
 categories: [PVE, LXC]
 permalink: /docs/pve/pve-lxc-timezone/
-last_modified_at: 2026-10-19
+last_modified_at: 2026-10-20
 ---
 
 # 一次檢查並統一所有 LXC 的時區
@@ -16,7 +16,7 @@ last_modified_at: 2026-10-19
 | 適合誰看 | 容器裡的時間和節點差 8 小時、想一次檢查所有 LXC 的人 |
 | 環境 | PVE 9.2 三節點（node10～12）；10 台 LXC（Debian／Ubuntu） |
 | 日期 | 2026-10-19 |
-| 結論 | ✅ 10 台 LXC 都是 Asia/Taipei、`+0800` ✅ LibreNMS 的 PHP 與 MariaDB 時間一致，poller 已恢復 ✅ Graylog 重啟後 log 改為台灣時間 |
+| 結論 | ✅ 10 台 LXC 都是 Asia/Taipei、`+0800` ✅ LibreNMS 的 PHP 與 MariaDB 時間一致，poller 已恢復 ✅ Graylog 重啟後 log 改為台灣時間 ✅ 10/20 補上 9 台缺少的 en_US.UTF-8 語系（第 8 節） |
 
 ## 1. 先認識幾個名詞
 
@@ -360,11 +360,87 @@ ssh root@node10 "pct exec 102 -- sh -c '
 
 **看到的結果**：`19   5    * * *   librenms …daily.sh`，`diff` 只差這一行；cron 16:13:01 `RELOAD (/etc/cron.d/librenms)`，沒有錯誤；poller 照常每 5 分鐘輪詢。
 
-## 8. 常見問題
+## 8. 補充：產生 en_US.UTF-8 語系（2026-10-20）
+
+**問題**：升級 Graylog（CT 105）時，apt 一直出現：
+
+```text
+perl: warning: Setting locale failed.
+        LANG = "en_US.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+```
+
+**原因**：從節點 `pct enter` 或 SSH 進容器時會帶著 `LANG=en_US.UTF-8`，但容器裡**沒有產生**這個語系，perl、apt 只好退回 `C`。只是警告，不影響服務。
+
+### 8-1 一次查所有容器（只讀取）
+
+在 node10 執行（`pct exec` 只能操作本機的容器，所以用 SSH 到三台各跑一次）：
+
+```bash
+for h in node10 node11 node12; do
+  ssh -o BatchMode=yes root@$h bash -s <<'EOS'
+for id in $(pct list | awk 'NR>1 && $2=="running"{print $1}'); do
+  o=$(pct exec $id -- sh -c '. /etc/os-release; echo $ID$VERSION_ID')
+  p=$(pct exec $id -- sh -c 'dpkg -s locales >/dev/null 2>&1 && echo 有 || echo 無')
+  n=$(pct exec $id -- sh -c 'locale -a 2>/dev/null | grep -ci "^en_US.utf8$"')
+  echo "$(hostname) CT$id 系統=$o locales套件=$p en_US.UTF-8=$n"
+done
+EOS
+done
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `ssh … bash -s <<'EOS'` | 把整段送到每台節點執行 |
+| `dpkg -s locales` | 有沒有裝產生語系需要的 locales 套件 |
+| `locale -a \| grep -ci en_US.utf8` | 1＝已產生，0＝沒有 |
+
+**看到的結果**：10 台都有 locales 套件，只有 CT 109 已有 en_US.UTF-8；其餘 9 台（Debian 12／13 ×6、Ubuntu 22.04／24.04 ×3）都是 0。
+
+### 8-2 一次產生語系
+
+Debian 要先在 `/etc/locale.gen` 打開那一行再 `locale-gen`；Ubuntu 直接 `locale-gen en_US.UTF-8`。只多一份語系檔，**不改系統預設語言、不重啟服務**：
+
+```bash
+for h in node10 node11 node12; do
+  ssh -o BatchMode=yes root@$h bash -s <<'EOS'
+for id in $(pct list | awk 'NR>1 && $2=="running"{print $1}'); do
+  n=$(pct exec $id -- sh -c 'locale -a 2>/dev/null | grep -ci "^en_US.utf8$"')
+  [ "$n" = 1 ] && { echo "$(hostname) CT$id 已經有，跳過"; continue; }
+  pct exec $id -- sh -c '
+    . /etc/os-release
+    if [ "$ID" = ubuntu ]; then
+      locale-gen en_US.UTF-8 >/dev/null
+    else
+      cp -a /etc/locale.gen /etc/locale.gen.bak-$(date +%Y%m%d)
+      sed -i "s/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/" /etc/locale.gen
+      grep -q "^en_US.UTF-8 UTF-8" /etc/locale.gen || echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
+      locale-gen >/dev/null
+    fi'
+  n=$(pct exec $id -- sh -c 'locale -a 2>/dev/null | grep -ci "^en_US.utf8$"')
+  echo "$(hostname) CT$id en_US.UTF-8=$n"
+done
+EOS
+done
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `[ "$n" = 1 ] && … continue` | 已經有的跳過 |
+| `cp -a /etc/locale.gen …bak-日期` | Debian 改設定檔前先備份 |
+| `sed -i "s/^# *en_US…/…/"` | 打開被註解的那一行；沒有這一行就加在最後 |
+
+**看到的結果**：9 台都變成 `en_US.UTF-8=1`，CT 109 跳過；`pct exec 105 -- perl -e 'print "OK\n"'` 只印 `OK`，沒有警告。
+
+新建容器時記得一起做：`pct exec <ID>` 後照 8-2 產生語系。
+
+## 9. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
 | 時間已經是 `+0800`，但 `/etc/timezone` 還寫 `Etc/UTC` | `timedatectl` 只改 `/etc/localtime`；`echo Asia/Taipei > /etc/timezone`，Java 程式才會讀到新時區 |
+| apt 出現 `perl: warning: Setting locale failed` | 容器沒有產生 `en_US.UTF-8`；照第 8 節產生，只是警告、不影響服務 |
 | `while read` 迴圈裡用 ssh，只跑了第一台 | ssh 會吃掉迴圈的標準輸入；ssh 指令後面加 `< /dev/null` |
 | LibreNMS `validate.php`：`Time between this server and the mysql database is off` | MariaDB 還在用舊時區；`systemctl restart mariadb` |
 | 改時區後，LibreNMS 舊的事件紀錄時間早了 8 小時 | `eventlog.datetime` 是 DATETIME（不帶時區）；依 event_id 找出切點，備份後把切點之前的紀錄 +8 小時（步驟四④）。`alerts`、`alert_log`、`syslog` 是 TIMESTAMP，不受影響 |
@@ -376,7 +452,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 | 用 `sed` 分組替換改 cron 欄位後，變成 `195    * * *` | 替換字串漏了保留空白的分組（例如 `\1` 和新值之間少了 `\2`），分鐘和小時黏在一起成為無效值；10/19 因此讓整個 `/etc/cron.d/librenms` 被忽略約 1 分鐘（沒碰到 poller 執行時間）。改用比對完整開頭字串的替換，並用 `diff` 和備份比對 |
 | 容器的時間（不是時區）不對 | 容器共用節點的時鐘，去查節點的 NTP：`timedatectl show -p NTPSynchronized --value` |
 
-## 9. 待辦
+## 10. 待辦
 
 - [x] LibreNMS poller 在 MariaDB 重啟後已恢復（16:06:40 輪詢 16 台，validate OK）
 - [x] CT 105 Graylog 重啟，log 時間改為 `+08:00`（7-1）
@@ -387,7 +463,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 - [ ] 以後新建 LXC 時，建好就設 `timedatectl set-timezone Asia/Taipei`；定期用 `/root/check-ct-tz.sh` 檢查；Ubuntu 24.04 容器同時停用容器內的 rsyslogd AppArmor 規則（見 Wazuh 維運篇 11-2）
 - [x] 刪除 CT 102 的 `/etc/php/8.4/*/php.ini.bak-20261019`、`/root/librenms.cron.bak-20261019`、`/root/eventlog-before-tzfix-20261019.sql.gz`（2026-10-20）
 
-## 10. 延伸閱讀
+## 11. 延伸閱讀
 
 - [把 PVE、PBS 與 NAS 的日誌集中到 Graylog（一）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-graylog-syslog-pipeline-sop/)：11-1 Graylog 顯示時區（和容器系統時區是兩回事）
 - [Graylog 告警與監控（三）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alert-templates/)：告警信裡的 `+08:00` 是時區標記（第 11 節）
