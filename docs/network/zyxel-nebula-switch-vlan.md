@@ -395,6 +395,7 @@ SSID 填 VLAN ID 只是第一步，使用者要拿得到 IP、上得了網，流
 - [Nebula Switch VLAN 設定教學（原文）](https://community.zyxel.com/tw/discussion/16355/nebula-switch-vlan-%E8%A8%AD%E5%AE%9A%E6%95%99%E5%AD%B8)：Zyxel 台灣社群，第 5～7 節的來源，含截圖
 - [Nebula 如何設定無線網路 (SSID) 的 VLAN ID（原文）](https://community.zyxel.com/tw/discussion/16659/nebula-%E5%A6%82%E4%BD%95%E8%A8%AD%E5%AE%9A%E7%84%A1%E7%B7%9A%E7%B6%B2%E8%B7%AF-ssid-%E7%9A%84-vlan-id)：Zyxel 台灣社群，第 8 節的來源，含截圖
 - [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](../cht-security-fleet-dns-filtering/)：防火牆 DNS 要填什麼
+- [圖書館 Nebula 網路規劃：讀者 Wi-Fi 切 VLAN、兩條 FTTB 分流](../zyxel-nebula-library-vlan-dual-wan-plan/)：本篇的實際案例
 - [Configuration and explanation of VLAN (Trunk/Access/PVID) on Nebula switch](https://community.zyxel.com/en/discussion/10887/configuration-and-explanation-of-vlan-trunk-access-pvid-on-nebula-switch)：英文版說明
 - [How to Configure Management VLAN on Nebula Switch via Nebula?](https://community.zyxel.com/en/discussion/16675/how-to-configure-management-vlan-on-nebula-switch-via-nebula)：管理 VLAN 不用 VLAN 1 時怎麼改
 - [[NEBULA] How to Configure Voice VLAN on Zyxel Nebula Switch](https://community.zyxel.com/en/discussion/2730/nebula-how-to-configure-voice-vlan-on-zyxel-nebula-switch)：語音 VLAN 設定
