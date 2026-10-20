@@ -16,7 +16,7 @@ last_modified_at: 2026-10-19
 | 適合誰看 | LibreNMS 一直跳溫度告警、或監控 PVE 上 LXC 的人 |
 | 環境 | LibreNMS（CT 102，PHP 8.4、MariaDB）；PVE 三節點 node10～12（AMD Ryzen、DDR5、雙 NVMe、r8169 網卡）；Synology tokyo16、melayu17 |
 | 日期 | 2026-10-19 |
-| 結論 | ✅ 10 台 LXC 停用 sensors 模組、刪除 109 個重複感測器 ✅ node10～12 依元件重設門檻，全部低於門檻 |
+| 結論 | ✅ 10 台 LXC 停用 sensors 模組、刪除 109 個重複感測器 ✅ node10～12 依元件重設門檻，全部低於門檻 ✅ 隔天確認：除 NAS 外溫度事件從 107 筆降到 0 |
 
 ## 1. 先認識幾個名詞
 
@@ -201,6 +201,32 @@ ssh root@node10 "pct exec 102 -- sh -c '
 
 **還原**：`zcat /root/sensors-before-limits-20261019.sql.gz | mysql librenms`（在 CT 102 內）（這次的備份已於 2026-10-20 刪除）；之後要改門檻，直接在網頁 Health → Temperature 修改。
 
+### 6-1 隔天確認：誤報消失了
+
+**怎麼做**（2026-10-20 早上，只讀取）：以門檻調整的 10/19 16:35 為分界，統計每台設備前後的溫度事件數。
+
+```bash
+ssh root@node10 "pct exec 102 -- mysql -t librenms -e \"
+SELECT SUBSTRING_INDEX(d.hostname,'.',1) AS 設備,
+       SUM(e.datetime <  '2026-10-19 16:35:00') AS 調整前24小時,
+       SUM(e.datetime >= '2026-10-19 16:35:00') AS 調整後,
+       MAX(e.datetime) AS 最後一次
+FROM eventlog e JOIN devices d ON d.device_id = e.device_id
+WHERE e.type = 'temperature' AND e.datetime > '2026-10-18 16:35:00'
+GROUP BY d.hostname ORDER BY 調整後 DESC, 調整前24小時 DESC\"" < /dev/null
+```
+
+**看到的結果**：
+
+| 設備 | 調整前 24 小時 | 調整後（到 10/20 早上） |
+| --- | --- | --- |
+| node10、node11、node12 | 10、11、15 | **0** |
+| pihole、adguard、wazuh | 24、22、18 | **0** |
+| 其他 7 台 LXC（librenms、graylog、ai、wireguard、ipam、grafana、proxcenter） | 各 1 | **0** |
+| tokyo16（NAS，另外處理） | 56 | 7 |
+
+除了 NAS 以外，溫度事件從調整前 24 小時的 107 筆降到 0。
+
 ## 7. 常見問題
 
 | 現象 | 怎麼辦 |
@@ -214,7 +240,7 @@ ssh root@node10 "pct exec 102 -- sh -c '
 
 ## 8. 待辦
 
-- [ ] 觀察一天，確認 LibreNMS 事件紀錄不再出現 LXC 與 node10～12 的 `Temperature above threshold`（NAS 的溫度另外處理，不在本文範圍）
+- [x] 觀察到隔天早上，LXC 與 node10～12 都沒有再出現 `Temperature above threshold`（見 6-1）
 - [ ] 以後新增 LXC 到 LibreNMS 時，加入後就關掉 sensors 模組
 - [ ] node12 的 2 TB NVMe（KINGSTON SNV3S）內部感測器 71.8 °C：觀察是否持續上升
 - [x] 刪除 CT 102 的 `/root/sensors-before-lxcfix-20261019.sql.gz`、`/root/sensors-before-limits-20261019.sql.gz`（2026-10-20）
