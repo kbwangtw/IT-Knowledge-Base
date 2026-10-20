@@ -1031,6 +1031,8 @@ PBS31 不在叢集的 SSH 互信裡（也不該為此加進去），到 PBS31 �
 cp -a /etc/postfix/main.cf.bak-<日期> /etc/postfix/main.cf && systemctl reload postfix
 ```
 
+這次四台的 `main.cf.bak-20261019` 已於 2026-10-20 刪除；之後要改回，手動 `postconf -X smtp_tls_security_level` 再 `postconf -e "smtp_use_tls = yes"`，或改成 `smtp_tls_security_level = may`（效果相同）。
+
 ## 10. 常見問題
 
 | 現象 | 原因 | 怎麼辦 |
