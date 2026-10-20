@@ -947,7 +947,7 @@ curl -s http://$GL:9000/api/ ; echo
 | 服務 | 三個 active；hold 仍是 graylog-server、opensearch |
 | 停機 | 停 graylog-server 到 `ALIVE` 約 1～2 分鐘 |
 
-- apt 執行時出現 `perl: warning: Setting locale failed`：容器沒有產生 `en_US.UTF-8` 語系，不影響升級與 Graylog。
+- apt 執行時出現 `perl: warning: Setting locale failed`：容器沒有產生 `en_US.UTF-8` 語系，不影響升級與 Graylog；10/20 已補上（[LXC 時區文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-lxc-timezone/)第 8 節）。
 - `dpkg -l graylog-server | grep ^ii` 這次沒有輸出，改用 `dpkg-query -W` 確認版本。
 - 快照 `pre-graylog-7111` 觀察一天正常後刪除（⏳）。
 
