@@ -1016,7 +1016,7 @@ curl -s http://$GL:9000/api/ ; echo
 
 - apt 執行時出現 `perl: warning: Setting locale failed`：容器沒有產生 `en_US.UTF-8` 語系，不影響升級與 Graylog；10/20 已補上（[LXC 時區文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-lxc-timezone/)第 8 節）。
 - `dpkg -l graylog-server | grep ^ii` 這次沒有輸出，改用 `dpkg-query -W` 確認版本。
-- 快照 `pre-graylog-7111` 觀察一天正常後刪除（⏳）。
+- 觀察一天正常後，10/21 在 node11 `pct delsnapshot 105 pre-graylog-7111` 刪除快照（`listsnapshot` 只剩 `current`）。
 - 10/21 08:00 收到【每日健康回報】（node11），升級後整條告警鏈正常。
 
 **新版預設設定檔對照（10/21）**：`server.conf` 有密碼雜湊、`password_secret`、寄信密碼，不能直接 `diff`；只比對**設定名稱**（含被註解的說明項目），不顯示值：
