@@ -14,7 +14,7 @@ last_modified_at: 2026-10-21
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | LibreNMS 一直跳溫度告警、或監控 PVE 上 LXC 的人 |
-| 環境 | LibreNMS（CT 102，PHP 8.4、MariaDB）；PVE 三節點 node10～12（AMD Ryzen、DDR5、雙 NVMe、r8169 網卡）；Synology tokyo16、melayu17 |
+| 環境 | LibreNMS（CT 102，PHP 8.4、MariaDB）；PVE 三節點 node10～12（Win element M600：AMD Ryzen 9 8945HS、DDR5 64 GB、雙 NVMe、r8169 網卡）；Synology tokyo16、melayu17 |
 | 日期 | 2026-10-19 |
 | 結論 | ✅ 10 台 LXC 停用 sensors 模組、刪除 109 個重複感測器 ✅ node10～12 依元件重設門檻，全部低於門檻 ✅ 隔天確認：除 NAS 外溫度事件從 107 筆降到 0 ⏳ tokyo16 設備太密導致偏熱，10/24～25 調整擺放 ✅ node12 NVMe 的 Sensor 2 是讀數卡住，不是過熱（第 8 節） |
 

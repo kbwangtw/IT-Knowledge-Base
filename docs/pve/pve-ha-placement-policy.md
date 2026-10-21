@@ -14,7 +14,7 @@ last_modified_at: 2026-10-19
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 同時用 PVE 和 ProxCenter，不確定規則該設在哪邊的人 |
-| 環境 | Proxmox VE 9.2.20 → 9.2.21，三節點（node10、node11、node12），Ceph 共用儲存 |
+| 環境 | Proxmox VE 9.2.20 → 9.2.21，三節點（node10、node11、node12，皆為 Win element M600：Ryzen 9 8945HS、64 GB），Ceph 共用儲存 |
 | 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案；10/19 再次分散 |
 | 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；✅ 10/19 HA 資源分散為 4／5／4；⏳ 單節點故障演練 |
 

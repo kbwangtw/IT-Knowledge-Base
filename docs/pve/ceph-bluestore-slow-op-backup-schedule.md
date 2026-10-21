@@ -14,7 +14,7 @@ last_modified_at: 2026-10-21
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 看到 `BLUESTORE_SLOW_OP_ALERT`、想知道要不要換硬碟的人；要排 PVE／PBS 備份時間的人 |
-| 環境 | PVE 9.2.21、kernel 7.0.14-23-pve、Ceph 20.2.4-pve5；PBS31 為 PBS 4.2.8，datastore Tokyo16 在 CIFS 掛載上 |
+| 環境 | 三台 Win element M600（Ryzen 9 8945HS、64 GB，硬體見 8-1）；PVE 9.2.21、kernel 7.0.14-23-pve、Ceph 20.2.4-pve5；PBS31 為 PBS 4.2.8，datastore Tokyo16 在 CIFS 掛載上 |
 | 日期 | 2026-10-13～14；10/16 補 slow ops 歷史 |
 | 結論 | ✅ 硬碟與核心正常；✅ 三台備份錯開；✅ PBS GC 77 → 7 分鐘；✅ 告警消失；✅ 10/21 一週追蹤：retries 沒有上升（142 → 117），期間沒有再出現告警 |
 
@@ -228,6 +228,38 @@ done
 - PBS：刪除沒規則的 Prune Job；Verify 改到 02:00 後，GC 從 77 分鐘降到 7 分鐘。
 - 觀察：`ceph health` 是否再出現 `BLUESTORE_SLOW_OP_ALERT`；osd.0 SMART 的 Unsafe Shutdowns 是否增加。
 - 如果告警反覆出現，再評估降低單一備份的並行讀取（例如 vzdump 的頻寬限制，或 `performance` 的 max-workers），本次沒有調整。
+
+### 8-1 三台硬體與 OSD 碟款（2026-10-21）
+
+用 `dmidecode` 讀硬體資訊（在 node10 執行，唯讀；刻意不查序號）：
+
+```bash
+for h in node10 node11 node12; do
+  echo "===== $h ====="
+  ssh -o BatchMode=yes root@$h '
+    echo "系統廠牌：$(dmidecode -s system-manufacturer)"
+    echo "系統型號：$(dmidecode -s system-product-name)"
+    echo "主機板：  $(dmidecode -s baseboard-manufacturer) $(dmidecode -s baseboard-product-name)"
+    echo "BIOS：    $(dmidecode -s bios-version)（$(dmidecode -s bios-release-date)）"
+    echo "CPU：     $(dmidecode -s processor-version | head -1)"
+    echo "記憶體：  $(free -g | awk "/Mem:/{print \$2}") GB"
+    for d in /sys/class/nvme/nvme*; do echo "NVMe：    $(cat $d/model | xargs)（$(cat $d/address)）"; done
+  '
+done
+```
+
+| 項目 | node10 | node11 | node12 |
+| --- | --- | --- | --- |
+| 機型 | Win element M600 | Win element M600 | Win element M600 |
+| CPU | AMD Ryzen 9 8945HS（Radeon 780M） | 同左 | 同左 |
+| 記憶體 | 64 GB（`free` 顯示 62 GB，部分保留給內顯與系統） | 同左 | 同左 |
+| BIOS | SR500_P5C2V08（2024/07/29） | SR500_P5C2V08（2024/07/29） | SR500_P5C2V**09**（2024/11/21） |
+| 系統碟 512 GB（`06:00`） | SAMSUNG MZVL4512HBLU | KINGSTON OM8SEP4512Q | KINGSTON SA2000M8500G |
+| 資料碟 2 TB（`01:00`，Ceph OSD） | BIWIN NV7200（osd.0） | Lexar THOR PRO（osd.1） | KINGSTON SNV3S（osd.2） |
+
+**和 retries 分布對照（推測）**：一週平均每晚 osd.0 約 23（最少）、osd.1 約 39、osd.2 約 70（最多）。osd.2 的 KINGSTON NV3 系列是入門款，推測大量讀寫時較慢，所以排隊重試最多；沒有實測三顆碟的效能，資料分布與 PG 主副本位置也會影響，未確認。三個廠牌的好處是不容易同時故障，代價是 Ceph 會被最慢的那顆拖住。目前 retries 穩定、沒有告警，不需要處理；日後要換碟可優先考慮 osd.2。
+
+- node12 的 BIOS 比另兩台新一版；沒有造成問題，不為了一致而更新（有變磚風險、要停機），等真的需要時三台一起評估。
 
 **PBS 每天的忙碌時段**變成三段，重啟 `proxmox-backup-proxy`、升級 PBS 套件或重開 PBS 都要避開：
 
