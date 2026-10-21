@@ -959,6 +959,23 @@ curl -s http://$GL:9000/api/ ; echo
 - apt 執行時出現 `perl: warning: Setting locale failed`：容器沒有產生 `en_US.UTF-8` 語系，不影響升級與 Graylog；10/20 已補上（[LXC 時區文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-lxc-timezone/)第 8 節）。
 - `dpkg -l graylog-server | grep ^ii` 這次沒有輸出，改用 `dpkg-query -W` 確認版本。
 - 快照 `pre-graylog-7111` 觀察一天正常後刪除（⏳）。
+- 10/21 08:00 收到【每日健康回報】（node11），升級後整條告警鏈正常。
+
+**新版預設設定檔對照（10/21）**：`server.conf` 有密碼雜湊、`password_secret`、寄信密碼，不能直接 `diff`；只比對**設定名稱**（含被註解的說明項目），不顯示值：
+
+```bash
+cd /etc/graylog/server
+d(){ grep -oE '^\s*#?\s*[a-z][a-z_0-9.]+\s*=' "$1" | sed -E 's/^\s*#?\s*//; s/\s*=$//' | sort -u; }
+echo "== 1. 新版有、舊版沒提到"; comm -13 <(d server.conf) <(d server.conf.dpkg-dist)
+echo "== 2. 舊版有、新版沒提到"; comm -23 <(d server.conf) <(d server.conf.dpkg-dist)
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `d(){ … }` | 列出檔案提到的所有設定名稱（包括 `#` 註解掉的），只取 `=` 前面 |
+| `comm -13`／`comm -23` | 只在新版／只在目前設定出現的名稱 |
+
+看到的結果：新版只多了 `events_index_refresh_interval`（告警事件索引多久可被搜尋到，預設 `1s`，主要給有最低限制的託管 OpenSearch 用），註解狀態等於使用預設值；沒有被棄用的設定。**不需要修改** `server.conf`。
 
 ### 11-3 要不要升級到 Debian 13？（10/04 查證、10/06 測試）
 
