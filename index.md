@@ -114,6 +114,7 @@ last_modified_at: 2026-10-19
 | --- | --- |
 | [jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理](docs/network/jt-ipam-adoption-itbh/) | 想用工具管理 IP 位址，不再用 Excel |
 | [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | ping 得到外網，網址卻打不開 |
+| [圖書館 Nebula 網路規劃：VLAN 隔離讀者 Wi-Fi、兩條 FTTB 分流](docs/network/zyxel-nebula-library-vlan-dual-wan-plan/) | 第一次用 Nebula 切 VLAN；館員、讀者共用一個 Wi-Fi，想分開並讓兩條線分工（規劃，未實作） |
 
 ### 4-6 雲端、超融合與硬體
 
