@@ -4,7 +4,7 @@ title: "LibreNMS 溫度告警誤報：LXC 重複感測器與門檻整理"
 date: 2026-10-19
 categories: [PVE, LibreNMS, Monitoring]
 permalink: /docs/pve/librenms-temperature-sensor-cleanup/
-last_modified_at: 2026-10-19
+last_modified_at: 2026-10-21
 ---
 
 # LibreNMS 溫度告警誤報：LXC 重複感測器與門檻整理
@@ -16,7 +16,7 @@ last_modified_at: 2026-10-19
 | 適合誰看 | LibreNMS 一直跳溫度告警、或監控 PVE 上 LXC 的人 |
 | 環境 | LibreNMS（CT 102，PHP 8.4、MariaDB）；PVE 三節點 node10～12（AMD Ryzen、DDR5、雙 NVMe、r8169 網卡）；Synology tokyo16、melayu17 |
 | 日期 | 2026-10-19 |
-| 結論 | ✅ 10 台 LXC 停用 sensors 模組、刪除 109 個重複感測器 ✅ node10～12 依元件重設門檻，全部低於門檻 ✅ 隔天確認：除 NAS 外溫度事件從 107 筆降到 0 ⏳ tokyo16 設備太密導致偏熱，10/24～25 調整擺放 |
+| 結論 | ✅ 10 台 LXC 停用 sensors 模組、刪除 109 個重複感測器 ✅ node10～12 依元件重設門檻，全部低於門檻 ✅ 隔天確認：除 NAS 外溫度事件從 107 筆降到 0 ⏳ tokyo16 設備太密導致偏熱，10/24～25 調整擺放 ✅ node12 NVMe 的 Sensor 2 是讀數卡住，不是過熱（第 8 節） |
 
 ## 1. 先認識幾個名詞
 
@@ -275,7 +275,46 @@ WHERE SUBSTRING_INDEX(d.hostname,'.',1)='tokyo16' AND e.type='temperature'
 | 事件減少到每天個位數 | 有改善；再看 DSM → 控制台 → 硬體與電源 → 風扇模式 |
 | 和以前差不多 | 對流仍不足或有其他熱源 |
 
-## 8. 常見問題
+## 8. node12 NVMe 的 Sensor 2：讀數卡住，不是過熱（2026-10-21）
+
+**做什麼**：node12 的 2 TB NVMe（KINGSTON SNV3S）內部 `Sensor 2` 一直是 72 °C 左右，是三台最高的，確認是不是越來越熱。
+
+**怎麼做①：看硬碟自己記錄的 SMART**（在 node10 執行，唯讀；用 PCI 位置找出 2 TB 碟，重開後 `/dev/nvmeX` 編號可能會變）：
+
+```bash
+ssh root@node12 '
+for d in /sys/class/nvme/nvme*; do [ "$(cat $d/address)" = "0000:01:00.0" ] && dev=/dev/$(basename $d); done
+echo "== 裝置：$dev"
+smartctl -A $dev | grep -iE "temperature|warning|critical|percentage used|data units written|media"
+'
+```
+
+| 項目 | 數值 |
+| --- | --- |
+| Critical Warning | `0x00` |
+| Temperature（整體） | 38 °C |
+| Sensor 1／2／3 | 47／**72**／38 °C |
+| Warning／Critical Comp. Temperature Time | **0／0**（從出廠到現在，超過警告／危險溫度的累計分鐘數） |
+| Percentage Used | 3% |
+| Data Units Written | 17.0 TB |
+| Media and Data Integrity Errors | 0 |
+
+**怎麼做②：看 LibreNMS 一個月的圖**（Devices → node12 → Health → Temperature → Sensor 2 → 1 個月）：
+
+```text
+9/22～9/26：約 43～55 °C，有正常的上下起伏
+9/26      ：突然跳到 69 °C
+9/30 起   ：72 °C，一條水平直線，一個月幾乎沒有變動
+```
+
+**判讀**：
+
+- 真實溫度一定會隨負載起伏（備份時段、白天晚上）；Sensor 2 從 9/30 起是**一條水平線**，整體溫度同時只有 38 °C。推測是這顆碟的韌體回報固定值（讀數卡住），**不是真實溫度**。
+- 硬碟判斷過熱用的是整體溫度，**累計過熱 0 分鐘**，壽命 3%、沒有資料錯誤，碟本身健康。
+- 跳變的原因（9/26 前後發生了什麼）未確認。
+- 處理：不用動。Sensor 2 的 LibreNMS 門檻 85 °C 維持，不會誤報；判斷這顆碟的溫度看 `Composite` 和 SMART。下次 node12 重開後（例如單節點故障演練）再看一次 Sensor 2，若變回有起伏的數值，就更能確定是韌體卡住。
+
+## 9. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
@@ -285,16 +324,18 @@ WHERE SUBSTRING_INDEX(d.hostname,'.',1)='tokyo16' AND e.type='temperature'
 | 不知道 `Sensor 2`、`temp1` 是什麼 | 在節點跑 `sensors`，看它在哪個晶片底下（`nvme-pci-…`、`mt7921_phy0`…）（步驟三） |
 | `sensors` 顯示 `ALARM (HIGH)` | 是硬體模組自己的門檻（例如 DDR5 high 55）；對照 `crit` 判斷是否真的危險 |
 | `acpitz-acpi-0:temp1` 一直是 0.0 | 這個 ACPI 感測器沒有讀數，可以不管 |
+| 某個感測器一直是同一個數字（圖是水平直線） | 可能是讀數卡住；對照同一顆元件的其他感測器和 SMART 的過熱累計時間判斷（第 8 節） |
 
-## 9. 待辦
+## 10. 待辦
 
 - [x] 觀察到隔天早上，LXC 與 node10～12 都沒有再出現 `Temperature above threshold`（見 6-1）
 - [ ] tokyo16：10/24～25 調整擺放位置；10/26 用第 7 節的查詢比較搬動前後（已排提醒）
 - [ ] 以後新增 LXC 到 LibreNMS 時，加入後就關掉 sensors 模組
-- [ ] node12 的 2 TB NVMe（KINGSTON SNV3S）內部感測器 71.8 °C：觀察是否持續上升
+- [x] node12 的 2 TB NVMe（KINGSTON SNV3S）內部感測器 71.8 °C：10/21 確認是讀數卡住、碟本身健康（第 8 節）
+- [ ] node12 下次重開後，看 Sensor 2 是否恢復起伏（可和單節點故障演練一起做）
 - [x] 刪除 CT 102 的 `/root/sensors-before-lxcfix-20261019.sql.gz`、`/root/sensors-before-limits-20261019.sql.gz`（2026-10-20）
 
-## 10. 延伸閱讀
+## 11. 延伸閱讀
 
 - [一次檢查並統一所有 LXC 的時區](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-lxc-timezone/)：這次是在修正 LibreNMS 舊事件紀錄時發現溫度事件的
 - [用 Grafana 建立戰情中心（二）：接上 LibreNMS](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/)
