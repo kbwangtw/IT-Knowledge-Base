@@ -1102,7 +1102,7 @@ node11、node12 從 node10 用 9-1 同樣的 `for h in node11 node12; do ssh …
 | node12 | 無 | ✅ 走 IPv4，`status=sent` |
 | pbs31 | 無 | ✅ 走 IPv4，`status=sent` |
 
-原本就只是偶爾發生，一封測試信沒出現不代表修好；真正的驗證是幾天後搜同一個查詢、時間從 10/20 13:48 起，應為 0 筆（⏳）。
+原本就只是偶爾發生，一封測試信沒出現不代表修好；真正的驗證是隔天搜同一個查詢：10/20 13:48～10/21 08:53 為 **0 筆** ✅。
 
 還原：`cp -a /etc/postfix/main.cf.bak-<日期>-ipv4 /etc/postfix/main.cf && systemctl reload postfix`，或 `postconf -X smtp_address_preference`。
 

@@ -78,7 +78,7 @@ Infrastructure Syslog 的實際索引名稱是 `infra_syslog_` 加上編號（In
 | 收集 | ✅ 三台 PVE、PBS31（10/08 加入）、兩台 NAS 都已確認收到 |
 | 分類（Pipeline） | ✅ 主機、服務、任務、認證、系統錯誤分類；PBS 識別；NAS 登入解析 |
 | 主機名稱查表 | ✅ 10/15 接上 jt-ipam，訊息中的 IP 自動補上 `src_host` |
-| 雜訊過濾 | ✅ 10/16 丟棄 PBS 讀取 NAS 產生的大量紀錄，tokyo16 每天少了約 7 萬筆 |
+| 雜訊過濾 | ✅ 10/16 丟棄 PBS 讀取 NAS 的紀錄（每天少約 7 萬筆）；10/20 再丟棄 PBS 的寫入紀錄，只保留刪除（再少約 3.4 萬筆，7-4） |
 | 告警 | ✅ 14 個告警運作中，全部寄 Gmail；10/16 盤點並修正 3 項設定；10/19 加入「每日健康回報」（下篇第 3 節） |
 | 監控 Graylog 本身 | ✅ 10/19 三台 PVE 每 5 分鐘從外部檢查，異常直接用 postfix 寄信；每日 08:00 健康回報驗證整條告警鏈（下篇第 5 節） |
 | NAS 快照複寫 | ✅ 10/19 複寫失敗、停止由 tokyo16 DSM 寄信；兩台 NAS 是否回應由三台 PVE 每 5 分鐘檢查（下篇第 6 節） |
@@ -569,6 +569,64 @@ end
 
 > 查詢時間範圍要注意時區（第 11-1 節）：改時區後，原本以 UTC 填的 Absolute 範圍會被平移 8 小時。
 
+### 7-4 再丟棄 PBS 寫入 NAS 的紀錄，保留刪除（2026-10-20～21）
+
+**做什麼**：7-3 之後，先分析兩台 NAS 送了哪些日誌，再決定要不要也丟掉 PBS 的寫入紀錄（原待辦「DSM 日誌過濾器」「觀察磁碟用量」）。
+
+**怎麼查**：Search 時間選最近 2 天，逐一看 Total results：
+
+| 查詢 | 筆數（10/18～10/20） | 判讀 |
+| --- | --- | --- |
+| `source:tokyo16` | 89,408 | tokyo16 總量（約 4.47 萬／天） |
+| `source:melayu17` | 36 | 很少，不用處理 |
+| `source:tokyo16 AND WinFileService AND <PBS 帳號>` | 89,374 | **99.96% 是 PBS 的 SMB 寫入**（write／create／rename／delete） |
+| `source:tokyo16 AND WinFileService AND NOT <PBS 帳號>` | 0 | 目前沒有其他人用 SMB |
+| `source:tokyo16 AND NOT WinFileService` | 34 | 系統、登入、Hyper Backup、風扇等，**要保留** |
+| 上面再加 `AND "Event: delete"` | 20,971 | 刪除約 1 萬／天，主要是 00:00 GC 清 `.chunks` |
+
+**選擇**：
+
+| 選項 | 取捨 |
+| --- | --- |
+| A. 維持現狀 | 每天約 4.5 萬筆幾乎都是雜訊 |
+| **B. 丟 write／create／rename，保留 delete（採用）** | 少約 77%；PBS 帳號被盜、有人刪備份時**刪除紀錄還在** |
+| C. PBS 帳號全部丟掉 | 量最少，但勒索軟體刪備份不會留下紀錄 |
+| D. DSM 關掉 SMB 寫入紀錄 | 對所有帳號生效，以後別人用 SMB 也沒紀錄 |
+
+**怎麼做**：規則加在 Synology Syslog Pipeline 的 **Stage 0**（和 7-3 的 read 規則並列）。和 7-3 一樣先用 `set_field("would_drop", "yes")` 模擬：write 訊息出現 `would_drop: yes`、delete 訊息沒有，再把 `then` 改成 `drop_message();`：
+
+```text
+rule "Drop - Synology PBS SMB write"
+when
+    contains(to_string($message.message), "User: <PBS 帳號>")
+    &&
+    (
+        contains(to_string($message.message), "WinFileService Event: write")
+        ||
+        contains(to_string($message.message), "WinFileService Event: create")
+        ||
+        contains(to_string($message.message), "WinFileService Event: rename")
+    )
+then
+    drop_message();
+end
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `"User: <PBS 帳號>"` | 只針對 PBS 帳號 |
+| write／create／rename 三選一 | 寫入類事件；delete 不在清單裡，所以保留 |
+| `contains()` 沒有第三個參數 | 有分大小寫，要和 DSM 訊息完全一致；DSM 改格式或 PBS 換帳號時，只是雜訊回來，不會漏掉其他紀錄 |
+
+**看到的結果**（10/20 11:25 上線，查 10/20 11:25～10/21 08:53）：
+
+| 查詢 | 結果 |
+| --- | --- |
+| PBS 的 write／create／rename | ✅ **0** |
+| PBS 的 delete | 11,814（集中在 00:07 GC） |
+| `source:tokyo16 AND NOT WinFileService` | 8（DDNS、USB 備份等，照常進來） |
+| `source:tokyo16` 總量 | 11,822（約 21.5 小時；原本約 4.47 萬／天） |
+
 ## 8. 看板
 
 | 看板 | 用途 | Widget |
@@ -949,7 +1007,7 @@ curl -s http://$GL:9000/api/ ; echo
 
 - apt 執行時出現 `perl: warning: Setting locale failed`：容器沒有產生 `en_US.UTF-8` 語系，不影響升級與 Graylog；10/20 已補上（[LXC 時區文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-lxc-timezone/)第 8 節）。
 - `dpkg -l graylog-server | grep ^ii` 這次沒有輸出，改用 `dpkg-query -W` 確認版本。
-- 快照 `pre-graylog-7111` 觀察一天正常後刪除（⏳）。
+- 觀察一天正常後，10/21 在 node11 `pct delsnapshot 105 pre-graylog-7111` 刪除快照（`listsnapshot` 只剩 `current`）。
 - 10/21 08:00 收到【每日健康回報】（node11），升級後整條告警鏈正常。
 
 **新版預設設定檔對照（10/21）**：`server.conf` 有密碼雜湊、`password_secret`、寄信密碼，不能直接 `diff`；只比對**設定名稱**（含被註解的說明項目），不顯示值：
@@ -1061,10 +1119,7 @@ curl -s https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt/dist
 
 ## 13. 待辦
 
-| 項目 | 說明 |
-| --- | --- |
-| DSM 日誌過濾器 | 確認兩台 NAS 送出哪些種類的日誌 |
-| 觀察磁碟用量 | 一週後決定是否也丟棄 PBS 的寫入紀錄 |
+本篇的待辦已全部完成（10/21 結案「DSM 日誌過濾器」「觀察磁碟用量」，見 7-4）。
 
 告警相關的待辦（Summary Template、新告警測試、單節點故障演練、每月看 Snapshot Replication）在下篇第 11 節。
 
