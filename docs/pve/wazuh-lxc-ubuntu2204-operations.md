@@ -4,7 +4,7 @@ title: "Wazuh 維運（二）：資料保留、告警調校、弱點修補與整
 date: 2026-10-02
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-operations/
-last_modified_at: 2026-10-20
+last_modified_at: 2026-10-22
 ---
 {% raw %}
 
@@ -1048,7 +1048,7 @@ pct exec 102 -- mysql librenms -e "SELECT g.name, d.hostname FROM device_group_d
 
 | 群組 | 規則 | 成員 |
 | --- | --- | --- |
-| Virtual_Group | `devices.sysDescr` contains `-pve` AND `devices.features` not contains `PVE` | 10 台 LXC、pbs31 |
+| Virtual_Group | `devices.sysDescr` contains `-pve` AND `devices.features` not contains `PVE`（10/22 再加三台 VM，見下方「2026-10-22 補充」） | 10 台 LXC、pbs31（10/22 起再加 DC01、DC02、CA） |
 | Physical_Group | `devices.features` contains `PVE` | node10、node11、node12 |
 | Storage_Group | `devices.os` equal `dsm` | tokyo16、melayu17 |
 
@@ -1057,9 +1057,40 @@ pct exec 102 -- mysql librenms -e "SELECT g.name, d.hostname FROM device_group_d
 注意事項：
 
 - 規則依賴 `features`（`extend distro`）。新 LXC 以 `snmp-v3-add.sh` 加入會一併安裝 distro 並自動進入 Virtual_Group；手動設定 SNMP 未裝 distro 時 `features` 為 NULL，不會進任何群組。新 PVE 節點同理，要有 distro 才會進 Physical_Group。
-- 日後加入 DC01、DC02 時，Virtual_Group 加上 `OR devices.os equal windows`（環境中納管的 Windows 只有 DC，皆為 VM）。Windows Server 內建 SNMP 服務已列為淘汰，屆時評估是否改以既有 Wazuh Agent 監控即可。
+- ~~日後加入 DC01、DC02 時，Virtual_Group 加上 `OR devices.os equal windows`~~：10/22 實際以 Ping 加入，`os` 是 `ping`、其他欄位全為 NULL，改用 sysName 比對（見下方補充）。Windows Server 內建 SNMP 服務已列為淘汰，要補資源監控時評估改以既有 Wazuh Agent 等方式。
 - 有自己 kernel 的 VM（例如 QEMU 的 Linux VM）不符合 Virtual_Group 規則，若日後納管需另加條件（例如 hostname）。
 - 檢查是否有 LibreNMS 告警規則綁定群組：`SELECT r.name, g.name FROM alert_group_map m JOIN alert_rules r ON r.id=m.rule_id JOIN device_groups g ON g.id=m.group_id;`。2026-10-16 查詢無輸出，沒有告警規則綁定群組，所有告警套用全部設備。
+
+**2026-10-22 補充：DC01、DC02、CA 沒有自動進 Virtual_Group**
+
+**原因**：三台以 Ping 加入 LibreNMS（[戰情中心（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/)第 9 節），盤點結果：
+
+| sysName | `os` | `hardware`／`features`／`sysDescr` |
+| --- | --- | --- |
+| dc01.<網域>、dc02.<網域>、ca.<網域> | `ping` | 全部 NULL |
+
+原規則靠 `sysDescr` 的 `-pve` 抓 LXC（共用主機 kernel）；VM 跑自己的作業系統，Ping only 更是沒有任何欄位可比對，所以永遠不符合。
+
+**為什麼不能直接把 AND 切成 OR**：`sysDescr contains -pve OR features not contains PVE OR …` 會把 node10～12（sysDescr 也有 `-pve`）一起加進來。要用**子群組**（像數學的括號）：
+
+```text
+最上層 OR
+  ├─ devices.sysName equal dc01.<網域>
+  ├─ devices.sysName equal dc02.<網域>
+  ├─ devices.sysName equal ca.<網域>
+  └─ 子群組 AND：devices.features doesn't contain PVE  AND  devices.sysDescr contains -pve   ← 原規則，判斷結果不變
+```
+
+**怎麼改**（Edit 群組畫面）：按 **Add group** 新增子群組、維持 AND → 把原本兩條規則移進子群組（或在子群組重建再刪掉外面的）→ 最上層切成 **OR**（綠色是被選中）→ 最上層 Add rule 三次填 sysName（值要和盤點結果完全一樣）。
+
+| 選項 | 取捨 |
+| --- | --- |
+| `devices.os equal ping` | 簡單，但以後 Ping only 的實體設備（印表機、AP）也會被誤加 |
+| **sysName 逐台列出（採用）** | 精確；以後新增 VM 要手動加規則 |
+
+**看到的結果**：Virtual_Group 從 11 台變 **14 台**（10 台 LXC、pbs31、DC01、DC02、CA），node10～12 不在裡面。
+
+**順帶發現**：裝置清單的「位置」欄是各容器 snmpd 設定裡寫死的 `sysLocation`，10/19 HA 分散後沒有跟著改（例如 graylog、ai、grafana 寫 Node10，實際在 node11；pihole 寫 node11，實際在 node12）。不影響監控，列入待辦。
 
 ### 11-15 驗收：重要事件仍然偵測得到（2026-10-20）
 
@@ -1519,6 +1550,8 @@ Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警�
 - [x] TLS 驗證（2026-10-20）：Grafana 改為驗證 Indexer 憑證（[戰情中心（一）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/) 7-1）；jt-ipam 評估後維持不驗證（13-3）
 - [x] node10 的 AppArmor DENIED（52002）告警調校：2026-10-20 來源是 Grafana（CT 114），停用容器內 rsyslogd 規則後歸零（11-2）
 - [ ] 定期檢查索引佔用與保留是否正常（10-5）
+- [ ] DC01、DC02、CA 補上資源監控：目前 LibreNMS 只知道通不通，磁碟快滿、服務停止都不知道；Windows 內建 SNMP 已列為淘汰，評估改用既有 Wazuh Agent 或其他方式
+- [ ] LibreNMS「位置」欄統一：各 LXC 的 `sysLocation` 改成與節點無關的寫法（例如 `PVE-Cluster`），HA 搬移後才不會不準（11-14 補充）
 - [ ] 2027 年初規劃把容器升級到 Ubuntu 24.04（升級前先快照與 PBS 備份）
 
 ## 風險與注意事項
