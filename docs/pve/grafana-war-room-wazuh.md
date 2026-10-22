@@ -4,7 +4,7 @@ title: "用 Grafana 建立戰情中心（一）：接上 Wazuh"
 date: 2026-10-14
 categories: [PVE, Grafana, Wazuh]
 permalink: /docs/pve/grafana-war-room-wazuh/
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-22
 ---
 
 # 用 Grafana 建立戰情中心（一）：接上 Wazuh
@@ -448,7 +448,7 @@ nftables 備份要選**建立 `wazuh_indexer` 之前**的那一份；如果之�
 | --- | --- |
 | CT 114 納管：DNS、jt-ipam、Wazuh Agent、LibreNMS（SNMPv3）、PBS 備份 | ✅ 完成（第 9 節） |
 | 階段 2：LibreNMS | ✅ 完成（改用 API 唯讀 Token），見[戰情中心（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/) |
-| 階段 3：Prometheus、Ceph prometheus 模組、PVE exporter | ⏳ 未做 |
+| 階段 3：Prometheus、Ceph prometheus 模組、PVE exporter | ✅ 2026-10-22，見[戰情中心（三）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-prometheus/) |
 | 階段 4：Graylog／PBS（Graylog 的 OpenSearch 可能沒有帳號保護，要另外評估） | ⏳ 未做 |
 | 階段 5：專用電腦 kiosk（`?kiosk`、開機自動開啟、Viewer 帳號、不休眠） | ⏳ 未做 |
 | 資料來源改為驗證憑證（不再 Skip TLS Verify） | ✅ 2026-10-20（7-1） |
@@ -457,6 +457,7 @@ nftables 備份要選**建立 `wazuh_indexer` 之前**的那一份；如果之�
 ## 14. 延伸閱讀
 
 - [用 Grafana 建立戰情中心（二）：接上 LibreNMS](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/)
+- [用 Grafana 建立戰情中心（三）：接上 Prometheus（Ceph 與 PVE）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-prometheus/)
 - [Grafana：Install on Debian or Ubuntu](https://grafana.com/docs/grafana/latest/setup-grafana/installation/debian/)
 - [Grafana：Configure with environment variables](https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#override-configuration-with-environment-variables)
 - [Grafana OpenSearch data source](https://grafana.com/grafana/plugins/grafana-opensearch-datasource/)
