@@ -1,363 +1,473 @@
 ---
 layout: default
-title: "圖書館 Nebula 網路規劃：VLAN 隔離讀者 Wi-Fi、兩條 FTTB 分流"
+title: "圖書館 Nebula 網路改造：VLAN 隔離讀者、CIP 過濾、兩條 FTTB 分流"
 permalink: /docs/network/zyxel-nebula-library-vlan-dual-wan-plan/
 date: 2026-10-20
 categories: [Network, VLAN, Zyxel, Nebula, Dual WAN]
-last_modified_at: 2026-10-20
+last_modified_at: 2026-10-22
 ---
 
-# 圖書館 Nebula 網路規劃：VLAN 隔離讀者 Wi-Fi、兩條 FTTB 分流
+# 圖書館 Nebula 網路改造：VLAN 隔離讀者、CIP 過濾、兩條 FTTB 分流
 
-> **一句話**：館員和讀者共用一個 SSID、一個 /24 網段時，讀者看得到館內設備，IP 也容易用光。做法是在防火牆替每個 VLAN 建介面，交換器之間和接 AP 的埠維持 **Trunk**，多開一個館員 SSID，把讀者 SSID 移到獨立 VLAN，再用 Policy Route 讓讀者走另一條 FTTB。**順序是先開館員 SSID，再搬讀者**。
+> **一句話**：館員和讀者原本共用一個 SSID、一個 /24 網段，讀者看得到館內設備，而且原本設定的上網過濾其實沒有生效。這次把網路切成四個網段：館員有線、館員無線、讀者有線、讀者無線，每段各有一個 VLAN；再用安全政策擋住讀者連館員網段、讓讀者一律套用 CIP 過濾，最後用 Policy Route 讓館員和讀者各走一條 FTTB。
 
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 公共場所（圖書館、活動中心）同時有內部人員與訪客上網、想把兩邊分開的人；第一次在 Nebula 設定 VLAN、搞不懂 Trunk／Access／PVID 的人 |
-| 環境 | USG FLEX 100H ×1、XGS2220 ×1（核心）、GS1920 ×3（1F～3F 各一台）、NWA90AX ×9（每層 3 台），全部由 Nebula 管理；FTTB ×2。架構依 Nebula 拓撲圖確認 |
-| 日期 | 2026-10-20 規劃 |
-| 資料來源 | 現場現況截圖；設定方法整理自 Zyxel 台灣社群官方教學（Nebula 19.00 版截圖）：〈[Nebula 防火牆 LAN 介面設定教學](https://community.zyxel.com/tw/discussion/16371/nebula-%E9%98%B2%E7%81%AB%E7%89%86-lan-%E4%BB%8B%E9%9D%A2%E8%A8%AD%E5%AE%9A%E6%95%99%E5%AD%B8)〉、〈[Nebula Switch VLAN 設定教學](https://community.zyxel.com/tw/discussion/16355/nebula-switch-vlan-%E8%A8%AD%E5%AE%9A%E6%95%99%E5%AD%B8)〉、〈[Nebula 如何設定無線網路 (SSID) 的 VLAN ID](https://community.zyxel.com/tw/discussion/16659/nebula-%E5%A6%82%E4%BD%95%E8%A8%AD%E5%AE%9A%E7%84%A1%E7%B7%9A%E7%B6%B2%E8%B7%AF-ssid-%E7%9A%84-vlan-id)〉 |
-| 結論 | ⏳ 規劃完成，**尚未實作**；雙 WAN 備援行為與部分 Nebula 欄位**未確認**；新版 Nebula 介面名稱可能與 19.00 版不同 |
+| 環境 | USG FLEX 100H ×1、XGS2220 ×1（核心）、GS1920 ×3（1F～3F 各一台）、NWA90AX ×9（每層 3 台），全部由 Nebula 管理（Nebula 版本 20.20）；FTTB ×2 |
+| 日期 | 2026-10-20 規劃；2026-10-21～22 實作 |
+| 資料來源 | 現場設定與驗收結果；設定觀念參考 Zyxel 台灣社群官方教學（見第 11 節） |
+| 設定清單 | 每一項最後的實際設定，見[附錄：設定清單與實作紀錄](../zyxel-nebula-library-vlan-implementation-record/) |
+| 結論 | ✅ 館員無線、讀者無線分 VLAN 並完成分流；✅ 出口對調（館員走 WAN B、讀者走 WAN A）並驗收；✅ 讀者 CIP 過濾、讀者禁止連館員網段的安全政策已啟用；✅ 10 台讀者有線電腦全部搬到 VLAN 90，過渡用的規則、綁定、物件已清除；⏳ 現場驗收（櫃台作業、讀者手機與電腦的外網 IP／過濾／隔離）、Layer 2 isolation、授權到期影響待確認 |
 
 ## 1. 先認識幾個名詞
 
 | 名詞 | 白話解釋 |
 | --- | --- |
-| **VLAN** | 在同一套實體交換器上切出好幾個「虛擬的獨立網路」，彼此預設不互通，例如館員一個網段、讀者一個網段 |
-| **802.1Q／VLAN Tag** | VLAN 的國際標準：在乙太網路幀（Frame）裡插入一個「我屬於哪個 VLAN」的標籤，交換器靠它把流量分組、隔離 |
+| **VLAN** | 在同一套實體交換器上切出好幾個「虛擬的獨立網路」，彼此預設不互通 |
+| **802.1Q／VLAN Tag** | VLAN 的國際標準：在乙太網路幀（Frame）裡插入一個「我屬於哪個 VLAN」的標籤 |
 | **Tagged／Untagged** | 帶有 VLAN 標籤的幀叫 Tagged；沒有標籤的叫 Untagged。電腦、印表機送出來的幀都是 Untagged |
 | **PVID**（Port VLAN ID） | 埠的「預設 VLAN」。像在埠上裝一台**標籤機**：沒貼標籤的幀進來，就自動貼上 PVID 指定的標籤 |
-| **Access 模式（存取）** | 給「終端設備」（電腦、印表機）用的埠：進來的幀貼上 PVID 標籤，送出去前把標籤撕掉，終端設備完全不用懂 VLAN |
+| **Access 模式** | 給「終端設備」（電腦、印表機）用的埠：進來的幀貼上 PVID 標籤，送出去前把標籤撕掉 |
 | **Trunk 模式** | 給「中繼設備」（防火牆、交換器、AP）用的埠：一條線同時跑多個 VLAN，幀離開時保留標籤 |
-| **允許的 VLANs**（Allowed VLANs） | 只有 Trunk 有：這個埠放行哪些 VLAN 的通行清單，預設是「全部（All）」 |
-| **Native VLAN** | Trunk 埠上「不帶標籤傳送」的那個 VLAN，在 Nebula 裡就是 Trunk 埠的 PVID（通常是 1） |
-| **LAN 介面／VLAN 介面** | 防火牆上代表一個網段的「虛擬網卡」：有自己的 IP（當預設閘道）和 DHCP。LAN1 是預設介面，每多一個 VLAN 就新增一個 VLAN 介面 |
-| **DHCP Pool／租約** | DHCP 可以發出去的 IP 範圍（起始位址＋Pool 大小），以及每個 IP 借給設備多久 |
+| **允許的 VLANs**（Allowed VLANs） | 只有 Trunk 有：這個埠放行哪些 VLAN 的通行清單，預設「全部（All）」 |
+| **VLAN 介面** | 防火牆上代表一個網段的「虛擬網卡」：有自己的 IP（當預設閘道）和 DHCP |
+| **Zone** | 防火牆把介面分組（LAN、WAN、DMZ…），安全政策用「從哪個 Zone 到哪個 Zone」來寫規則 |
 | **SSID** | 無線網路的名稱。一台 AP 可以同時廣播好幾個 SSID，每個 SSID 對應一個 VLAN |
 | **FTTB／WAN** | 光纖到大樓的固定制網路；防火牆接網際網路的那一側叫 WAN，本案兩條 FTTB＝兩個 WAN |
-| **Policy Route**（政策路由） | 依「從哪裡進來、誰送的」決定走哪條 WAN，例如讀者網段一律走 WAN B |
-| **SNAT** | 封包出去時把來源改成 WAN 的外網 IP，本案設為 Outgoing-interface（用出去那條線的 IP） |
-| **DPPSK** | 一個 SSID、每人一組密碼，並依密碼分到不同 VLAN。本案**沒有採用**，原因見第 4 節 |
+| **Policy Route**（政策路由） | 依「從哪裡進來、誰送的」決定走哪條 WAN |
+| **SNAT** | 封包出去時把來源改成 WAN 的外網 IP，本案設為 Outgoing interface（用出去那條線的 IP） |
+| **安全政策**（Security policy） | 防火牆的放行／拒絕規則，**由上往下比對，第一條符合的就生效** |
+| **CIP** | 本案防火牆上的內容過濾設定檔名稱，套用在讀者上網流量（推測為兒少上網保護類的過濾，未向原廠確認） |
+| **位址物件／服務物件** | 把 IP 範圍、網段、服務埠先取好名字，規則裡直接選名字，不必每次手打 |
 
 ## 2. VLAN 怎麼運作：貼標籤、撕標籤
 
 ```text
-【Access 埠】接讀者電腦（PVID 30）
+【Access 埠】接讀者電腦（PVID 90）
 
-  電腦 ──(Untagged)──▶ 進入埠：貼上 VLAN 30 標籤 ──▶ 交換器內部（VLAN 30）
-  電腦 ◀─(Untagged)─── 送出埠：撕掉標籤          ◀── 交換器內部（VLAN 30）
+  電腦 ──(Untagged)──▶ 進入埠：貼上 VLAN 90 標籤 ──▶ 交換器內部（VLAN 90）
+  電腦 ◀─(Untagged)─── 送出埠：撕掉標籤          ◀── 交換器內部（VLAN 90）
   ※ 收到「已帶標籤」的幀 → 直接丟棄
 
-【Trunk 埠】接 AP 或上一層交換器（PVID 1，允許 1,10,20,30）
+【Trunk 埠】接 AP 或上一層交換器（PVID 1，允許 All）
 
-  VLAN 10／20／30 的幀 ──▶ 保留標籤（Tagged）通過
-  VLAN 1 的幀          ──▶ 撕掉標籤（Untagged）送出，因為 VLAN 1 = PVID
-  對方送來的 Untagged 幀 ─▶ 視為 VLAN 1
-  VLAN 40 的幀         ──▶ 不在允許清單，阻擋
+  VLAN 80／90／110 的幀 ──▶ 保留標籤（Tagged）通過
+  VLAN 1 的幀           ──▶ 撕掉標籤（Untagged）送出，因為 VLAN 1 = PVID
+  對方送來的 Untagged 幀  ─▶ 視為 VLAN 1
 ```
 
-判斷每個埠要設什麼：
+> **口訣**：後面還會再接東西的 → Trunk；後面不會再接東西的 → Access。最常見的錯誤，就是把接防火牆、AP 的埠誤設成 Access，其他 VLAN 的流量就全被擋掉。
 
-| 接的設備 | 屬於 | 類型 | PVID | 允許的 VLANs |
-| --- | --- | --- | --- | --- |
-| 電腦、印表機 | 終端設備 | **Access** | 該設備要加入的 VLAN ID | （Access 沒有這個欄位） |
-| 防火牆、交換器、AP | 中繼設備 | **Trunk**（預設） | 1 | 所有需要通過的 VLAN，或預設 All |
-
-> **口訣**：後面還會再接東西的 → Trunk；後面不會再接東西的 → Access。原廠教學指出最常見的錯誤，就是把接防火牆、AP 的埠誤設成 Access，其他 VLAN 的流量就全被擋掉。
-
-## 3. 現況與問題
+## 3. 改造前的現況與問題
 
 ```text
               WAN A（FTTB）    WAN B（FTTB）
                 ge1 \            / ge2
-                   USG FLEX 100H        ← LAN1（ge3）：<內網>/24 的閘道 + DHCP
+                   USG FLEX 100H        ← LAN1（ge3，實體埠 p3）：館員有線網段 /24
                          │
                    Core-XGS2220（核心）
            ┌─────────────┼─────────────┐
        1F-GS1920     2F-GS1920     3F-GS1920
        AP01～03       AP01～03      AP01～03     ← NWA90AX ×9
-         （每層 3 台；SSID：<SSID>，館員與讀者共用）
+         （每層 3 台；SSID：<讀者 SSID>，館員與讀者共用）
 ```
-
-已經做好的部分：
 
 | 項目 | 現況 |
 | --- | --- |
-| 兩條 FTTB 分工 | Policy Route 兩條：Incoming `ge3`（LAN1）＋來源物件「館員電腦群組」→ ge1（WAN A）；「讀者電腦範圍」→ ge2（WAN B），SNAT 都是 Outgoing-interface。不在物件裡的（Wi-Fi 使用者、網路設備）走預設路由 |
-| 有線電腦分類 | 館員電腦 → WAN A；兒童區、成人區讀者電腦與櫃台電腦（歸類為讀者電腦）→ WAN B |
-| 館員電腦固定 IP | LAN1 的靜態 DHCP 表用 MAC 綁 IP |
-| DHCP 租約 | 1 天 |
-
-還存在的問題：
+| 兩條 FTTB 分工 | Policy Route 兩條：Incoming `ge3`＋來源物件「館員電腦群組」→ ge1；「讀者電腦範圍」→ ge2 |
+| 有線電腦 | 館員電腦約 12 台＋館員用公用電腦 4 台；讀者電腦 10 台（兒童區、成人區、櫃台），全部在同一個 /24，用 MAC 綁 IP |
+| DNS | 防火牆 DHCP 發給用戶端的 DNS 是中華電信資安艦隊專用 DNS（見[這篇](../cht-security-fleet-dns-filtering/)），兩條線都能使用 |
 
 | 問題 | 說明 |
 | --- | --- |
-| 讀者 Wi-Fi 和館內設備在同一網段 | 連 Wi-Fi 的讀者可以直接掃描、存取館內電腦、印表機 |
-| IP 不夠用 | /24 只有 254 個 IP，扣掉網路設備 14 台、館內電腦，剩下的要給所有讀者手機 |
-| 讀者電腦和館員電腦在同一網段 | 公用電腦誰都能操作，卻可以直接存取館員電腦 |
+| 讀者無線和館內設備同網段 | 連 Wi-Fi 的讀者可以直接掃描、存取館內電腦、印表機 |
+| 讀者電腦和館員電腦同網段 | 公用電腦誰都能操作，卻可以直接存取館員電腦 |
+| **讀者的上網過濾沒有生效** | 安全政策裡為讀者套用 CIP 的規則，排在「LAN 全部放行」規則的**後面**，而且比對條件完全一樣，所以從來沒有被比對到（見 5-6） |
+| IP 不夠用 | /24 只有 254 個 IP，要給網路設備、館內電腦和所有讀者手機 |
 
 ## 4. 目標架構
 
 ```text
-                  WAN A ───────┐         ┌─────── WAN B
-             （館員、管理）     │         │     （讀者）
-                          USG FLEX 100H
-          LAN1（VLAN 1，不帶標籤）＋ vlan10 ＋ vlan20 ＋ vlan30
-                                │ Trunk：PVID 1，允許 1,10,20,30
+             WAN A（ge1）──────┐        ┌──────── WAN B（ge2）
+               讀者出口         │        │         館員出口
+                          USG FLEX 100H（p3）
+     LAN1（VLAN 1，不帶標籤）＋ vlan110 ＋ vlan80 ＋ vlan90（Zone 都是 LAN）
+                                │ Trunk：PVID 1，允許 All
                           Core-XGS2220
                                 │ Trunk
                     1F／2F／3F-GS1920（各 1 台）
                  ┌──────────────┴──────────────┐
-                 │ Trunk                        │ Access：PVID 30
-       每層 AP01～AP03（共 9 台）           讀者電腦（第二階段）
+                 │ Trunk                        │ Access：PVID 90
+       每層 AP01～AP03（共 9 台）           讀者有線電腦
           ┌──────────┴──────────┐
-  <SSID>-staff（VLAN 10）  <SSID>（VLAN 20）
-      館員 Wi-Fi              讀者 Wi-Fi
+  <館員 SSID>（VLAN 110）  <讀者 SSID>（VLAN 80）
+     館員手機上網              讀者 Wi-Fi
 ```
 
-| VLAN | 用途 | 網段大小 | DHCP 租約 | 走哪條 WAN |
-| --- | --- | --- | --- | --- |
-| 1（不變） | 管理＋館員有線 | /24（維持現狀） | 維持現狀 | A |
-| 10（新增） | 館員 Wi-Fi | /24 | 7 天 | A |
-| 20（新增） | 讀者 Wi-Fi | /23（約 510 個 IP） | 8 小時 | B |
-| 30（第二階段，選用） | 讀者電腦（兒童區、成人區、櫃台） | /24 | 1 天 | B |
+| 使用者 | VLAN | 網段大小 | DHCP 租約 | 出口 | CIP 過濾 |
+| --- | --- | --- | --- | --- | --- |
+| 館員有線（含網路設備管理） | 1（不變） | /24 | 7 天（維持） | WAN B | 不過濾 |
+| 館員無線（只給館員手機上網） | 110 | /24 | 7 天 | WAN B | 不過濾 |
+| 讀者無線 | 80 | /24 | 8 小時 | WAN A | **過濾** |
+| 讀者有線（兒童區、成人區、櫃台） | 90 | /24 | 1 天 | WAN A | **過濾** |
 
-設計上的考量：
-
-| 決定 | 為什麼 |
+| 設計決定 | 為什麼 |
 | --- | --- |
-| 原本的網段**不動** | 防火牆、交換器、AP 的管理 IP 和館員電腦都不用重設，改錯也不會讓設備從 Nebula 離線 |
-| 讀者 Wi-Fi 用 /23 | 沒有尖峰人數資料，先保守取大一點 |
-| 租約：館員 7 天、讀者 8 小時 | 原廠建議：員工網段 7 天；訪客網段 8 小時，避免 Pool 被已經離開的手機占住 |
-| 多開館員 SSID，不用 DPPSK | DPPSK 需要 Nebula Pro Pack 授權，Zyxel 社群列出的支援清單**沒有 NWA90AX**（未向原廠確認）；多開 SSID 不需額外授權，代價是館員設備要重新連線一次 |
+| VLAN ID 用網段的第三碼 | 看 IP 就知道屬於哪個 VLAN |
+| 館員有線網段**不動** | 防火牆、交換器、AP 的管理 IP 和館員電腦都不用重設，改錯也不會讓設備從 Nebula 離線 |
+| 多開一個館員 SSID，不用 DPPSK | DPPSK 需要 Nebula Pro Pack 授權，Zyxel 社群列出的支援清單**沒有 NWA90AX**（未向原廠確認） |
+| 讀者無線租約 8 小時 | 原廠建議訪客網段 8 小時，避免 Pool 被已經離開的手機占住 |
+| 櫃台電腦歸類為讀者電腦 | 案主決定。櫃台和讀者公用電腦同一個 VLAN、可以互連 |
+| 最初規劃館員走 WAN A、讀者走 WAN B | 實作當天案主改為**對調**（見 5-8） |
 
-## 5. 第一階段：Wi-Fi 分 VLAN（建議閉館時段）
+## 5. 實作過程（第一階段：無線與安全政策）
 
-| 步驟 | 做什麼 | 對誰有影響 |
-| --- | --- | --- |
-| 5-0 | 截圖記錄目前的防火牆介面、交換器埠、SSID、路由設定 | 無 |
-| 5-1 | 防火牆新增 `vlan10`、`vlan20` | 無 |
-| 5-2 | 確認交換器的 Trunk 埠 | 無 |
-| 5-3 | 新增館員 SSID | 無 |
-| 5-4 | 館員設備換到館員 SSID | 館員短暫斷線 |
-| 5-5 | 防火牆加安全政策 | 無 |
-| 5-6 | 讀者 SSID 改到 VLAN 20 | 讀者斷線重連 |
-| 5-7 | 新增 Policy Route | 短暫 |
-| 5-8 | 驗收與拔線測試 | 讀者短暫斷線 |
-
-> ⚠️ **為什麼 5-3、5-4 要在 5-6 前面**：館員原本也連 `<SSID>`。先把 `<SSID>` 改到 VLAN 20 的話，館員的筆電會被擋在讀者網段，連不到館內印表機和系統。
+| 步驟 | 做什麼 | 影響 | 結果 |
+| --- | --- | --- | --- |
+| 5-1 | 防火牆新增 `vlan110`、`vlan80` | 無 | ✅ |
+| 5-2 | 確認交換器 Trunk 埠 | 無 | ✅ 16 個埠都是預設值，不用改 |
+| 5-3 | 新增館員 SSID（VLAN 110） | 無 | ✅ |
+| 5-4 | Policy Route：`vlan110`、`vlan80` | 無 | ✅ |
+| 5-5 | 建位址物件、服務群組 | 無 | ✅ |
+| 5-6 | 安全政策：新增 3 條（先不啟用）→ 排序 → 逐條啟用 | 讀者開始被過濾 | ✅ |
+| 5-7 | 讀者 SSID 改到 VLAN 80 | 讀者斷線重連 | ✅ 讀者手機取得 VLAN 80 的 IP |
+| 5-8 | 出口對調 | 短暫 | ✅ |
 
 ### 5-1 防火牆新增 VLAN 介面
 
-做什麼：每個 VLAN 都要在防火牆有一個介面，當作該網段的預設閘道並發 DHCP，交換器和 AP 的 VLAN 才有意義。
+做什麼：每個 VLAN 都要在防火牆有一個介面，當作該網段的預設閘道並發 DHCP。
 
-怎麼做：
+怎麼做：**Configure → Firewall → Port & Interface**，新增 VLAN 介面：
 
-1. 先到 **整個站點 > 防火牆 > 設定 > 埠**，確認實體埠屬於哪個埠群組（LAN Group）。只需要一個 LAN Group 的話，可以把預設的 LAN Group 2 移除，做法見原廠[教學](https://community.zyxel.com/tw/discussion/16369)
-2. 到 **設定 > 防火牆 > 介面**，新增 VLAN 介面，依下表填入，`vlan10`、`vlan20` 各建一個
+| 欄位 | 填法 | 說明 |
+| --- | --- | --- |
+| Interface name | `vlan110`、`vlan80` | 只能英數，**存檔後不能改名** |
+| Type／Member type | VLAN／Port | |
+| **Members** | **只選接核心交換器的那個實體埠（本案 `p3`）** | 預設會帶入全部 LAN 埠；到埠狀態看哪個埠連線中 |
+| **Zone** | **LAN** | 選單只有 None／WAN／LAN／DMZ／VPN 類，沒有 Guest。留 None 推測會沒有任何規則放行（未確認）；DMZ 的預設政策不確定會不會擋 DNS，所以選 LAN，隔離改用安全政策 |
+| VLAN ID | `110`、`80` | |
+| IPv4 address/Network Mask | 網段的 `.254/24` | |
+| DHCP | DHCP server，Start IP `.1`、Pool size `240` | 發放 `.1～.240`，不會包到閘道 `.254` |
+| First DNS server | 跟 LAN1 一樣 | 本案為資安艦隊 DNS；確認讀者電腦原本走另一條線也能用這組 DNS，才沿用 |
+| Lease time | 館員 7 天、讀者 8 小時 | **任何情況都不要設「無限」** |
+| Connectivity check／MAC／MTU | 預設 | |
 
-| 參數 | 怎麼填 |
-| --- | --- |
-| **介面名稱** | 只能用英文和數字，**儲存後無法再修改**。用 `vlan10`、`vlan20` |
-| **埠群組** | 一般選 **LAN Group 1** |
-| **VLAN ID** | `10`、`20` |
-| IP 位址、子網路遮罩 | 依規劃填寫，**不要和其他網段重疊**（可用[子網路計算工具](http://www.subnet-calculator.com/subnet.php?net_class=B)驗算） |
-| DHCP | 選 **DHCP 伺服器** |
-| IP pool 起始位址、Pool 大小 | 見下方例子 |
-| DNS 伺服器 | 可填外部 DNS（原廠舉例 `168.95.1.1`、`8.8.8.8`）或內部 DNS |
-| 租約時間 | `vlan10` 7 天、`vlan20` 8 小時。**任何情況都不要設「無限」**，否則 IP 發出去就不會釋放 |
-| 靜態的 DHCP 表、MTU、進階選項 | 保留預設；MAC 綁定需要時再加（見 5-4） |
+> ⚠️ **不要動 LAN1 的 VLAN ID**：LAN1 要保持空白（不帶標籤），正好對上交換器 Trunk 埠的 PVID 1。
 
-用例子看懂 Pool（原廠例子，IP 換成文件專用的 `192.0.2.x`）：
+### 5-2 確認交換器 Trunk 埠
 
-| 設定 | 結果 |
-| --- | --- |
-| IP pool 起始位址 `192.0.2.33` | `192.0.2.2`～`192.0.2.32` **不會**發給使用者，可以保留給固定 IP |
-| Pool 大小 `200` | 發放範圍是 `192.0.2.33`～`192.0.2.232`，共 200 個 IP |
+做什麼：VLAN 要從防火牆一路通到 AP，中間每個埠都要放行。
 
-應該看到：介面清單多出 `vlan10`、`vlan20`，各有自己的 IP 網段。
+怎麼做：**Switch → Configure → Switch ports**，逐台看防火牆↔核心、核心↔三台樓層交換器、樓層交換器↔9 台 AP 兩端的埠。
 
-> ⚠️ **不要動 LAN1 的 VLAN ID**：原廠教學特別提醒，LAN1 的 VLAN ID **保留空白，不要填任何數值**，否則會造成網路異常。LAN1 不帶標籤，正好對上交換器 Trunk 埠的 PVID 1。
->
-> ⚠️ **DNS 填 8.8.8.8 前先確認線路**：線路有申請中華電信資安艦隊的話，DNS 不能填 `8.8.8.8`，詳見[這篇](../cht-security-fleet-dns-filtering/)。
+結果：16 個埠都是預設的 **Trunk／PVID 1／Allowed VLANs All**，**不用改**。
 
-### 5-2 確認交換器的 Trunk 埠
-
-做什麼：讓 VLAN 10、20 能從防火牆一路通到 AP。
-
-怎麼做：到 **交換器 > 設定 > 交換器埠**，勾選要看的埠（可以一次勾選多個）→ **編輯**，確認下列 13 條連線兩端的埠：
-
-| 連線 | 類型 | PVID | 允許的 VLANs |
-| --- | --- | --- | --- |
-| 100H ↔ Core-XGS2220 | Trunk | 1 | All，或 `1,10,20,30` |
-| Core-XGS2220 ↔ 1F／2F／3F-GS1920（3 條） | Trunk | 1 | 同上 |
-| 各層 GS1920 ↔ AP01～03（9 條） | Trunk | 1 | 同上 |
-
-埠編輯視窗裡的欄位：
-
-| 欄位 | 意思 |
-| --- | --- |
-| **類型** | `Trunk` 或 `存取`（Access） |
-| **PVID** | 這個埠的預設 VLAN ID |
-| **允許的 VLANs** | 只有 Trunk 會出現；預設 `全部`（All） |
-| **VLAN 類型** | 只有 Access 會出現；預設 `無`（None），用語音 VLAN 時才改 |
-
-應該看到：這些埠都是 Trunk、PVID 1。埠如果還是預設值（Trunk／1／All），**這一步不用改**。
-
-如果要改成只放行指定 VLAN（原廠的安全建議），逐段看 `1,10,20,30`：
-
-| 片段 | 意思 |
-| --- | --- |
-| `1` | Native VLAN（就是 PVID），**一定要列**，否則管理流量會斷、設備從 Nebula 離線 |
-| `10,20,30` | 館員 Wi-Fi、讀者 Wi-Fi、讀者電腦 |
-| 其他沒列的 | 一律被阻擋 |
-
-> **兩端 PVID 要一致**：Trunk 埠會把「和 PVID 相同 VLAN」的幀撕掉標籤送出，對面再用自己的 PVID 貼回去。兩邊 PVID 不一樣，管理流量會被歸到錯的 VLAN。
+> 先從 Nebula 拓撲圖確認設備連接關係，再請現場提供埠號，做成接線對照表。注意各樓層交換器的上行埠不一定一樣（本案 2F 是 26，1F、3F 是 25）。
 
 ### 5-3 新增館員 SSID
 
-做什麼：開一個館員專用的 SSID，放進 VLAN 10。
+怎麼做：**Configure → Access point → SSID settings**，打開 **Advanced mode** → **+ Add SSID network** → **Edit**：
 
-怎麼做：
-
-1. 到 **設定 > 無線基地台 > SSID 設置**，打開 **進階模式** 開關
-2. 新增 `<SSID>-staff`，加密用 WPA2／WPA3-Personal、強密碼，不要公告
-3. 進入它的 **編輯** 頁，捲到**最下方**的 **VLAN ID**，填 `10`，點 **返回**
-4. 點主設定頁**右下角**的 **儲存**（沒按這個，前面的設定都不會生效）
-
-應該看到：用手機連 `<SSID>-staff`，拿到 VLAN 10 的 IP，能上網、能列印到 VLAN 1 的印表機。
-
-### 5-4 館員設備換到館員 SSID
-
-做什麼：讓館員的筆電、手機改連 `<SSID>-staff`。
-
-怎麼做：逐台改連，並在設備上「忘記」`<SSID>`，避免之後自動連回去。
-
-應該看到：館員設備都拿到 VLAN 10 的 IP。
-
-> **MAC 綁定要重建**：LAN1 的靜態 DHCP 表不會帶到 VLAN 10，需要固定 IP 的設備要在 `vlan10` 重建。手機和新版 Windows 預設會在每個 Wi-Fi 用「隨機 MAC 位址（私人位址）」，要綁定的設備請針對 `<SSID>-staff` 關掉這個功能。
-
-### 5-5 防火牆加安全政策
-
-| 來源 | 目的 | 動作 |
+| 欄位 | 填法 | 說明 |
 | --- | --- | --- |
-| VLAN 20（讀者 Wi-Fi） | VLAN 1、VLAN 10 | 拒絕 |
-| VLAN 20（讀者 Wi-Fi） | 防火牆管理介面 | 拒絕 |
-| VLAN 20（讀者 Wi-Fi） | 網際網路 | 允許 |
-| VLAN 10（館員 Wi-Fi） | VLAN 1 | 允許（印表機、館內系統） |
+| Security options | **WPA Personal With WPA2**，填強密碼 | ⚠️ **新 SSID 預設是 Open**，一定要改 |
+| Sign-in method | Disabled | |
+| Forwarding mode | **Local bridge** | 選 NAT mode 的話 AP 會自己發 IP，VLAN 和防火牆分流都不會生效 |
+| **VLAN ID** | **`110`** | 在頁面最下方 Advanced settings，預設是 `1` |
+| Band mode、802.11r 等 | 跟讀者 SSID 一樣 | |
+| Layer 2 isolation、Intra-BSS | 關 | 館員可能要連館內設備 |
 
-### 5-6 讀者 SSID 改到 VLAN 20
+改完按 **Back**。畫面會顯示「Please allow 1-2 minutes for changes to take effect」。
 
-做什麼：把 `<SSID>` 變成讀者專用。
+結果：手機連上取得 VLAN 110 的 IP（`.2`）。
 
-怎麼做：在 SSID 設置頁編輯 `<SSID>`，最下方 **VLAN ID** 填 `20` → **返回** → 右下角 **儲存**。建議同時開啟用戶端隔離，讓讀者手機彼此看不到（Nebula 欄位名稱未確認）。
+> 館員電腦全部是有線的，館員 SSID 只給館員手機上網，所以**不需要做列印測試**，讀者 SSID 搬家也不會影響館員作業。
 
-應該看到：讀者手機重新連線後拿到 VLAN 20 的 IP，ping 不到館內網段。
+### 5-4 Policy Route
 
-### 5-7 新增 Policy Route
+怎麼做：**Configure → Firewall → Routing** → Policy route → **+ Add**：
 
-做什麼：讓館員 Wi-Fi 走 WAN A、讀者 Wi-Fi 走 WAN B。
-
-現有兩條規則的 Incoming 都是 `ge3`（LAN1）。新 VLAN 的流量從 `vlan10`／`vlan20` 進來，**不會被現有規則抓到**，所以只要新增規則，現有的不用動。
-
-怎麼做：到 **整個站點 > 設定 > 防火牆 > 路由**（依 Zyxel 支援文件；100H 的實際選單**未確認**），新增規則 0、3、4：
-
-| # | Incoming | Source | Destination | Next-Hop | SNAT | 說明 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 0 | Any | Any | 內網各網段 | 依路由表（欄位未確認） | 不做 | 新增：內網互通不送外網 |
-| 1 | ge3 | 館員電腦群組 | Any | ge1（WAN A，`198.51.100.x`） | Outgoing-interface | 現有，不動 |
-| 2 | ge3 | 讀者電腦範圍 | Any | ge2（WAN B，`203.0.113.x`） | Outgoing-interface | 現有，不動 |
-| 3 | vlan10 | Any | Any | ge1 | Outgoing-interface | 新增：館員 Wi-Fi |
-| 4 | vlan20 | Any | Any | ge2 | Outgoing-interface | 新增：讀者 Wi-Fi |
-
-> **規則 0 的原因（推測，未確認）**：Destination 是 Any 的 Policy Route，可能把館員 Wi-Fi 到館內印表機（VLAN 1）的流量也送去外網。原本全部在同一網段、不經過路由，所以沒遇到；切 VLAN 之後就要防。如果 Next-Hop 沒有「依路由表」的選項，改成在規則 3、4 的 Destination 用「非內網」物件。
-
-### 5-8 驗收與拔線測試
-
-| 檢查 | 應該看到 |
-| --- | --- |
-| 讀者手機查外網 IP | WAN B 的 IP |
-| 館員 Wi-Fi 查外網 IP | WAN A 的 IP |
-| 館員 Wi-Fi 列印到 VLAN 1 的印表機 | 印得出來（驗證規則 0） |
-| 讀者手機 ping 館內設備 | ping 不到 |
-| 有線館員電腦、讀者電腦的外網 IP | 和改之前一樣 |
-| 交換器、AP 在 Nebula | 全部在線 |
-| 拔掉 WAN B 的線 | 讀者是否自動改走 WAN A（**未確認**，要實測） |
-
-**回滾**：把 `<SSID>` 的 VLAN ID 清空並儲存，讀者就回到原本的網段；停用規則 0、3、4 即可回到原本的分流。
-
-## 6. 第二階段（選用）：讀者電腦搬到 VLAN 30
-
-做什麼：把兒童區、成人區、櫃台的有線電腦放進 VLAN 30，和館員電腦隔開。
-
-| 步驟 | 做什麼 | 應該看到 |
+| 欄位 | 館員無線 | 讀者無線 |
 | --- | --- | --- |
-| 6-1 | 查出讀者電腦接在哪幾層、哪幾個埠 | 對照表 |
-| 6-2 | 防火牆新增 `vlan30`＋DHCP（做法同 5-1，租約 1 天）；新增路由規則（Incoming `vlan30` → ge2）；安全政策拒絕 VLAN 30 → VLAN 1／10 | — |
-| 6-3 | 把這些埠改成 **Access、PVID 30**（見下表） | 讀者電腦拿到 VLAN 30 的 IP、外網走 WAN B、ping 不到館內網段 |
-| 6-4 | 有 MAC 綁定的話，在 `vlan30` 重建 | IP 固定 |
-| 6-5 | 測試櫃台電腦的館務系統（借還書等） | 正常登入、借還 |
-| 6-6 | 都正常後，停用原本的規則 2（讀者電腦範圍） | 讀者電腦仍走 WAN B |
+| Incoming | Interface → `vlan110` | Interface → `vlan80` |
+| Source／Destination／Service | Any | Any |
+| Next Hop | Type **Interface** → WAN B | Type **Interface** → WAN A |
+| SNAT address | Outgoing interface | Outgoing interface |
+| Disable policy route automatically while Interface link down | **開** | **開** |
+| Enable Connectivity Check | 先關 | 先關 |
 
-6-3 的埠設定：
-
-| 欄位 | 值 |
-| --- | --- |
-| 類型 | `存取`（Access） |
-| PVID | `30` |
-| VLAN 類型 | `無`（None，維持預設） |
-
-> **Access 埠的規則**：收到電腦送來的 Untagged 幀 → 貼上 PVID 標籤；收到意外帶標籤的幀 → **直接丟棄**；送給電腦的幀 → 先撕掉標籤。
+> 現有的有線規則 Incoming 都是 `ge3`，新 VLAN 從 `vlan110`／`vlan80` 進來，**不會被現有規則抓到**，所以只要新增，不必改舊的。
 >
-> 櫃台電腦和讀者公用電腦會在同一個 VLAN、可以互連（本案的決定）。想再加強，可以在櫃台電腦開 Windows 防火牆，擋掉同 VLAN 其他電腦的連入。
+> Next Hop 的 Type 預設是 `Auto`（依路由表），要改成 Interface 才能指定 WAN。Next Hop 選單裡每個 WAN 旁邊顯示的編號，是在介面說明裡填的**電路編號**，報修時很方便。
 
-## 7. 雙 WAN 還沒確認的地方
+結果：手機連館員 SSID，查外網 IP 是預期的那條線。
 
-| 注意 | 說明 |
+### 5-5 位址物件與服務群組
+
+怎麼做：**Configure → Firewall → Object**，分頁 **Address**、**Service**：
+
+| 物件 | 類型 | 內容 |
+| --- | --- | --- |
+| `Reader_WiFi_Net` | **Interface subnet** | `vlan80` |
+| `Staff_WiFi_Net` | **Interface subnet** | `vlan110` |
+| `Reader_PC_Net` | Subnet | 讀者有線網段 /24 |
+| `Reader_All`（群組） | | `Reader_WiFi_Net`、`Reader_PC_Net`（過渡期另含舊的讀者電腦範圍，搬完後移除，見 6-5） |
+| `Staff_Net`（群組） | | `LAN1_SUBNET`、`Staff_WiFi_Net` |
+| `Mgmt_Service_Group`（服務群組） | | HTTP、HTTPS、SSH-TCP |
+
+> **Interface subnet** 會自動等於該介面的網段，介面 IP 改了物件也跟著變，不用手打。
+>
+> 另外建新群組 `Reader_All`，而不是把成員加進現有的讀者群組，因為不確定現有群組還被哪些設定使用。
+>
+> 安全政策的 Service 欄位**一次只能選一個**，要擋多個服務就先建服務群組。
+
+### 5-6 安全政策
+
+**先發現的問題**：**Configure → Firewall → Security policy** 的現況是這樣：
+
+| # | Name | Action | 設定檔 | From → To | Source |
+| --- | --- | --- | --- | --- | --- |
+| 1 | LAN_Outgoing | Allow | — | LAN → Any (Excluding ZyWALL) | Any |
+| 2 | Reader_PC_Policy | Allow | default_profile、CIP | LAN → Any (Excluding ZyWALL) | **Any** |
+
+兩條的比對條件**完全一樣**，規則 1 排在前面，所以所有 LAN 流量在規則 1 就被放行了，**讀者電腦其實從來沒有被 CIP 過濾**。案主確認讀者（有線＋無線）都要過濾。
+
+**做法**：policy 的名稱存檔後**不能修改**，所以不改舊規則，改成「新增 → 排序 → 逐條啟用 → 停用舊的」：
+
+| 順序 | Name | Action | 設定檔 | From → To | Source | Destination | Service |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Reader_to_Staff_Deny | Deny | — | LAN → LAN | `Reader_All` | `Staff_Net` | Any |
+| 2 | Reader_to_Device_Deny | Deny | — | LAN → ZyWALL | `Reader_All` | Any | `Mgmt_Service_Group` |
+| 3 | Reader_CIP_Outgoing | Allow | default_profile、CIP | LAN → Any (Excluding ZyWALL) | `Reader_All` | Any | Any |
+| 4 | LAN_Outgoing | Allow | — | LAN → Any (Excluding ZyWALL) | Any | Any | Any |
+| 5 | Reader_PC_Policy | **停用** | | | | | |
+
+| 步驟 | 動作 | 影響 |
+| --- | --- | --- |
+| ① | 新增 3 條，**Enabled 不勾**，拖到最上面 → Save | 無 |
+| ② | 勾選第 3 條 → Save | ⚠️ 讀者電腦立刻開始被過濾，要選閉館時段 |
+| ③ | 勾選第 1、2 條 → Save | 無 |
+| ④ | 取消勾選舊的 `Reader_PC_Policy` | 無（它本來就沒作用） |
+
+> **為什麼第 2 條只擋管理服務、不擋 Any**：讀者要靠防火牆拿 DHCP，全擋可能連 DHCP 都擋掉（未確認），讀者會連上 Wi-Fi 卻拿不到 IP。
+>
+> 最右邊的 **Log** 開關可以記錄比對到的流量，新規則建議開啟，之後要查「誰被擋了」會用到。
+
+### 5-7 讀者 SSID 改到 VLAN 80
+
+怎麼做：編輯讀者 SSID：
+
+| 欄位 | 改成 |
 | --- | --- |
-| 單線斷線時會不會自動切換 | **未確認**，5-8 要實測 |
-| WAN Trunk 在 Nebula 設不了 | Zyxel 社群回覆說 H 系列的 WAN Trunk 目前要用本機網頁設定（回覆日期不明，現在是否已支援**未確認**）。在本機網頁改的設定可能被 Nebula 覆蓋，所以先只用 Nebula 上的 Policy Route |
-| 預設路由走哪條 | 不在規則裡的流量（例如網路設備本身）走哪條 WAN **未確認** |
-| 綁定外網 IP 的服務 | VPN、NAT、對方網站的 IP 白名單，分流後要確認還是走原本那條 WAN |
+| VLAN ID | `1` → **`80`** |
+| **Intra-BSS traffic blocking** | **開**（同一台 AP 下的手機彼此看不到） |
+| Layer 2 isolation | 先關（原因見下方） |
+
+> **Layer 2 isolation 要填白名單**：打開後會要求「至少填入閘道的 MAC 位址」，否則手機連閘道都碰不到、無法上網。查閘道 MAC 要另外處理，所以先用不需要 MAC 的 Intra-BSS，Layer 2 isolation 列為待辦。
+
+結果：Nebula **Clients** 頁面上，在線的讀者手機都已取得 VLAN 80 的 IP（`.2`～`.8`）。
+
+> ⚠️ 讀者 SSID 原本只勾 5 GHz（6 GHz 這款 AP 用不到），只支援 2.4 GHz 的舊設備連不上。這是原本就有的設定，這次沒有改動。
+
+### 5-8 出口對調
+
+案主在實作當天決定：館員改走 WAN B、讀者改走 WAN A。
+
+| 規則 | 做法 |
+| --- | --- |
+| 無線兩條 | 直接編輯 Next Hop，Description 一起更新 |
+| 有線兩條 | 舊規則名稱裡寫了外網 IP，而且名稱不能改，所以**另外新增**兩條新規則 |
+
+> **Policy route 不能拖曳排序**：新規則排在舊規則後面、條件又一樣，就不會生效。做法是把舊規則停用或刪除，流量就會往下比對到新規則。本案直接刪除舊規則，所以還原方式改成「編輯新規則的 Next Hop」。
+
+對調後的 Policy route：
+
+| # | 規則 | Incoming | Source | Next Hop |
+| --- | --- | --- | --- | --- |
+| 1 | Librarian_WiFi_SNAT | vlan110 | Any | WAN B |
+| 2 | Reader_WiFi_SNAT | vlan80 | Any | WAN A |
+| 3 | Staff_PC_SNAT_WAN2 | ge3 | 館員電腦群組 | WAN B |
+| 4 | Reader_PC_SNAT_WAN1 | ge3 | 讀者電腦群組 | WAN A（過渡用，讀者電腦搬完後已刪除，見 6-5） |
+| 5 | Reader_PC_VLAN90_SNAT | vlan90 | Any | WAN A（第二階段新增） |
+
+> ⚠️ **出口一換，依外網 IP 設白名單的外部系統都會連不上**。對調前要先問案主或系統廠商：哪些系統只允許某個 IP 連線。
+
+### 5-9 驗收
+
+| 用哪台 | 應該看到 | 結果 |
+| --- | --- | --- |
+| 館員有線電腦 | 外網 IP＝WAN B | ✅ |
+| 館員公用電腦 | 外網 IP＝WAN B | ✅ |
+| 館員手機（館員 SSID） | 外網 IP＝WAN B | ✅ |
+| 讀者有線電腦（搬遷前） | 外網 IP＝WAN A | ✅ |
+| 櫃台電腦館務系統（搬遷前） | 正常 | ✅ |
+| 讀者手機（讀者 SSID） | 取得 VLAN 80 的 IP | ✅ |
+| 讀者手機 | 外網 IP＝WAN A、連不到館內、不當網站被擋 | ⏳ 現場驗收中 |
+
+## 6. 第二階段：讀者有線電腦搬到 VLAN 90
+
+### 6-1 找出讀者電腦接在哪個埠
+
+做什麼：要改交換器的埠，就要知道每台電腦接在哪台交換器的哪個埠。
+
+怎麼做：Nebula 左側 **Clients**。點進單台可以看到 **Connected to**（交換器）和 **Port**，下方的 Current client connection 會畫出「電腦 → 埠 → 交換器 → 核心 → 防火牆」整條路徑。列表頁直接顯示所有有線、無線設備最近 24 小時的連線，用 MAC 前幾碼搜尋最快。
+
+| 發現 | 怎麼處理 |
+| --- | --- |
+| 同一個埠出現好幾台設備 | 推測下面接了小型交換器。**整個埠會一起被搬**，改之前要到現場確認下面只接了讀者電腦 |
+| 館員電腦和印表機共用的埠 | **絕對不能改** |
+| Nebula 裡的用戶端名稱和 DHCP 表的名稱不一致（例如「公用電腦」其實是館員用） | 先跟案主確認用途，再決定搬不搬 |
+| 24 小時內沒上線的電腦 | 列表裡看不到，要等開機或到現場查 |
+
+### 6-2 防火牆新增 `vlan90`
+
+做法同 5-1，另外在 **Static DHCP table** 加上 10 台讀者電腦：
+
+| 欄位 | 填法 |
+| --- | --- |
+| Hostname | 沿用原本的電腦名稱 |
+| IP address | **最後一碼沿用舊的**（例如原本 `.41`，新網段也用 `.41`），方便對照 |
+| MAC address | 從 LAN1 的 Static DHCP table 照抄，**逐筆核對最後兩碼**（同一批電腦 MAC 前段都一樣，很容易打錯） |
+
+> 還不知道接在哪個埠的電腦，**綁定也可以先建**。綁定只看 MAC，之後埠一改就會拿到對的 IP。
+>
+> LAN1 裡的舊綁定在搬遷期間先留著，萬一要還原才有依據；全部搬完後再刪（見 6-5）。
+
+接著新增 Policy route `Reader_PC_VLAN90_SNAT`（Incoming `vlan90` → WAN A），做法同 5-4。
+
+### 6-3 改交換器的埠
+
+怎麼做：**Switch → Configure → Switch ports** → 勾選該埠 → **Edit**：
+
+| 欄位 | 改成 |
+| --- | --- |
+| Type | **Access** |
+| PVID | **`90`** |
+| VLAN type | None |
+| 其他 | 維持預設 |
+
+> ⚠️ **遠端改埠的陷阱**：只改 PVID 不會讓網路線斷線，**開著的電腦會繼續用舊 IP**，在新 VLAN 裡等於斷網，要等 DHCP 租約更新才會恢復（舊網段租約 7 天）。解法：把該埠的 **Port enabled** 改 Disabled → Update → 等 1 分鐘 → 改回 Enabled → Update，Windows 會以為網路線被拔插，自動重新要 IP。關機中的電腦則在下次開機時就會拿到新 IP。
+>
+> 埠名稱維持預設，不寫電腦名稱：用戶端設備會更換，埠名寫死某台電腦反而容易誤導。
+
+### 6-4 搬遷結果
+
+| 區域 | 接在 | 台數 | 結果 |
+| --- | --- | --- | --- |
+| 櫃台 | 1F 第 19 埠 | 1 | ✅ 取得 VLAN 90 指定 IP；⏳ 館務系統、列印待櫃台確認 |
+| 兒童區 | 1F 第 10 埠 | 1 | ✅ 取得 VLAN 90 指定 IP |
+| 兒童區 | 1F 第 11 埠（下接小交換器） | 3 | ✅ 開館開機後取得 VLAN 90 指定 IP |
+| 成人區 | 2F 第 1～5 埠（每埠一台） | 5 | ✅ 改埠、斷線再接上後取得 VLAN 90 指定 IP |
+
+> 成人區電腦前一天沒開機，Clients 列表看不到；隔天開館開機後才查出它們在 **2F**，不在 1F。**沒上線的設備，Clients 查不到埠號**，要等開機或到現場查。
+>
+> 關機中的電腦，改完埠後下次開機就會直接拿到新 IP；開著的電腦要做「斷線再接上」。
+>
+> Nebula Clients 的名稱跟防火牆 Static DHCP table 的 Hostname **是各自獨立的**，不會自動同步。沒有名稱的用戶端會直接顯示 MAC，要到 Clients 點進該設備、按標題旁的 ✏️ 手動改名。
+
+**還原**：該埠改回 **PVID `1`**，再做一次斷線再接上。⚠️ 舊網段的綁定已刪除（見 6-5），還原前要先把那台的綁定加回舊網段，否則會拿到隨機 IP，不會被當成讀者。
+
+### 6-5 收尾：清掉過渡期的設定
+
+讀者電腦全部搬完、確認都拿到新 IP 後，把過渡期留下的東西清掉：
+
+| 項目 | 做法 | 為什麼 |
+| --- | --- | --- |
+| 舊網段裡讀者電腦的 10 筆綁定 | LAN1 → Static DHCP table 刪除 | 免得之後忘記；只保留館員電腦、印表機的綁定 |
+| `Reader_PC_SNAT_WAN1` | Routing 刪除 | 讀者電腦都離開舊網段，這條已經沒有流量 |
+| **`Reader_All` 移除舊的讀者電腦範圍** | Object → Address group | **一定要做**：舊網段的 DHCP 發放範圍包含這段 IP，綁定刪掉後這些 IP 會被發給其他設備，那些設備會被誤判成讀者（被過濾、連不到防火牆管理頁） |
+| 舊的讀者範圍物件、讀者群組物件 | Object 刪除 | 已經沒有規則使用（Nebula 允許刪除，就代表沒有被引用） |
+
+清完之後，`Reader_All` 只剩兩個以 **VLAN** 劃分的成員（讀者無線、讀者有線），不再依賴舊網段的 IP 範圍。Policy route 也剩下 4 條，每一類使用者各一條：
+
+| 規則 | 誰 | 出口 |
+| --- | --- | --- |
+| Librarian_WiFi_SNAT | 館員無線（vlan110） | WAN B |
+| Reader_WiFi_SNAT | 讀者無線（vlan80） | WAN A |
+| Staff_PC_SNAT_WAN2 | 館員有線（ge3＋館員電腦群組） | WAN B |
+| Reader_PC_VLAN90_SNAT | 讀者有線（vlan90） | WAN A |
+
+### 6-6 補齊館員網段的綁定
+
+做什麼：館員網段裡還有幾台設備沒有 MAC 綁定，IP 可能會變。
+
+| 設備 | 原本 | 處理 |
+| --- | --- | --- |
+| 1F 印表機 | DHCP 自動發的 IP | 加綁定，**沿用現在的 IP**，各電腦的印表機設定都不用改 |
+| 館員公用電腦（固定 IP 設在電腦本身，在 DHCP 範圍外） | 不在綁定表 | 加綁定，跟防火牆的位址物件同一個 IP |
+| 2F 事務機 | Clients 頁面看不到 IP，推測在機器上手動設定 | 決定不綁定 |
+
+> 手動設定 IP 的設備也建議加進綁定表：如果那個 IP 落在 DHCP 發放範圍內，加綁定等於「預約」，DHCP 就不會再把它發給別人，避免 IP 衝突。
+>
+> 用途不明的設備**不要綁**，等查清楚再說。
+
+## 7. 還沒確認的地方
+
+| 項目 | 說明 |
+| --- | --- |
+| 讀者手機的完整驗收 | 外網 IP、連不到館內、不當網站被擋，要現場用手機測 |
+| 櫃台電腦搬到 VLAN 90 後的館務系統與列印 | 如果需要連館員網段的伺服器或印表機，會被 `Reader_to_Staff_Deny` 擋住，要在它上方加例外規則 |
+| **Nebula Pro Pack 試用到期** | 安全政策頁面的 Application Patrol／Content Filter 欄位有鑽石圖示（授權功能），畫面顯示 Pro Pack 試用 30 天後到期。CIP 過濾靠的是 Pro Pack 還是防火牆本身的安全服務授權，**未確認**，要到 License & inventory 查 |
+| 單線斷線時的切換 | 已開啟「Interface link down 時自動停用規則」，停用後流量走預設路由；預設路由走哪條線、實際切換效果未實測 |
+| Connectivity Check | FTTB 常見「燈號正常但對外不通」，只有 Connectivity Check 抓得到；目前先關，避免偵測對象選錯造成誤停用 |
+| 不在館員群組的有線設備 | 舊網段裡不在館員群組的設備（印表機、事務機、用途不明的設備）走預設路由；可考慮把館員有線規則的 Source 改成 Any，讓舊網段全部走 WAN B |
+| 館員網段與網路設備管理共用 VLAN 1 | 這次刻意不動舊網段以降低風險；業界常見把網路設備管理獨立成一個 VLAN，列為日後選項 |
 
 ## 8. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
-| 改完 `<SSID>` 後，館員連不到印表機 | 館員設備還連在 `<SSID>`（現在是讀者網段），請改連 `<SSID>-staff` |
-| SSID 設了 VLAN ID，但完全沒生效 | 回到 SSID 設置頁，確認有按右下角的 **儲存**；只按「返回」不會儲存 |
-| 找不到 SSID 的 VLAN ID 欄位 | 先打開 SSID 設置頁的 **進階模式**，欄位在編輯頁最下方 |
-| 連上 Wi-Fi 卻拿不到 IP | 依序檢查：接 AP 的埠是否 Trunk、允許清單有沒有這個 VLAN、防火牆有沒有該 VLAN 的介面和 DHCP |
-| 只有一個 VLAN 通，其他 VLAN 都不通 | 接防火牆或 AP 的埠被設成 Access，改回 Trunk |
-| 交換器或 AP 從 Nebula 離線 | Trunk 的允許清單漏了 `1`（管理 VLAN），把 `1` 加回去 |
-| 改完 LAN1 之後整個網路異常 | 檢查 LAN1 的 VLAN ID 是否被填了數值，LAN1 要**留空** |
-| 新使用者拿不到 IP，舊的正常 | DHCP Pool 用完了：調整子網路遮罩與 Pool 大小、縮短租約、確認租約不是「無限」 |
-| VLAN 介面名稱打錯了 | 名稱儲存後不能改，只能刪掉重建（**推測**，原廠只寫「儲存後無法再修改」） |
-| 館員 Wi-Fi 的流量跑到 WAN B | 現有規則的 Incoming 是 `ge3`，抓不到 `vlan10`；要另外新增 Incoming＝`vlan10` 的規則 |
-| 館員 Wi-Fi 上得了網，卻印不到館內印表機 | Policy Route 的 Destination 是 Any，內網流量被送去外網（推測）；加上規則 0，或把 Destination 改成「非內網」 |
-| 館員筆電搬到 VLAN 10 後 IP 不固定 | 在 `vlan10` 重建 MAC 綁定，並對這個 SSID 關掉「隨機 MAC 位址」 |
-| 靜態 DHCP 表有兩筆同名 | 只是名稱重複，不影響發 IP，但查 log 會混淆，建議更正（本案現況就有一筆） |
-| 讀者電腦搬到 VLAN 30 後外網 IP 變了或連不上 | `vlan30` 的路由規則沒建或 Incoming 選錯；Incoming 要選 `vlan30`，不是 `ge3` |
-| 讀者還是 ping 得到館內設備 | 5-5 的安全政策沒有生效，或規則順序不對 |
-| 介面找不到文中的欄位名稱 | 原廠教學是 Nebula 19.00 版截圖，新版名稱可能不同（未確認） |
+| 新 SSID 存檔後是開放網路 | 新 SSID 的 Security options 預設是 **Open**，一定要改成 WPA Personal |
+| SSID 設了 VLAN ID 卻沒生效 | 確認有按 Back／Save；VLAN ID 在 SSID 編輯頁最下方的 Advanced settings |
+| VLAN 介面的 Members 預設帶入全部 LAN 埠 | 只留接核心交換器的那個埠 |
+| 讀者連上 Wi-Fi 卻拿不到 IP | 檢查：接 AP 的埠是否 Trunk、允許清單有沒有這個 VLAN、防火牆 VLAN 介面的 DHCP |
+| 打開 Layer 2 isolation 後要求填 MAC | 那是白名單，至少要填閘道 MAC，否則無法上網；不想填就先改用 Intra-BSS traffic blocking |
+| 為讀者套用過濾的規則沒效果 | 安全政策由上往下比對，條件相同時排在後面的永遠比對不到；把它拖到「LAN 全部放行」上面，或把 Source 改成讀者物件 |
+| 安全政策或 Policy route 名稱打錯、想改 | 名稱存檔後不能改，只能新增一條、再停用或刪除舊的 |
+| Policy route 拖不動 | 停用或刪除排在前面、條件相同的舊規則 |
+| Service 欄位只能選一個服務 | 先在 Object → Service 建服務群組 |
+| 改了交換器埠的 PVID，電腦還是舊 IP、不能上網 | 把該埠 Port enabled 關掉再打開，或請現場重開機 |
+| 出口對調後某個系統連不上 | 那個系統可能只允許舊的外網 IP；請廠商加白名單，或為該系統另外加一條指定 Destination 的 Policy route |
+| Clients 列表只顯示 MAC、沒有電腦名稱 | Clients 名稱與 DHCP 綁定表的 Hostname 不同步，點進設備按 ✏️ 手動改名 |
+| 找不到某台電腦接在哪個埠 | Clients 只列出最近有上線的設備；請現場開機後再查 |
+| 一個交換器埠出現好幾台設備 | 下面接了小型交換器，改 VLAN 會整個埠一起搬；改之前到現場確認 |
+| 交換器的 AP 埠上出現不認識的 MAC | 經 AP 連線的手機會被交換器記在 AP 埠上；MAC 第二碼是 2、6、A、E 的通常是手機的隨機 MAC |
+| 刪了一條安全政策後，館員突然不能上網、Nebula 設備離線 | 檢查 `LAN_Outgoing`（LAN 對外放行）還在不在。本案刪除舊的讀者規則時它被一起刪掉，館員與網路設備的對外流量落到 Default Deny。補回時要放在讀者 CIP 規則**下面**。刪規則前先截圖，刪完再對一次 |
+| 館員的新設備莫名被過濾 | 讀者群組裡還留著舊網段的 IP 範圍，DHCP 把那段 IP 發給了館員設備；讀者群組改成只用 VLAN 劃分 |
+| 動畫 GIF 截圖只看到一部分 | 回報設定時用一般截圖，一個畫面一張 |
 
 ## 9. 待辦
 
-- [ ] 補上每條連線的埠號（設備與連線關係已從 Nebula 拓撲圖確認）
-- [ ] 確認新網段沒有和 VPN 或其他網段重疊
-- [ ] 統計讀者尖峰同時上線人數，確認 /23 夠不夠用
-- [ ] 確認預設路由走哪條 WAN、Policy Route 有沒有「依路由表」的 Next-Hop
-- [ ] 盤點讀者電腦台數與接埠（第二階段用）
-- [ ] 實作第一階段，補上實測結果與截圖，把結論改成 ✅
-- [ ] 實測 Policy Route 在單線斷線時的行為
+- [ ] 櫃台電腦：確認館務系統與列印正常
+- [ ] 讀者電腦、讀者手機現場驗收（外網 IP、隔離、CIP）
+- [ ] 到現場確認兒童區小交換器下只接讀者電腦
+- [ ] 查閘道 MAC，讀者 SSID 補開 Layer 2 isolation
+- [ ] 確認 CIP 過濾依賴的授權與到期日
+- [ ] 實測單線斷線時的切換行為；評估 Connectivity Check
+- [ ] 查出用途不明的有線設備
+- [ ] （選用）館員有線規則的 Source 改成 Any
+- [ ] （選用）網路設備管理獨立成一個 VLAN
 
-## 10. 延伸閱讀
+## 10. 這次的心得
 
-- [Nebula 防火牆 LAN 介面設定教學](https://community.zyxel.com/tw/discussion/16371/nebula-%E9%98%B2%E7%81%AB%E7%89%86-lan-%E4%BB%8B%E9%9D%A2%E8%A8%AD%E5%AE%9A%E6%95%99%E5%AD%B8)：Zyxel 台灣社群，5-1 的來源，含截圖
-- [Nebula Switch VLAN 設定教學](https://community.zyxel.com/tw/discussion/16355/nebula-switch-vlan-%E8%A8%AD%E5%AE%9A%E6%95%99%E5%AD%B8)：Zyxel 台灣社群，第 2 節、5-2、6-3 的來源，含截圖
-- [Nebula 如何設定無線網路 (SSID) 的 VLAN ID](https://community.zyxel.com/tw/discussion/16659/nebula-%E5%A6%82%E4%BD%95%E8%A8%AD%E5%AE%9A%E7%84%A1%E7%B7%9A%E7%B6%B2%E8%B7%AF-ssid-%E7%9A%84-vlan-id)：Zyxel 台灣社群，5-3、5-6 的來源，含截圖
-- [Nebula USGFLEX/ATP/VPN - Routing and Traffic Shaping configuration](https://support.zyxel.eu/hc/en-us/articles/360020464860)：Nebula 路由與 Policy Route 設定位置
+| 心得 | 說明 |
+| --- | --- |
+| 先看現況再改 | 這次在安全政策裡發現讀者過濾從來沒有生效，如果直接照原計畫新增規則，就不會發現 |
+| 新規則先建成停用狀態 | 排好順序、閉館時段再逐條啟用，出問題取消勾選就能還原 |
+| 規則名稱不要寫會變的東西 | 名稱不能改，寫了外網 IP 或 WAN 編號，之後一調整就名實不符 |
+| 一次只改一件事 | 出口對調、讀者 SSID 搬家、讀者有線搬家分開做，出問題才知道是哪一步 |
+| 改埠前先對 MAC 和埠號 | Nebula Clients 頁面能看到每台設備接在哪個埠，也能發現一個埠下接了好幾台的情況 |
+| 過渡期的東西要記得清 | 搬完立刻刪舊綁定、舊規則、舊物件，免得之後忘記；刪之前先想想「它被刪了之後，那段 IP 會發給誰」 |
+| 用 VLAN 劃分，不要用 IP 範圍 | 位址物件改用 Interface subnet 或整個網段，比手動維護 IP 範圍可靠，新設備不會被誤判 |
+
+## 11. 延伸閱讀
+
+- [圖書館 Nebula 網路改造（附錄）：設定清單與實作紀錄](../zyxel-nebula-library-vlan-implementation-record/)：每一項實際設定、逐日實作紀錄、現場確認清單範本
+- [Nebula 防火牆 LAN 介面設定教學](https://community.zyxel.com/tw/discussion/16371/nebula-%E9%98%B2%E7%81%AB%E7%89%86-lan-%E4%BB%8B%E9%9D%A2%E8%A8%AD%E5%AE%9A%E6%95%99%E5%AD%B8)：Zyxel 台灣社群，VLAN 介面與 DHCP 參數
+- [Nebula Switch VLAN 設定教學](https://community.zyxel.com/tw/discussion/16355/nebula-switch-vlan-%E8%A8%AD%E5%AE%9A%E6%95%99%E5%AD%B8)：Zyxel 台灣社群，Trunk／Access／PVID
+- [Nebula 如何設定無線網路 (SSID) 的 VLAN ID](https://community.zyxel.com/tw/discussion/16659/nebula-%E5%A6%82%E4%BD%95%E8%A8%AD%E5%AE%9A%E7%84%A1%E7%B7%9A%E7%B6%B2%E8%B7%AF-ssid-%E7%9A%84-vlan-id)：Zyxel 台灣社群，SSID 對應 VLAN
+- [Nebula USGFLEX/ATP/VPN - Routing and Traffic Shaping configuration](https://support.zyxel.eu/hc/en-us/articles/360020464860)：Nebula 路由與 Policy Route
 - [USG Flex H Series Load Balancing In Nebula Mode](https://community.zyxel.com/en/discussion/comment/77409/)：H 系列在 Nebula 下的負載平衡討論
 - [[Nebula] Dynamic Personal Pre-Shared Key (DPPSK)](https://community.zyxel.com/vn/discussion/16890/nebula-dynamic-personal-pre-shared-key-dppsk)：DPPSK 支援機型清單
-- [How to Configure Management VLAN on Nebula Switch via Nebula?](https://community.zyxel.com/en/discussion/16675/how-to-configure-management-vlan-on-nebula-switch-via-nebula)：管理 VLAN 不用 VLAN 1 時怎麼改
 - [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](../cht-security-fleet-dns-filtering/)：防火牆 DNS 要填什麼

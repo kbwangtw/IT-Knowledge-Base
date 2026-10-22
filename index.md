@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 資訊黑手的 Knowledge Base
-last_modified_at: 2026-10-19
+last_modified_at: 2026-10-22
 ---
 
 # 資訊黑手的 IT 維運筆記
@@ -11,7 +11,7 @@ last_modified_at: 2026-10-19
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 剛接觸虛擬化、備份、監控的 IT 新鮮人；想找實際案例對照的維運人員 |
-| 文章數 | 32 篇，分 6 類 |
+| 文章數 | 33 篇，分 6 類 |
 | 最近更新 | 2026-10-17：全站改寫為新手版 |
 
 ## 1. 這裡記錄的是什麼環境
@@ -104,6 +104,7 @@ last_modified_at: 2026-10-19
 | [Wazuh 維運（二）：資料保留、告警調校、弱點修補與整合](docs/pve/wazuh-lxc-ubuntu2204-operations/) | Wazuh 裝好後：磁碟不爆、告警降噪、看弱點、接其他系統 |
 | [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh/) | 把資安數據放進一頁儀表板 |
 | [用 Grafana 建立戰情中心（二）：接上 LibreNMS](docs/pve/grafana-war-room-librenms/) | 把設備上下線狀態放進同一頁 |
+| [用 Grafana 建立戰情中心（三）：接上 Prometheus（Ceph 與 PVE）](docs/pve/grafana-war-room-prometheus/) | Ceph 健康、節點負載、VM 在哪台節點與 HA 狀態 |
 | [LibreNMS 溫度告警誤報：LXC 重複感測器與門檻整理](docs/pve/librenms-temperature-sensor-cleanup/) | 一直跳 Temperature above threshold；容器重複回報、門檻不合理 |
 | [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](docs/pve/pve-cluster-fail2ban-hardening/) | 有人一直猜密碼；加上兩步驟驗證 |
 | [不再把 PVE 8006 開到網際網路：改用 WireGuard](docs/pve/wireguard-remote-access-replace-8006/) | 在外面要管理家裡或公司的主機 |
@@ -114,7 +115,9 @@ last_modified_at: 2026-10-19
 | --- | --- |
 | [jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理](docs/network/jt-ipam-adoption-itbh/) | 想用工具管理 IP 位址，不再用 Excel |
 | [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | ping 得到外網，網址卻打不開 |
-| [圖書館 Nebula 網路規劃：VLAN 隔離讀者 Wi-Fi、兩條 FTTB 分流](docs/network/zyxel-nebula-library-vlan-dual-wan-plan/) | 第一次用 Nebula 切 VLAN；館員、讀者共用一個 Wi-Fi，想分開並讓兩條線分工（規劃，未實作） |
+| [圖書館 Nebula 網路改造：VLAN 隔離讀者、CIP 過濾、兩條 FTTB 分流](docs/network/zyxel-nebula-library-vlan-dual-wan-plan/) | 第一次用 Nebula 切 VLAN；館員、讀者共用網路，想分開、過濾讀者上網並讓兩條線分工（第二階段完成，待現場驗收） |
+| [圖書館 Nebula 網路改造（附錄）：設定清單與實作紀錄](docs/network/zyxel-nebula-library-vlan-implementation-record/) | 要照抄同樣架構，或接手維護這個環境 |
+| [Nebula 兩層樓 Site-to-Site VPN 規劃：6F USG FLEX 100 × 10F USG FLEX 50HP](docs/network/zyxel-nebula-site-to-site-vpn-6f-10f-plan/) | 兩個地點的防火牆都在 Nebula，想讓兩邊內網互通（規劃，未實作） |
 
 ### 4-6 雲端、超融合與硬體
 
