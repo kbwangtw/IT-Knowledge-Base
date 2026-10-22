@@ -301,7 +301,7 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 | 評估 jt-ipam 改用權限較小的 LibreNMS 使用者 | 待評估 |
 | 「目前告警」面板（`/api/v0/alerts?state=1`） | 可擴充 |
 | DC01、DC02、CA 加入 LibreNMS（只用 Ping） | ✅ 完成（2026-10-22，第 9 節） |
-| 9-4 實測時有沒有寄出告警信 | ⏳ 未確認 |
+| LibreNMS 告警：**沒有任何告警規則**（`alert_rules` 0 筆、近 7 天 `alert_log` 0 筆，9-4 的斷線也沒留下告警）；容器內 postfix 已安裝、只聽本機，但 `relayhost` 空白、`myhostname` 是 `librenms.localdomain` | ⏳ 待辦（2026-10-22 盤點）：先建「設備斷線」等少數規則，再比照 PVE／PBS 設定 Gmail 轉寄 |
 | DC／CA 的 CPU、磁碟用量：先在非 DC 的測試機試用 SNMPv3 agent（snmp4windows），或等 jt-snmpd 支援 v3 | ⏳ 待評估 |
 | 設備清單改為「類型」＋「發行版」 | ✅ 完成（2026-10-15） |
 | 6 台補 `extend distro` | ✅ 完成（2026-10-15） |
