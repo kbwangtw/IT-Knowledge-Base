@@ -4,7 +4,7 @@ title: "PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？"
 permalink: /docs/pve/pve-cluster-fail2ban-hardening/
 date: 2026-09-14
 categories: [PVE, Security, Fail2Ban, Network]
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-22
 ---
 
 # PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？
@@ -16,7 +16,7 @@ last_modified_at: 2026-10-17
 | 適合誰看 | PVE 管理頁面被外部嘗試登入、想確認防護有沒有用的人 |
 | 環境 | PVE 9.2.18（9/14）；三台 node10～node12 |
 | 日期 | 2026-09-14 首次記錄；10/12～10/15 補記 |
-| 結論 | ✅ node10 確認遞增封鎖（1h → 2h）與 iptables 命中；✅ 8006 對外轉送已停用、改走 WireGuard；✅ `root@pam` 啟用 TOTP；✅ SSH 金鑰加上來源限制；⏳ 刪除 hermesagent token、關閉 SSH 密碼登入 |
+| 結論 | ✅ node10 確認遞增封鎖（1h → 2h）與 iptables 命中；✅ 8006 對外轉送已停用、改走 WireGuard；✅ `root@pam` 啟用 TOTP；✅ SSH 金鑰加上來源限制；✅ 10/22 三台 PVE 與 PBS31 關閉 SSH 密碼登入（第 12 節）；⏳ 刪除 hermesagent token |
 
 > 完整的封鎖與封包證據來自 node10；三台設定相同，但不擴大解讀成三台都各自驗證過。
 
@@ -346,11 +346,154 @@ for n in node10 node11 node12; do ssh root@$n 'journalctl -u ssh -u sshd --since
 - 如果互連失敗，立刻 `cat <備份> > /etc/pve/priv/authorized_keys` 還原。
 - 確認正常後用 `shred -u` 刪除備份（覆寫後再刪，不留痕跡）。
 
-### 11-5 尚未處理：密碼登入
+### 11-5 密碼登入（10/22 已處理，見第 12 節）
 
 `PermitRootLogin yes` 加上 `PasswordAuthentication yes`，代表知道 root 密碼就能從內網 SSH，而且不受 TOTP 保護。目前密碼登入來源都是人工（WinClient、VPN、家中兩台裝置）。關閉前要先讓這些裝置改用金鑰登入，另排時間處理。
 
-## 12. 常見問題
+## 12. 10/22：關閉 SSH 密碼登入（三台 PVE 與 PBS31）
+
+**做什麼**：先讓手上的裝置改用金鑰登入，四台都測試成功後，才關掉密碼登入。全程保留已登入的視窗；萬一新連線進不去，PVE／PBS 網頁的 **Shell**（有 TOTP 保護）不走 SSH，一定進得去。
+
+```text
+產生金鑰（公司筆電）─▶ 公鑰加進 PVE（三台共用）和 PBS31 ─▶ 四台用金鑰登入測試
+  ─▶ 查 30 天內的密碼登入來源 ─▶ 新增 sshd 設定檔 ─▶ 密碼被拒、金鑰可登入
+```
+
+### 12-1 產生金鑰（MobaXterm／PuTTY）
+
+1. MobaXterm 選單 **Tools → MobaKeyGen**（就是 PuTTYgen）。不要在 MobaXterm 的本機終端機跑 `ssh-keygen`：它的家目錄重開就會清掉。
+2. Type of key 選 **EdDSA／Ed25519** → **Generate**（移動滑鼠）。
+3. Key comment 填裝置名稱（例如 `company-laptop-p51`），**一定設 passphrase**，存成 `.ppk`。
+4. 複製上方「Public key for pasting into OpenSSH authorized_keys file」框裡的那一行（`ssh-ed25519 …`）。
+
+| 檔案 | 處理 |
+| --- | --- |
+| 公鑰（`ssh-ed25519 …` 一行） | 可以公開，加到伺服器 |
+| 私鑰（`.ppk`） | 只留在這台電腦；不要放在會同步到 OneDrive 的「桌面／文件」，例如存在 `C:\Users\<帳號>\.ssh\` |
+
+公司筆電由公司 IT 管理、離職要交回，所以私鑰一定加 passphrase；註解寫清楚是哪台，日後刪掉那一行就能撤銷。
+
+### 12-2 公鑰加進 PVE 與 PBS31
+
+PVE（任一台執行，三台共用 `/etc/pve/priv/authorized_keys`）：
+
+```bash
+ls -l /root/.ssh/authorized_keys
+cp -a /etc/pve/priv/authorized_keys /root/authorized_keys.bak-$(date +%Y%m%d)
+wc -l /etc/pve/priv/authorized_keys
+KEY='ssh-ed25519 AAAA…（公鑰）… company-laptop-p51'
+F=/etc/pve/priv/authorized_keys
+[ -n "$(tail -c1 $F)" ] && echo >> $F
+grep -qF "$KEY" $F || echo "$KEY" >> $F
+wc -l $F
+tail -1 $F
+for h in node11 node12; do echo "== $h"; ssh root@$h 'grep -c company-laptop-p51 /root/.ssh/authorized_keys'; done
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `ls -l` | 確認是指向 `/etc/pve/priv/authorized_keys` 的連結 |
+| `cp -a … /root/…bak-日期` | 備份放 `/root`，不放 `/etc/pve` |
+| `[ -n "$(tail -c1 $F)" ] && echo >> $F` | 最後一行沒換行就先補，避免新金鑰黏在上一把後面 |
+| `grep -qF … \|\| echo …` | 還沒加過才加 |
+
+看到的結果：連結正確；9 → 10 行；最後一行是新公鑰；node11、node12 各 `1`。
+
+PBS31 不在叢集裡，要另外加（原本沒有任何公鑰）：
+
+```bash
+mkdir -p /root/.ssh && chmod 700 /root/.ssh
+F=/root/.ssh/authorized_keys
+touch $F && chmod 600 $F
+cp -a $F $F.bak-$(date +%Y%m%d)
+KEY='ssh-ed25519 AAAA…（公鑰）… company-laptop-p51'
+[ -s $F ] && [ -n "$(tail -c1 $F)" ] && echo >> $F
+grep -qF "$KEY" $F || echo "$KEY" >> $F
+wc -l $F
+```
+
+`chmod 600` 很重要：權限太寬時 sshd 會拒絕使用這個檔案。看到的結果：0 → 1 行。
+
+### 12-3 用金鑰登入測試
+
+MobaXterm 每個 session：**Edit session → Basic SSH settings 勾 Specify username 填 `root` → Advanced SSH settings 勾 Use private key**，選 `.ppk`。PuTTY 在 **Connection → SSH → Auth → Credentials** 設定，再存 session。
+
+伺服器端確認（不能只看能不能登入，要確認不是用密碼）：
+
+```bash
+journalctl -u ssh --since "10 min ago" --no-pager | grep Accepted
+```
+
+看到的結果：四台都是 `Accepted publickey for root from <VPN 位址> … ED25519 SHA256:<指紋>`，`found at /root/.ssh/authorized_keys:10`（新加的那一行）。同一秒有兩筆是 MobaXterm 另外開給 SFTP 瀏覽器的連線。
+
+### 12-4 關閉前：30 天內誰用密碼登入（唯讀）
+
+```bash
+for h in node10 node11 node12; do
+  echo "== $h"
+  ssh root@$h 'journalctl -u ssh --since "30 days ago" --no-pager | grep "Accepted password" | grep -oP "from \K[0-9.]+" | sort | uniq -c'
+done
+```
+
+| 來源 | 次數與時間 | 判讀 |
+| --- | --- | --- |
+| `<VPN 位址>` | node10 35 次 | 公司筆電等 VPN 裝置，已改金鑰 |
+| `<裝置 A>` | 9/30 三台，每次同一秒兩筆 | MobaXterm 手動登入 |
+| `<裝置 B>` | 9/26～9/27，每次同一秒兩筆 | MobaXterm 手動登入 |
+| `<PBS31 位址>` | 10/20 08:04 一次 | PBS31 上手動 ssh；30 天只一次，不是排程 |
+
+全部是人工登入，**關掉密碼不會讓自動化程式失敗**（節點互連、Hermes、ProxCenter 本來就用金鑰）。
+
+### 12-5 新增 sshd 設定檔
+
+不改原本的 `sshd_config`，另外新增設定檔，還原時刪掉即可。先在 node10 做：
+
+```bash
+grep -nE '^\s*(Include|PasswordAuthentication|PermitRootLogin|KbdInteractiveAuthentication|Match)' /etc/ssh/sshd_config
+cat > /etc/ssh/sshd_config.d/10-key-only.conf <<'EOF'
+# 2026-10-22 只允許金鑰登入（還原：刪除本檔後 systemctl reload ssh）
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+EOF
+sshd -t && echo "CONFIG-OK"
+sshd -T | grep -E '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin) '
+systemctl reload ssh
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `PasswordAuthentication no` | 不接受密碼 |
+| `KbdInteractiveAuthentication no` | 也關掉鍵盤互動式（另一種輸密碼的方式） |
+| `PermitRootLogin prohibit-password` | root 只能用金鑰；`sshd -T` 顯示為舊名稱 `without-password` |
+| `sshd -t` | 設定沒錯才印 `CONFIG-OK`，沒有就不要 reload |
+| `systemctl reload ssh` | 套用，不中斷已登入的連線 |
+
+**為什麼原本的 `yes` 不用改**：`Include /etc/ssh/sshd_config.d/*.conf` 在第 12 行，比第 33 行的 `PermitRootLogin yes`、第 57 行的 `PasswordAuthentication yes` 先讀到；sshd 同一個設定**只採用第一次讀到的值**。
+
+測試密碼被拒（`StrictHostKeyChecking=no`、`UserKnownHostsFile=/dev/null` 是為了不在 `known_hosts` 多留一筆 localhost）：
+
+```bash
+ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o BatchMode=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost
+```
+
+node11、node12 從 node10 用 `for h in node11 node12; do ssh root@$h '…'; done` 執行同一段，`sshd -t` 失敗就刪掉新檔並停止；PBS31 在本機執行同一段（它的 `sshd_config` 沒寫 `PasswordAuthentication`，預設是允許）。
+
+**看到的結果**：
+
+| 主機 | Include 位置 | 生效值 | 密碼測試 | 金鑰登入 |
+| --- | --- | --- | --- | --- |
+| node10 | 第 12 行 | `without-password`／`no`／`no` | `Permission denied (publickey)` | ✅ |
+| node11 | 第 12 行 | 同上 | 同上 | ✅ |
+| node12 | 第 12 行 | 同上 | 同上 | ✅ |
+| PBS31 | 第 12 行 | 同上 | 同上 | ✅ |
+
+- MobaXterm 在第一次輸入 passphrase 後，同一次執行中連其他主機不用再輸入（MobAgent 沒有啟用，確切機制未確認）。離開座位要鎖螢幕、不用時關掉 MobaXterm。
+- 確認沒有代理轉送：在登入的伺服器上 `echo "SSH_AUTH_SOCK=[$SSH_AUTH_SOCK]"`，結果是 `[]`。
+
+**還原**（任一台）：`rm /etc/ssh/sshd_config.d/10-key-only.conf && systemctl reload ssh`。
+
+## 13. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
@@ -361,14 +504,19 @@ for n in node10 node11 node12; do ssh root@$n 'journalctl -u ssh -u sshd --since
 | 一直有外部 IP 嘗試登入 | 查路由器有沒有轉送 8006；改用 VPN |
 | 啟用 TOTP 後被鎖住 | SSH 登入節點，`pveum user tfa delete`；或用復原碼 |
 | 改 authorized_keys 後節點互連失敗 | 立刻用備份還原 |
+| 關掉密碼後，某台裝置 SSH 出現 `Permission denied (publickey)` | 這台還沒換金鑰：用 PVE／PBS 網頁的 Shell 把它的公鑰加進去（第 12 節） |
+| MobaXterm 連線先問 `login as:` | session 沒勾 Specify username；Edit session 填 `root` |
+| 金鑰登入卻還是要輸入 root 密碼 | session 沒設定私鑰；用 `journalctl -u ssh … \| grep Accepted` 看是 `publickey` 還是 `password` |
 
-## 13. 待辦
+## 14. 待辦
 
 - [ ] 約 10/29 刪除已停用的 `hermesagent` token
-- [ ] 各裝置改用金鑰後，關閉 SSH 密碼登入
+- [x] 各裝置改用金鑰後，關閉 SSH 密碼登入（2026-10-22，第 12 節）
+- [ ] 其他裝置換金鑰：WinClient、家裡的電腦、家裡的筆電（第 11 節的「管理者筆電」金鑰可能就是它，先試）、手機。要用 SSH 時才做，先用網頁 Shell 加公鑰
+- [ ] 確認幾天正常後，`shred -u` 刪除 node10 的 `/root/authorized_keys.bak-20261022` 和 PBS31 的 `/root/.ssh/authorized_keys.bak-20261022`
 - [x] ~~（可選）Hermes 改用只能執行唯讀指令的帳號~~：2026-10-20 決定不做（目前沒有需求；SSH 金鑰已加 `from=` 來源限制）
 
-## 14. 延伸閱讀
+## 15. 延伸閱讀
 
 - [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)
 - [Fail2Ban 1.1.0 設定參考](https://github.com/fail2ban/fail2ban/blob/1.1.0/config/jail.conf)
