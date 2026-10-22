@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 資訊黑手的 Knowledge Base
-last_modified_at: 2026-10-19
+last_modified_at: 2026-10-22
 ---
 
 # 資訊黑手的 IT 維運筆記
@@ -11,7 +11,7 @@ last_modified_at: 2026-10-19
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 剛接觸虛擬化、備份、監控的 IT 新鮮人；想找實際案例對照的維運人員 |
-| 文章數 | 32 篇，分 6 類 |
+| 文章數 | 33 篇，分 6 類 |
 | 最近更新 | 2026-10-17：全站改寫為新手版 |
 
 ## 1. 這裡記錄的是什麼環境
@@ -116,6 +116,7 @@ last_modified_at: 2026-10-19
 | [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | ping 得到外網，網址卻打不開 |
 | [圖書館 Nebula 網路改造：VLAN 隔離讀者、CIP 過濾、兩條 FTTB 分流](docs/network/zyxel-nebula-library-vlan-dual-wan-plan/) | 第一次用 Nebula 切 VLAN；館員、讀者共用網路，想分開、過濾讀者上網並讓兩條線分工（第二階段完成，待現場驗收） |
 | [圖書館 Nebula 網路改造（附錄）：設定清單與實作紀錄](docs/network/zyxel-nebula-library-vlan-implementation-record/) | 要照抄同樣架構，或接手維護這個環境 |
+| [Nebula 兩層樓 Site-to-Site VPN 規劃：6F USG FLEX 100 × 10F USG FLEX 50HP](docs/network/zyxel-nebula-site-to-site-vpn-6f-10f-plan/) | 兩個地點的防火牆都在 Nebula，想讓兩邊內網互通（規劃，未實作） |
 
 ### 4-6 雲端、超融合與硬體
 
