@@ -63,6 +63,7 @@
 - [jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理](docs/network/jt-ipam-adoption-itbh.md)
 - [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering.md)：須指定 210.69.1.1；過濾機制未向中華電信確認
 - [圖書館 Nebula 網路改造：VLAN 隔離讀者、CIP 過濾、兩條 FTTB 分流](docs/network/zyxel-nebula-library-vlan-dual-wan-plan.md)：無線與讀者有線搬遷完成，待現場驗收
+- [圖書館 Nebula 網路改造（附錄）：設定清單與實作紀錄](docs/network/zyxel-nebula-library-vlan-implementation-record.md)：實際設定、逐日紀錄、現場確認清單範本
 
 ### 雲端、超融合與硬體
 

@@ -17,6 +17,7 @@ last_modified_at: 2026-10-22
 | 環境 | USG FLEX 100H ×1、XGS2220 ×1（核心）、GS1920 ×3（1F～3F 各一台）、NWA90AX ×9（每層 3 台），全部由 Nebula 管理（Nebula 版本 20.20）；FTTB ×2 |
 | 日期 | 2026-10-20 規劃；2026-10-21～22 實作 |
 | 資料來源 | 現場設定與驗收結果；設定觀念參考 Zyxel 台灣社群官方教學（見第 11 節） |
+| 設定清單 | 每一項最後的實際設定，見[附錄：設定清單與實作紀錄](../zyxel-nebula-library-vlan-implementation-record/) |
 | 結論 | ✅ 館員無線、讀者無線分 VLAN 並完成分流；✅ 出口對調（館員走 WAN B、讀者走 WAN A）並驗收；✅ 讀者 CIP 過濾、讀者禁止連館員網段的安全政策已啟用；✅ 10 台讀者有線電腦全部搬到 VLAN 90，過渡用的規則、綁定、物件已清除；⏳ 現場驗收（櫃台作業、讀者手機與電腦的外網 IP／過濾／隔離）、Layer 2 isolation、授權到期影響待確認 |
 
 ## 1. 先認識幾個名詞
@@ -395,7 +396,7 @@ last_modified_at: 2026-10-22
 | --- | --- | --- |
 | 1F 印表機 | DHCP 自動發的 IP | 加綁定，**沿用現在的 IP**，各電腦的印表機設定都不用改 |
 | 館員公用電腦（固定 IP 設在電腦本身，在 DHCP 範圍外） | 不在綁定表 | 加綁定，跟防火牆的位址物件同一個 IP |
-| 2F 事務機 | Clients 頁面看不到 IP，推測在機器上手動設定 | ⏳ 查出 IP 後加綁定 |
+| 2F 事務機 | Clients 頁面看不到 IP，推測在機器上手動設定 | 決定不綁定 |
 
 > 手動設定 IP 的設備也建議加進綁定表：如果那個 IP 落在 DHCP 發放範圍內，加綁定等於「預約」，DHCP 就不會再把它發給別人，避免 IP 衝突。
 >
@@ -432,6 +433,7 @@ last_modified_at: 2026-10-22
 | 找不到某台電腦接在哪個埠 | Clients 只列出最近有上線的設備；請現場開機後再查 |
 | 一個交換器埠出現好幾台設備 | 下面接了小型交換器，改 VLAN 會整個埠一起搬；改之前到現場確認 |
 | 交換器的 AP 埠上出現不認識的 MAC | 經 AP 連線的手機會被交換器記在 AP 埠上；MAC 第二碼是 2、6、A、E 的通常是手機的隨機 MAC |
+| 刪了一條安全政策後，館員突然不能上網、Nebula 設備離線 | 檢查 `LAN_Outgoing`（LAN 對外放行）還在不在。本案刪除舊的讀者規則時它被一起刪掉，館員與網路設備的對外流量落到 Default Deny。補回時要放在讀者 CIP 規則**下面**。刪規則前先截圖，刪完再對一次 |
 | 館員的新設備莫名被過濾 | 讀者群組裡還留著舊網段的 IP 範圍，DHCP 把那段 IP 發給了館員設備；讀者群組改成只用 VLAN 劃分 |
 | 動畫 GIF 截圖只看到一部分 | 回報設定時用一般截圖，一個畫面一張 |
 
@@ -440,7 +442,6 @@ last_modified_at: 2026-10-22
 - [ ] 櫃台電腦：確認館務系統與列印正常
 - [ ] 讀者電腦、讀者手機現場驗收（外網 IP、隔離、CIP）
 - [ ] 到現場確認兒童區小交換器下只接讀者電腦
-- [ ] 2F 事務機查出 IP 後加綁定
 - [ ] 查閘道 MAC，讀者 SSID 補開 Layer 2 isolation
 - [ ] 確認 CIP 過濾依賴的授權與到期日
 - [ ] 實測單線斷線時的切換行為；評估 Connectivity Check
@@ -462,6 +463,7 @@ last_modified_at: 2026-10-22
 
 ## 11. 延伸閱讀
 
+- [圖書館 Nebula 網路改造（附錄）：設定清單與實作紀錄](../zyxel-nebula-library-vlan-implementation-record/)：每一項實際設定、逐日實作紀錄、現場確認清單範本
 - [Nebula 防火牆 LAN 介面設定教學](https://community.zyxel.com/tw/discussion/16371/nebula-%E9%98%B2%E7%81%AB%E7%89%86-lan-%E4%BB%8B%E9%9D%A2%E8%A8%AD%E5%AE%9A%E6%95%99%E5%AD%B8)：Zyxel 台灣社群，VLAN 介面與 DHCP 參數
 - [Nebula Switch VLAN 設定教學](https://community.zyxel.com/tw/discussion/16355/nebula-switch-vlan-%E8%A8%AD%E5%AE%9A%E6%95%99%E5%AD%B8)：Zyxel 台灣社群，Trunk／Access／PVID
 - [Nebula 如何設定無線網路 (SSID) 的 VLAN ID](https://community.zyxel.com/tw/discussion/16659/nebula-%E5%A6%82%E4%BD%95%E8%A8%AD%E5%AE%9A%E7%84%A1%E7%B7%9A%E7%B6%B2%E8%B7%AF-ssid-%E7%9A%84-vlan-id)：Zyxel 台灣社群，SSID 對應 VLAN
