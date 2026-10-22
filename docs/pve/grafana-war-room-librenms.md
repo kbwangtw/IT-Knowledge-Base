@@ -15,8 +15,8 @@ last_modified_at: 2026-10-22
 | --- | --- |
 | 適合誰看 | 想把監控系統的資料接到 Grafana 的人 |
 | 環境 | LibreNMS 26.9.1（LXC，CT 102，nginx）、Grafana 13.2.3（CT 114）、Infinity plugin |
-| 紀錄日期 | 2026-10-14（10/15 補充設備清單欄位與 SNMP 修正） |
-| 結果 | ✅ 斷線設備數字、設備清單（16 台）已上線；Token 屬唯讀使用者、寫入測試被拒（403） |
+| 紀錄日期 | 2026-10-14（10/15 補充設備清單欄位與 SNMP 修正；10/22 補上 DC01、DC02、CA） |
+| 結果 | ✅ 斷線設備數字、設備清單（16 台，10/22 起 19 台）已上線；Token 屬唯讀使用者、寫入測試被拒（403）；✅ DC01、DC02、CA 以 Ping 監控，斷線實測會變紅 |
 
 > 第一階段見 [戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)。文中 IP 都是文件示範位址。
 
@@ -200,7 +200,89 @@ pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device
 
 `personal_access_tokens` 只有兩筆：`admin` 的 `jt-ipam`（**不會過期**）和 `grafana` 的 `Grafana war room`。jt-ipam 主機如果被入侵，那把 Token 可以修改 LibreNMS 任何設定。jt-ipam 的「自動加入監控」功能可能需要寫入權限，所以暫不更動，列為待評估。
 
-## 9. 還原方式
+## 9. 補上 DC01、DC02、CA：只用 Ping 監控（2026-10-22）
+
+**為什麼**：Grafana 把「設備清單（LibreNMS）」和 PVE 的「VM／CT 位置與 HA」並排後發現，網域控制站 DC01、DC02 和憑證伺服器 CA **不在 LibreNMS 裡**，它們掛掉時戰情中心看不出來。
+
+**為什麼不用 SNMP**：
+
+| 選項 | 評估 |
+| --- | --- |
+| Windows 內建 SNMP | 只支援 v1／v2c（community 明文），跟本環境統一的 SNMPv3 authPriv 不一致，微軟也已標為淘汰 |
+| Net-SNMP（Windows 版） | 支援 v3，但找得到的 Windows 安裝檔和文件停在 5.6～5.7 版，查不到仍在維護的官方 Windows 版 |
+| snmp4windows（商用 SNMPv3 agent） | 有試用版，但找不到 Server 2022／2025 的實測紀錄 |
+| jt-snmpd（開源） | 目前只有 v2c |
+| **只用 Ping（✅ 採用）** | DC 完全不用安裝或改設定，先補上「主機有沒有活著」 |
+
+DC 和 CA 是網域最核心的主機，不在上面跑沒有維護或沒驗證過的網路服務。資安事件已由 Wazuh Agent（9/30 安裝）監控；CPU、磁碟用量之後再評估（先在非 DC 的測試機試用 SNMPv3 agent）。
+
+### 9-1 先確認解析得到、Ping 得到
+
+```bash
+pct exec 102 -- bash -c 'for h in dc01 dc02 ca; do echo "== $h"; getent hosts $h.<網域> || getent hosts $h || echo "解析不到"; done'
+pct exec 102 -- fping -c 3 dc01.<網域> dc02.<網域> ca.<網域>
+```
+
+**看到的結果**：三台都解析得到；dc01、dc02 `3/3/0%`，**ca `3/0/100%`**。推測原因：升級成網域控制站時會自動開放 AD 的 ICMP Echo 規則，CA 只是成員伺服器，Windows 預設擋 Ping。
+
+### 9-2 CA 只對 LibreNMS 開放 Ping
+
+在 CA 以系統管理員身分開 PowerShell（LibreNMS 的 IP 用 `pct exec 102 -- hostname -I` 查）：
+
+```powershell
+Get-NetConnectionProfile | Select-Object InterfaceAlias, NetworkCategory
+New-NetFirewallRule -DisplayName "LibreNMS ICMPv4 Echo" -Direction Inbound -Protocol ICMPv4 -IcmpType 8 -RemoteAddress <LibreNMS IP> -Action Allow -Profile Any
+Get-NetFirewallRule -DisplayName "LibreNMS ICMPv4 Echo" | Get-NetFirewallAddressFilter
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `-Protocol ICMPv4 -IcmpType 8` | 只開放 Ping 請求，不開其他 ICMP |
+| `-RemoteAddress <LibreNMS IP>` | 只有 LibreNMS 能 Ping，其他來源照樣擋 |
+| `-Profile Any` | 不分網路設定檔；安全性靠來源 IP 限制 |
+
+**看到的結果**：再跑一次 fping，ca 變成 `3/3/0%`。新增規則可能產生一筆 Wazuh 的防火牆變更事件，屬預期。
+
+### 9-3 加入 LibreNMS
+
+```bash
+for h in dc01 dc02 ca; do
+  pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device:add --ping-only $h.<網域>"
+done
+for h in dc01 dc02 ca; do
+  pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device:poll $h.<網域>" | tail -3
+done
+pct exec 102 -- mysql librenms -e "select device_id, hostname, status, status_reason, os, last_polled from devices where hostname like 'dc0%' or hostname like 'ca.%';"
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `device:add --ping-only` | 新增設備，不使用 SNMP，只用 Ping |
+| `device:poll` | 立刻輪詢一次，不等 5 分鐘的排程 |
+| `status` | 1 上線、0 斷線；`status_reason` 是斷線原因 |
+
+**看到的結果**：`Added device …`（device_id 24、25、26），三台 `status` 都是 1。Grafana 的設備清單從 16 列變成 **19 列**，三台都是 Up。
+
+> `devices` 資料表**沒有** `snmp_disable` 欄位，查詢會出現 `ERROR 1054 Unknown column`；不影響設備加入。
+
+### 9-4 實測：讓 CA「假裝斷線」
+
+只停用 CA 上的 Ping 規則，CA 本身照常運作：
+
+```powershell
+Disable-NetFirewallRule -DisplayName "LibreNMS ICMPv4 Echo"
+```
+
+```bash
+pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device:poll ca.<網域>" | tail -3
+pct exec 102 -- mysql librenms -e "select hostname, status, status_reason from devices where hostname like 'ca.%';"
+```
+
+**看到的結果**：`status 0`、`status_reason icmp`；Grafana「斷線設備」變成紅色 1，清單裡 ca 是 Down。
+
+恢復：`Enable-NetFirewallRule -DisplayName "LibreNMS ICMPv4 Echo"`，再 `device:poll` 一次，`status` 回到 1、Grafana 回到綠色 0。
+
+## 10. 還原方式
 
 ```bash
 pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join users u on u.user_id=t.tokenable_id where u.username='grafana';"
@@ -208,7 +290,9 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 
 再到 LibreNMS 刪除 `grafana` 使用者，並在 Grafana 移除 LibreNMS 資料來源和兩個面板。LibreNMS 本身沒有其他變更。
 
-## 10. 待辦
+第 9 節的三台：`lnms device:remove <主機名稱>` 移除設備；CA 上 `Remove-NetFirewallRule -DisplayName "LibreNMS ICMPv4 Echo"`。
+
+## 11. 待辦
 
 | 項目 | 狀態 |
 | --- | --- |
@@ -216,13 +300,18 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 | 2027-10-14 前更換 Grafana 用的 LibreNMS Token | 長期追蹤（已排入 Google Calendar 2027-10-01） |
 | 評估 jt-ipam 改用權限較小的 LibreNMS 使用者 | 待評估 |
 | 「目前告警」面板（`/api/v0/alerts?state=1`） | 可擴充 |
+| DC01、DC02、CA 加入 LibreNMS（只用 Ping） | ✅ 完成（2026-10-22，第 9 節） |
+| 9-4 實測時有沒有寄出告警信 | ⏳ 未確認 |
+| DC／CA 的 CPU、磁碟用量：先在非 DC 的測試機試用 SNMPv3 agent（snmp4windows），或等 jt-snmpd 支援 v3 | ⏳ 待評估 |
 | 設備清單改為「類型」＋「發行版」 | ✅ 完成（2026-10-15） |
 | 6 台補 `extend distro` | ✅ 完成（2026-10-15） |
 | 6 台 `rouser snmpuser` 加上 `priv` | ✅ 完成（2026-10-15） |
 
-## 11. 延伸閱讀
+## 12. 延伸閱讀
 
 - [LibreNMS：API Authentication](https://docs.librenms.org/API/)、[API Devices](https://docs.librenms.org/API/Devices/)
+- [Jt-snmpd: a read-only SNMP agent for Windows hosts（LibreNMS Community）](https://community.librenms.org/t/jt-snmpd-a-read-only-snmp-agent-for-windows-hosts/29432)
+- [Net-SNMP README.win32](https://net-snmp.sourceforge.io/docs/README.win32.html)
 - [Laravel Sanctum：API Token Authentication](https://laravel.com/docs/sanctum#api-token-authentication)
 - [Grafana Infinity data source](https://grafana.com/docs/plugins/yesoreyeram-infinity-datasource/latest/)
 - [用 Grafana 建立戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)
