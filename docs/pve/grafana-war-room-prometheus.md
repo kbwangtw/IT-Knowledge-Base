@@ -515,7 +515,7 @@ Legend 在查詢下方 **Options** 的**最左邊**欄位；中間那格是 Min 
 
 > 評估過合併成一張（面板資料來源選 Mixed，再用 Join by field 依主機名稱對應），**決定不做**：LibreNMS 是 `adguard.<網域>`、PVE 是 `AdGuard`，PromQL 不能轉小寫，要另靠 Grafana 轉換；而且任一邊改名就會對不上，又沒有錯誤提示。並排對照時注意：PVE「執行中」但 LibreNMS「Down」，代表 VM 開著、裡面的系統沒回應。
 >
-> 並排時也看出：**DC01、DC02、CA、UBClient、WinClient 這 5 台 Windows 不在 LibreNMS 清單**，網域控制站和 CA 目前沒有 SNMP 監控。
+> 並排時也看出：**DC01、DC02、CA、UBClient、WinClient 這 5 台 Windows 不在 LibreNMS 清單**，網域控制站和 CA 當時沒有 SNMP 監控；10/22 已改用 Ping 加入 LibreNMS，見[戰情中心（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/)第 9 節。
 
 ## 9. 驗收
 
@@ -634,7 +634,7 @@ rm /etc/systemd/system/ceph-prometheus-fw.service /etc/ceph-prometheus-fw.nft &&
 | PVE exporter Token 2027-10-22 到期前更換 | 長期追蹤（建議排行事曆 2027-10-08） |
 | 第 5 階段 kiosk：儀表板設定自動更新（例如 1m） | ⏳ 待辦 |
 | 查三款 NVMe 規格（PLP、DRAM），評估換成同型號企業級 NVMe | ⏳ 待評估（10-1） |
-| DC01、DC02、CA（及 UBClient、WinClient）加入 LibreNMS 監控 | ⏳ 待辦（8-5） |
+| DC01、DC02、CA 加入 LibreNMS 監控 | ✅ 2026-10-22，只用 Ping（UBClient、WinClient 不加入） |
 | 叢集防火牆（pve-firewall）目前停用，8006、22 同網段全開 | ⏳ 另案評估 |
 | Wazuh Critical 弱點 205（10/14）→ 296（10/22） | ⏳ 另案檢查 |
 | 單節點故障演練（建議不要選 node11，或事先處理 104／108） | ⏳ 待辦 |
