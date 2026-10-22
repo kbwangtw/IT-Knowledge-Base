@@ -4,7 +4,7 @@ title: "用 Grafana 建立戰情中心（二）：接上 LibreNMS"
 date: 2026-10-14
 categories: [PVE, Grafana, LibreNMS]
 permalink: /docs/pve/grafana-war-room-librenms/
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-22
 ---
 
 # 用 Grafana 建立戰情中心（二）：接上 LibreNMS
@@ -226,3 +226,4 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 - [Laravel Sanctum：API Token Authentication](https://laravel.com/docs/sanctum#api-token-authentication)
 - [Grafana Infinity data source](https://grafana.com/docs/plugins/yesoreyeram-infinity-datasource/latest/)
 - [用 Grafana 建立戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)
+- [用 Grafana 建立戰情中心（三）：接上 Prometheus（Ceph 與 PVE）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-prometheus/)
