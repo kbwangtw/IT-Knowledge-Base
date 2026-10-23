@@ -11,7 +11,7 @@ last_modified_at: 2026-10-22
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 剛接觸虛擬化、備份、監控的 IT 新鮮人；想找實際案例對照的維運人員 |
-| 文章數 | 37 篇，分 6 類 |
+| 文章數 | 38 篇，分 6 類 |
 | 最近更新 | 2026-10-17：全站改寫為新手版 |
 
 ## 1. 這裡記錄的是什麼環境
@@ -109,6 +109,7 @@ last_modified_at: 2026-10-22
 | [LibreNMS 溫度告警誤報：LXC 重複感測器與門檻整理](docs/pve/librenms-temperature-sensor-cleanup/) | 一直跳 Temperature above threshold；容器重複回報、門檻不合理 |
 | [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](docs/pve/pve-cluster-fail2ban-hardening/) | 有人一直猜密碼；加上兩步驟驗證 |
 | [不再把 PVE 8006 開到網際網路：改用 WireGuard](docs/pve/wireguard-remote-access-replace-8006/) | 在外面要管理家裡或公司的主機 |
+| [PHP2Shell（CVE-2026-109618、109619）：檢查環境有沒有中](docs/pve/php2shell-check/) | 聽到 PHP 漏洞，想知道哪些主機受影響、修補了沒有 |
 
 ### 4-5 網路與 IP 管理
 
