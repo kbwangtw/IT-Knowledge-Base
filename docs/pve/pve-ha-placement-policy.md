@@ -4,7 +4,7 @@ title: "PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？"
 date: 2026-10-02
 categories: [PVE, HA, ProxCenter]
 permalink: /docs/pve/pve-ha-placement-policy/
-last_modified_at: 2026-10-19
+last_modified_at: 2026-10-23
 ---
 
 # PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？
@@ -471,6 +471,14 @@ ssh root@node11 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | node12 | Pi-hole、Wazuh、DC01、CA |
 
 一台故障時同時重啟的服務，從最多 8 個降到最多 5 個。維護後服務不一定回到這個位置（CRS static 不會自動搬回），每次逐台更新後用 `ha-manager status` 對照這張表，必要時手動 `ha-manager migrate`。
+
+**2026-10-23 整個叢集關機再開機後的分布**（13 個服務同時啟動，`ha-rebalance-on-start=1` 依當下負載重新挑節點；仍是 4／5／4，DNS 與 DC 互斥規則都有遵守，見[叢集關機與開機](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-full-shutdown/)第 7 節）：
+
+| 節點 | HA 資源 |
+| --- | --- |
+| node10 | AdGuard、IPAM、ai、DC01 |
+| node11 | LibreNMS、WireGuard、ProxCenter、Wazuh、CA |
+| node12 | Pi-hole、Graylog、Grafana、DC02 |
 
 ## 14. 常見問題
 
