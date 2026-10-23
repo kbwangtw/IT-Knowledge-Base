@@ -199,7 +199,7 @@ cluster-startup.sh
 ## 9. 待辦
 
 - [ ] 下次整個叢集關機時，驗證修正版（node10 正常關機、不被重開）
-- [ ] 確認三台的 `/usr/local/sbin/cluster-shutdown.sh` 已換成 5-2 的修正版（和 repo 的 `tools/pve-cluster-power/` 相同）
+- [x] 三台的 `/usr/local/sbin/cluster-shutdown.sh` 已換成 5-2 的修正版（10/23，`bash -n` 通過，scp 到 node11、node12）
 - [ ] 修正版驗證後，刪除 node10 的 `/usr/local/sbin/cluster-shutdown.sh.bak-20261023`
 
 ## 10. 延伸閱讀
