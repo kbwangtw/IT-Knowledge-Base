@@ -9,7 +9,7 @@ last_modified_at: 2026-10-23
 
 # 整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）
 
-> **一句話**：為了調整機器擺放位置，要把三台 PVE、PBS31 和兩台 NAS 全部關機。三台不能直接一起關：HA 會把服務搬來搬去，Ceph 會以為硬碟壞了開始搬資料。這篇把正確順序寫成兩支腳本（關機、開機），實際用了一次；最後一台被 HA 的 watchdog 強制重開，已修正腳本（修正版待下次關機驗證）。
+> **一句話**：為了調整機器擺放位置（順便替 tokyo16 加裝 10G 網卡），要把三台 PVE、PBS31 和兩台 NAS 全部關機。三台不能直接一起關：HA 會把服務搬來搬去，Ceph 會以為硬碟壞了開始搬資料。這篇把正確順序寫成兩支腳本（關機、開機），實際用了一次；最後一台被 HA 的 watchdog 強制重開，已修正腳本（修正版待下次關機驗證）。
 
 | 項目 | 內容 |
 | --- | --- |
@@ -184,7 +184,39 @@ cluster-startup.sh
 
 之後 `pct exec` 要到新的節點執行；LibreNMS 的「位置」欄更不準了（[Wazuh 營運文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-operations/)待辦）。
 
-## 8. 常見問題
+## 8. 順便：tokyo16 加裝 10G 網卡
+
+**做什麼**：趁 NAS 關機時，tokyo16（DS723+）加裝 **Synology E10G22-T1-Mini**（單埠 10GBASE-T，RJ45），接到 10G 交換器；原本在「區域網路 2」的儲存網段 IP 搬到新網卡「區域網路 3」，**位址不變**，所以用這個 IP 的設備（PBS31 的 SMB datastore）不用改設定。
+
+**備份流量經過兩段**：
+
+```text
+PVE 節點 ──①──▶ PBS31（tokyo16 上的 VM） ──②──▶ tokyo16 本機 SMB
+```
+
+| 段落 | 走哪裡 | 速度上限 |
+| --- | --- | --- |
+| ① 節點 → PBS31 | 節點網卡 → 10G 交換器 → tokyo16 區域網路 3 → 虛擬交換器 → PBS31 | 節點的網卡（Realtek，推測 2.5G） |
+| ② PBS31 → tokyo16 | 同一台 NAS、同一個虛擬交換器內部 | 不經過實體網路 |
+
+關鍵是 **PBS31 的虛擬交換器綁在哪張網卡**：如果還綁區域網路 2，① 不會用到 10G，② 甚至可能從區域網路 2 出去、繞交換器再從區域網路 3 回來。
+
+**怎麼檢查**（tokyo16 DSM）：
+
+| 檢查 | 位置 | 結果 |
+| --- | --- | --- |
+| 連線速度 | 控制台 → 網路 → 網路介面 → 區域網路 3 | ✅ 10000 Mbps、全雙工 |
+| 區域網路 2 | 同一頁 | ✅ 沒有儲存網段的 IP（同網段兩張網卡會不穩） |
+| MTU | 區域網路 3 → 編輯 → 進階 | ✅ 1500，和原本相同（要和 PBS31、交換器一致） |
+| PBS31 的網路 | Virtual Machine Manager → 網路（虛擬交換器綁定的網卡）；虛擬機器 → PBS31 → 編輯 → 網路 | ✅ 綁區域網路 3，不會繞路 |
+| 防火牆 | 控制台 → 安全性 → 防火牆 → 編輯規則，看上方的介面選單 | ✅ 規則設在「所有介面」（兩個內網網段全部允許、特定服務只允許台灣），新網卡同樣受保護。DSM 防火牆可以依網卡分別設定，規則若綁在舊網卡，新網卡會沒有規則 |
+| PBS31 datastore | PBS 網頁 → Datastore | ✅ 正常 |
+
+- 10GBASE-T 建議 Cat6a（100 m）；Cat6 約 55 m，Cat5e 通常跑不到 10G。
+- LibreNMS 會多出新的網路介面，下次輪詢後在 tokyo16 的 Ports 頁看流量。
+- ⏳ 效果驗證：比較換網卡後的備份時間與 10/13 基準（node10 7 分 37 秒、node11 9 分 07 秒、node12 4 分 29 秒，見 [Ceph slow op 文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/)第 7 節）；PBS 是增量備份，每晚資料量不同，看趨勢即可。
+
+## 9. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
@@ -196,13 +228,14 @@ cluster-startup.sh
 | WinClient 開機出現 `no efidisk configured`、`failed to reset PCI device` | 這台 VM 原本的設定（沒有 EFI 磁碟、有 PCI 直通），`Task finished with 2 warning(s)` 仍正常啟動 |
 | 關機前 PBS31 網頁登不進去，重開後正常 | 原因未確認（和 SSH 金鑰設定無關，網頁用 PAM）；再發生時用 SSH 執行 `journalctl -u proxmox-backup-proxy --since "1 hour ago" \| grep -iE "auth\|login\|fail"` 抓原因 |
 
-## 9. 待辦
+## 10. 待辦
 
 - [ ] 下次整個叢集關機時，驗證修正版（node10 正常關機、不被重開）
+- [ ] 比較 10/23 晚上起的備份時間與 10/13 基準，確認 10G 網卡的效果（第 8 節）
 - [x] 三台的 `/usr/local/sbin/cluster-shutdown.sh` 已換成 5-2 的修正版（10/23，`bash -n` 通過，scp 到 node11、node12）
 - [ ] 修正版驗證後，刪除 node10 的 `/usr/local/sbin/cluster-shutdown.sh.bak-20261023`
 
-## 10. 延伸閱讀
+## 11. 延伸閱讀
 
 - [PVE HA 放置策略](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)：CRS、`ha-rebalance-on-start`、互斥規則
 - [PVE 更新重開後 HA 服務卡在 error](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)：shutdown_policy 改為 migrate 的原因
