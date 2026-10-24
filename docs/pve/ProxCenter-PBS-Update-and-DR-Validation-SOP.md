@@ -16,7 +16,7 @@ last_modified_at: 2026-10-24
 | 適合誰看 | 第一次更新 PBS、不確定更新完要查什麼的人 |
 | 環境 | ProxCenter 1.4.9；PBS31（PBS 4.2.5 → 4.2.8）；PVE 三節點 |
 | 日期 | 2026-09-11 首次；2026-10-13 kernel 更新；2026-10-14 清理舊 kernel；2026-10-24 kernel -23 → -25 |
-| 結論 | ✅ 更新與重開後服務正常、PVE 讀得到 141 份備份；✅ CT110 還原成 CT210 可開機；✅ 四台 kernel 一致為 -23、舊 kernel 清理完成；✅ 10/24 再更新到 -25（第 11 節）；⏳ 業務功能與完整 RTO／RPO 未驗證 |
+| 結論 | ✅ 更新與重開後服務正常、PVE 讀得到 141 份備份；✅ CT110 還原成 CT210 可開機；✅ 四台 kernel 一致為 -23、舊 kernel 清理完成；✅ 10/24 再更新到 -25，並清掉 -22 和 PVE 的 6.17（第 11 節）；⏳ 業務功能與完整 RTO／RPO 未驗證 |
 
 > 文中 IP 都是文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24）；照做前請換成自己的位址。
 
@@ -379,6 +379,49 @@ reboot
 
 PBS31 和三台 PVE 的 kernel 再次一致（-25）。
 
+### 11-1 同日清理舊 kernel
+
+四台都在 -25 開機正常後，照第 10-4 節的原則清理。四台指令相同，用 MobaXterm 的 **MultiExec**（一次對多個分頁輸入）同時執行；不另外讓 PVE 的 root 金鑰登入 PBS31，以免 PVE 被入侵時連備份伺服器一起淪陷。
+
+**① autoremove（先模擬）**：
+
+```bash
+echo "== $(hostname)  running: $(uname -r)"; apt autoremove -s 2>/dev/null | grep -E '^Remv' || echo 'nothing to remove'
+apt autoremove -y >/dev/null 2>&1; dpkg -l 'proxmox-kernel-*' | awk '/^ii/{print $2}'; grep -oE 'vmlinuz-[0-9.]+-[0-9]+-pve' /boot/grub/grub.cfg | sort -u
+```
+
+四台模擬都只有 `Remv proxmox-kernel-7.0.14-22-pve-signed`，執行中的 -25 不在清單。執行後 PBS31 只剩 -23、-25，但 **PVE 三台的開機選單還有 `vmlinuz-6.17.13-21-pve`**。
+
+**② PVE 三台還有 6.17 kernel**：第一次只用 `dpkg -l 'proxmox-kernel-7*'` 列，所以沒看到 6.x。
+
+```bash
+dpkg -l 'proxmox-kernel-6*' | awk '/^ii/{print $2}'
+proxmox-boot-tool kernel list | grep -A3 -i pinned
+apt-cache rdepends --installed proxmox-kernel-6.17
+```
+
+| 檢查 | 結果 |
+| --- | --- |
+| 6.x 套件 | `proxmox-kernel-6.17`（指標套件）、`proxmox-kernel-6.17.13-21-pve-signed`；推測是 PVE 9 安裝時附的原始 kernel，被標記成手動安裝，所以 autoremove 不清 |
+| pinned | 沒有 |
+| `rdepends` | 列出 `proxmox-default-kernel`，但**沒裝 6.17 的 PBS31 也一樣**：`rdepends` 會算到套件庫裡的舊版，不代表實際依賴 |
+
+是否真的有依賴，以模擬為準：
+
+```bash
+apt remove -s proxmox-kernel-6.17 proxmox-kernel-6.17.13-21-pve-signed | grep -E '^(Remv|Inst)'
+```
+
+只列出這兩個 `Remv`，沒有 `proxmox-default-kernel`、`proxmox-ve`，也沒有 `Inst`，才移除：
+
+```bash
+apt remove -y proxmox-kernel-6.17 proxmox-kernel-6.17.13-21-pve-signed
+dpkg -l 'proxmox-kernel-*' | awk '/^ii/{print $2}'
+grep -oE 'vmlinuz-[0-9.]+-[0-9]+-pve' /boot/grub/grub.cfg | sort -u
+```
+
+**看到的結果**：四台都只剩 `proxmox-kernel-7.0`、-23、-25，開機選單只有 -23、-25。不需要重開，也沒有重啟服務。
+
 ## 12. 常見問題：出問題時在哪裡停下來
 
 | 現象 | 先查什麼 |
@@ -389,6 +432,8 @@ PBS31 和三台 PVE 的 kernel 再次一致（-25）。
 | CT210 開不起來 | 容器狀態、設定與啟動日誌 |
 | 容器正常但網頁不通 | Docker 狀態、實際監聽埠與網路隔離規則 |
 | 裝了新 kernel 但 `uname -r` 還是舊的 | 還沒重開 |
+| 列 kernel 只看到 7.x，開機選單卻有 6.17 | 用 `dpkg -l 'proxmox-kernel-*'` 列全部；寫成 `7*` 會漏掉其他系列 |
+| `apt-cache rdepends` 說某套件依賴舊 kernel | 它會算到套件庫裡的舊版；以 `apt remove -s` 的模擬結果為準 |
 | `--failed` 出現 `session-x.scope` | 登入連線不是服務；確認後 `reset-failed` |
 | 容量數字和 PBS UI 不同 | G 和 GiB 單位不同 |
 
