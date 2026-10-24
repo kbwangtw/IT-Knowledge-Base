@@ -565,7 +565,7 @@ pct exec 113 -- bash -c '
 | `pct exec 113 -- rx …`：`Failed to exec "rx"` | `pct exec` 的 PATH 沒有 `/usr/local/bin`，寫完整路徑 `/usr/local/bin/rx` |
 | 指令最後 `\| rx --test` 出現 `No such file` | 管線放在 `pct exec` 外面，變成在 node10 執行；要放進 `bash -c '…'` 裡面 |
 | `Host key verification failed`（只有部分節點） | CT113 沒有那台的主機金鑰。`/etc/pve/priv/known_hosts` 推測只有部分節點；改從各節點讀 `/etc/ssh/ssh_host_ed25519_key.pub` |
-| 剛寫入的 known_hosts 第一筆無效、第二筆有效 | 檔案最後一行沒換行，新內容黏到上一行；寫入前先 `[ -n "$(tail -c1 $F)" ] && echo >> $F` |
+| 剛寫入的 known_hosts 第一筆無效，後面的有效 | 檔案最後一行沒換行，新內容黏到上一行（本案 node10 那行變成 9 個欄位）；ssh 只讀前 3 欄，黏上去的金鑰等於無效。寫入前先 `[ -n "$(tail -c1 $F)" ] && echo >> $F`；檢查用 `awk 'NF!=3' ~/.ssh/known_hosts` 找欄位數異常的行，確認後備份再刪（2026-10-24 已清掉，刪後 `rx` 對三台正常） |
 | 輸出裡 `/root` 變成 `<PBS帳號>` | 對照表放了 `root` 這種通用字；改成註解 |
 | `systemctl` 顯示服務 `failed`，但其實是自己停掉的 | `systemctl reset-failed <服務>` |
 | 安裝程式說 `~/.local/bin is not in your PATH`，`which` 卻找得到 | `su -` 讀 `.profile`，資料夾存在時才加進 PATH；照提示加進 `.bashrc` 保險 |
@@ -585,7 +585,8 @@ pct exec 113 -- bash -c '
 - [ ] repo 設定只允許 Squash merge（第 11 節）
 - [ ] 用幾天後，把常用唯讀指令（例如 `ceph -s`、`ha-manager status`）加進 allow
 - [ ] 幾天後刪除 CT113 快照 `pre-node22`、`pre-hermes-removal`；決定 `/root/generate_pptx.js` 是否保留
-- [ ] 清掉 CT113 `known_hosts` 裡那一行黏壞的記錄
+- [x] 清掉 CT113 `known_hosts` 裡那一行黏壞的記錄（2026-10-24；備份 `known_hosts.bak-20261024`，幾天後刪除）
+- [ ] CT113 `known_hosts` 補上 node10 的 ed25519 主機金鑰（目前只有 RSA）
 
 ## 14. 延伸閱讀
 
