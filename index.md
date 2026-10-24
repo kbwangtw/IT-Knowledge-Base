@@ -131,6 +131,12 @@ last_modified_at: 2026-10-22
 | [Nutanix 收到高風險安全警示：要等歲修嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide/) | 收到廠商安全公告，判斷要多急（規劃參考，未實測） |
 | [ML30 Gen11 擴充紀錄](docs/hardware/hpe/ml30-gen11/) | 伺服器加裝光碟機、M.2、設定 iLO |
 
+### 4-7 Blogger 舊文（2011–2025）
+
+| 文章 | 適合什麼時候看 |
+| --- | --- |
+| [Blogger 舊文總覽](docs/blogger/) | 舊部落格 62 篇全數搬入：Cisco／HPE 網路設備、防火牆、伺服器硬體、Windows、Linux 與 NAS 筆記（2011–2025） |
+
 ## 5. 怎麼讀每一篇文章
 
 每篇的結構都一樣：
