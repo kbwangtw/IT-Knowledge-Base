@@ -101,5 +101,5 @@ switch(boot)# load-nxos
 
 ## 9. 延伸閱讀
 
-- [Cisco Nexus 3000 系列密碼回復程序（官方文件）](https://www.cisco.com/c/en/us/support/switches/nexus-3000-series-switches/products-installation-and-configuration-guides-list.html)
+- [Cisco Nexus 3000 系列文件總覽](https://www.cisco.com/c/en/us/support/switches/nexus-3000-series-switches/series.html)
 - [Blogger 原文](https://kbwangtw.blogspot.com/2021/11/cisco-nexus-3548-x.html)

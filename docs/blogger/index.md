@@ -12,7 +12,7 @@ last_modified_at: 2026-10-24
 | 項目 | 內容 |
 | --- | --- |
 | 原部落格 | [kbwangtw.blogspot.com](https://kbwangtw.blogspot.com/)（共 62 篇） |
-| 已搬移 | 14 篇（第一～二批） |
+| 已搬移 | 23 篇（第一～三批） |
 | 注意 | 多數文章年代較早，設備與軟體版本可能已停產；照做前先確認自己的版本 |
 
 ## 1. 怎麼看這區的文章
@@ -45,11 +45,30 @@ last_modified_at: 2026-10-24
 | [Cisco Nexus 3548 忘記 admin 密碼](network/cisco-nexus-3548-password-recovery/) | 2021-11 | Nexus 密碼遺失 |
 | [Cisco Router／Switch 用 confreg 0x2142 回復原廠](network/cisco-router-switch-reset-confreg/)（轉貼摘要） | 2014-05 | 路由器忘記密碼 |
 
-### 2-3 其他廠牌交換器與防火牆
+### 2-3 Cisco 無線網路
 
 | 文章 | 原發表 | 適合什麼時候看 |
 | --- | --- | --- |
+| [Cisco 2504 無線控制器（一）：Console 初始設定精靈](network/cisco-wlc2504-setup-1-wizard/) | 2015-10 | 第一次設定 WLC |
+| [Cisco 2504 無線控制器（二）：用網頁設定兩個 SSID 與密碼](network/cisco-wlc2504-setup-2-ssid/) | 2015-10 | 設定 SSID 與 WPA2 密碼 |
+| [Cisco 2504 無線控制器（三）：應用程式統計與 5 GHz 頻道調整](network/cisco-wlc2504-setup-3-rf-tuning/) | 2015-10 | 看流量統計、調頻道減少干擾 |
+| [Cisco 瘦 AP 怎麼找到無線控制器](network/cisco-lightweight-ap-join-controller/)（摘要） | 2015-10 | AP 加入不了 WLC |
+| [Cisco 胖 AP（Autonomous AP）基本設定](network/cisco-autonomous-ap-basic/)（摘要） | 2015-11 | 單獨一台 Cisco AP 要能用 |
+
+### 2-4 HPE 交換器
+
+| 文章 | 原發表 | 適合什麼時候看 |
+| --- | --- | --- |
+| [HPE 5130 四台用 IRF 堆疊成一台](network/hpe-5130-irf-stack/) | 2018-07 | 多台交換器堆疊成一台管理 |
+| [HPE 5700 核心與 5130 堆疊之間的 LACP](network/hpe-5700-5130-lacp/) | 2018-07 | 核心往下接堆疊，要備援 |
+| [HPE 5130 忘記密碼、重設與取消 IRF](network/hpe-5130-password-reset/) | 2018-07 | 不知道密碼；要拆堆疊 |
 | [HPE Aruba 1930／1920S 網頁介面切 VLAN](network/hp-1930s-vlan/) | 2022-01 | 第一次在 HP 交換器切 VLAN |
+
+### 2-5 防火牆
+
+| 文章 | 原發表 | 適合什麼時候看 |
+| --- | --- | --- |
+| [Cisco 3560G 當路由、ASA 5505 用透通模式管控上網](network/cisco-3560g-asa5505-transparent/) | 2015-02 | 不改 IP 架構加一台防火牆 |
 | [FortiGate IP/MAC 綁定](network/fortigate-ip-mac-binding/)（轉貼摘要） | 2021-09 | 只讓登記過的電腦上網 |
 
 ## 3. 硬體與 UPS
