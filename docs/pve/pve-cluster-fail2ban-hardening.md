@@ -16,7 +16,7 @@ last_modified_at: 2026-10-24
 | 適合誰看 | PVE 管理頁面被外部嘗試登入、想確認防護有沒有用的人 |
 | 環境 | PVE 9.2.18（9/14）；三台 node10～node12 |
 | 日期 | 2026-09-14 首次記錄；10/12～10/24 補記 |
-| 結論 | ✅ node10 確認遞增封鎖（1h → 2h）與 iptables 命中；✅ 8006 對外轉送已停用、改走 WireGuard；✅ `root@pam` 啟用 TOTP；✅ SSH 金鑰加上來源限制；✅ 10/22 三台 PVE 與 PBS31 關閉 SSH 密碼登入（第 12 節）；✅ 10/23～10/24 手機、家裡筆電改用金鑰，清掉壞掉的金鑰行，`proxcenter` 帳號加上來源 IP 限制（第 13 節）；⏳ 刪除 hermesagent token、舊的管理者筆電金鑰 |
+| 結論 | ✅ node10 確認遞增封鎖（1h → 2h）與 iptables 命中；✅ 8006 對外轉送已停用、改走 WireGuard；✅ `root@pam` 啟用 TOTP；✅ SSH 金鑰加上來源限制；✅ 10/22 三台 PVE 與 PBS31 關閉 SSH 密碼登入（第 12 節）；✅ 10/23～10/24 手機、家裡筆電改用金鑰，清掉壞掉的金鑰行，`proxcenter` 帳號加上來源 IP 限制（第 13 節）；✅ 10/24 刪除 hermesagent token（Hermes 已移除）；⏳ 刪除舊的管理者筆電金鑰 |
 
 > 完整的封鎖與封包證據來自 node10；三台設定相同，但不擴大解讀成三台都各自驗證過。
 
@@ -228,7 +228,7 @@ done
 | token | 用途 | 使用紀錄 | 處理 |
 | --- | --- | --- | --- |
 | `pdm-admin-pdm` | Proxmox Datacenter Manager 自動建立，已不再使用 | — | 刪除 |
-| `hermesagent` | Hermes Agent（AI 機器人） | 三台 access.log 都是 0；實際讓 Hermes 檢查三台後仍是 0 | 先停用，觀察約兩週後刪除 |
+| `hermesagent` | Hermes Agent（AI 機器人） | 三台 access.log 都是 0；實際讓 Hermes 檢查三台後仍是 0 | 先停用，觀察約兩週後刪除；✅ 10/24 Hermes 已移除，提前刪除 |
 
 ```bash
 pveum user token remove root@pam pdm-admin-pdm
@@ -237,6 +237,12 @@ pveum user token list root@pam
 ```
 
 `--expire 1` 是把到期時間設成 1970 年的第 1 秒，等於立即過期。
+
+**2026-10-24 刪除**：Hermes Agent 已從 CT113 移除（見[用 Claude Code 取代 Hermes](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/claude-code-redact-gateway/)），不必再觀察，直接刪除：
+
+```bash
+pveum user token remove root@pam hermesagent
+```
 
 **意外發現**：讓 Hermes 實際檢查時，三台的 SSH 紀錄出現來自 Hermes 主機的 root 登入（另一把 RSA 金鑰）。**Hermes 是用 SSH root 金鑰操作節點，不是用 API token**。SSH 不受 PVE TOTP 管轄，AI 機器人又可能受提示注入或誤判影響，所以另外處理（第 11 節）。
 
@@ -728,7 +734,7 @@ ssh-keygen -lf $F | awk '{print $2, $3}'
 
 ## 15. 待辦
 
-- [ ] 約 10/29 刪除已停用的 `hermesagent` token
+- [x] 刪除已停用的 `hermesagent` token（2026-10-24，Hermes 已移除，`pveum user token remove root@pam hermesagent`）
 - [x] 各裝置改用金鑰後，關閉 SSH 密碼登入（2026-10-22，第 12 節）
 - [x] 家裡的筆電、手機改用金鑰（2026-10-24，第 13 節）
 - [ ] WinClient、家裡的桌機要用 SSH 時再換金鑰（先用網頁 Shell 加公鑰）

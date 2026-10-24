@@ -15,9 +15,9 @@ last_modified_at: 2026-10-24
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 想讓 AI 幫忙操作伺服器，但不想把 IP、帳號、密碼送上雲的人 |
-| 環境 | PVE 9.2.21 三節點；CT113（ai，Debian）；Claude Code 2.1.310（Pro 方案）；Claude 手機 App |
+| 環境 | PVE 9.2.21 三節點；CT113（ai，Ubuntu）；Claude Code 2.1.310（Pro 方案）；gh 2.45.0-1ubuntu0.3；Claude 手機 App |
 | 日期 | 2026-10-24 |
-| 結論 | ✅ `rx` 閘道（遮蔽、封鎖高風險指令）✅ 一般帳號 `ops` 只能 sudo `rx`，讀不到對照表 ✅ Claude Code 照 SOP 完成唯讀健康檢查，人只按同意 ✅ Remote Control：手機下指令、推播同意 ✅ Hermes 移除（釋出約 1.5G）⏳ Hermes 的外部 token 撤銷 ⏳ 開機自動啟動、GitHub 推送 |
+| 結論 | ✅ `rx` 閘道（遮蔽、封鎖高風險指令）✅ 一般帳號 `ops` 只能 sudo `rx`，讀不到對照表 ✅ Claude Code 照 SOP 完成唯讀健康檢查，人只按同意 ✅ Remote Control：手機下指令、推播同意 ✅ 開機自動啟動（systemd）✅ Trusted Devices ✅ GitHub 推送：只能開分支、送 PR，不能 merge ✅ Hermes 移除（釋出約 1.5G），外部 token 全部撤銷 |
 
 ## 1. 先認識幾個名詞
 
@@ -30,6 +30,11 @@ last_modified_at: 2026-10-24
 | **`rx` 閘道** | 本案寫的小程式：指令裡的代稱換回真實值 → SSH 執行 → 輸出遮蔽後才交給 Claude Code |
 | **Remote Control** | Claude Code 官方功能：用 claude.ai 或手機 App 操作內網那台機器上正在跑的 Claude Code |
 | **tmux** | 讓程式在背景持續執行的工具；SSH 斷線也不會停 |
+| **systemd 服務** | Linux 管理背景服務的方式；`enable` 之後開機會自動啟動 |
+| **Trusted Devices** | claude.ai 的設定：只有驗證過的裝置能操作 Remote Control 對話 |
+| **ruleset** | GitHub 的分支保護規則，例如「main 只能透過 PR 修改」 |
+| **fine-grained token** | GitHub 的細粒度存取權杖：可以只開放單一 repo、指定權限、設定到期日 |
+| **gh** | GitHub 官方命令列工具，用來登入、開 PR |
 | **Channels** | Claude Code 的研究預覽功能，可接 Telegram、Discord；本案先不用 |
 
 ## 2. 為什麼這樣設計
@@ -52,7 +57,7 @@ last_modified_at: 2026-10-24
 手機（Claude App）／ MobaXterm
    │  說要做什麼、按同意
    ▼
-CT113：Claude Code（ops 帳號，tmux 內持續執行，Remote Control）
+CT113：Claude Code（ops 帳號，systemd 開機啟動 tmux，Remote Control）
    │  讀知識庫 SOP → 規劃指令 → 每個 rx 都先問人
    ▼
 sudo /usr/local/bin/rx（root）
@@ -219,7 +224,7 @@ pct exec 113 -- su - ops -c 'grep -q "\.local/bin" ~/.bashrc || echo "export PAT
 
 **登入**（要互動畫面）：`pct enter 113` → `su - ops` → `claude` → 主題照預設 → **Claude account with subscription** → 網址貼到筆電瀏覽器授權 → 代碼貼回。
 
-**clone 知識庫**（目前只讀，不能推送）：
+**clone 知識庫**（這時只讀；推送設定見 9-3）：
 
 ```bash
 pct exec 113 -- su - ops -c 'git clone -q https://github.com/kbwangtw/IT-Knowledge-Base.git'
@@ -243,6 +248,8 @@ pct exec 113 -- su - ops -c 'git clone -q https://github.com/kbwangtw/IT-Knowled
 | allow | 只讀知識庫的本機指令，自動放行 |
 | ask | **所有 `rx`**（連唯讀的也問）、commit、push |
 | deny | 直接 SSH、切成 root、`rm -rf`、讀 `/root`：第二道防線（系統權限上本來就做不到） |
+
+後來開放 GitHub 推送時又加了幾條規則，見 9-3。
 
 **工作守則** `~/.claude/CLAUDE.md`（和知識庫的 `CLAUDE.md` 一起被讀取）：
 
@@ -280,7 +287,7 @@ claude
 | 結果 | 三台 7.0.14-25-pve、pve-manager 9.2.21、可更新 0；HA 13 個 started；還注意到 ct:110 的位置和 SOP 記錄不同，並說對了原因 |
 | 人做了什麼 | **只按同意，沒有複製貼上任何指令** |
 
-## 9. 步驟七：Remote Control（手機遙控）
+## 9. 步驟七：Remote Control（手機遙控）與後續設定
 
 | 項目 | 說明 |
 | --- | --- |
@@ -307,6 +314,177 @@ claude --remote-control "Lab Ops"
 測試：手機輸入「請用 rx 查一下 node11 的 Ceph 狀態（ceph -s），只要唯讀」→ 手機跳出同意 → `HEALTH_OK`。
 
 > Telegram 也做得到（Channels：`/plugin install telegram@claude-plugins-official`、`claude --channels plugin:telegram@claude-plugins-official`），但是研究預覽、要裝 Bun，而且 `rx` 要同意時能不能從 Telegram 回覆要看外掛支援（未確認）。先用 Remote Control。
+
+### 9-1 開機自動啟動
+
+**做什麼**：上面的 tmux 是手動開的，CT113 一重開就沒了。改用 systemd 服務，開機自動在 tmux 裡執行 `claude --remote-control`。
+
+**服務檔** `/etc/systemd/system/claude-rc.service`：
+
+```ini
+[Unit]
+Description=Claude Code Remote Control (tmux, user ops)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=ops
+WorkingDirectory=/home/ops/IT-Knowledge-Base
+Environment=PATH=/home/ops/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/tmux new-session -d -s claude -c /home/ops/IT-Knowledge-Base "while true; do claude --remote-control 'Lab Ops'; echo 'claude exited, restarting in 10s'; sleep 10; done"
+ExecStop=/usr/bin/tmux kill-session -t claude
+
+[Install]
+WantedBy=multi-user.target
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `After=`／`Wants=network-online.target` | 等網路通了再啟動，Remote Control 才連得上 |
+| `Type=forking` | `tmux new-session -d` 建好 session 後自己就結束，真正的程式留在背景，要用 forking |
+| `User=ops` | 用 `ops` 執行，權限和手動開的一樣（只能 sudo `rx`） |
+| `Environment=PATH=…` | systemd 不讀 `.bashrc`，要自己把 `~/.local/bin`（`claude` 所在）放進 PATH |
+| `-d -s claude -c …` | 在背景建立名叫 `claude` 的 session，起始目錄是知識庫（讀得到 `CLAUDE.md`） |
+| `while true; … sleep 10; done` | `claude` 結束（當掉或 `/exit`）後 10 秒自動重開 |
+| `ExecStop=… kill-session` | `systemctl stop` 時關掉整個 tmux session |
+| `WantedBy=multi-user.target` | `enable` 後開機自動啟動 |
+
+**怎麼做**：先關掉手動開的 tmux（名稱都叫 `claude`，會衝突），再推進服務檔、啟用：
+
+```bash
+pct exec 113 -- su - ops -c 'tmux kill-session -t claude'
+# 在 node10 用 cat > /root/claude-rc.service <<'EOF' … EOF 建好上面的內容
+pct push 113 /root/claude-rc.service /etc/systemd/system/claude-rc.service
+pct exec 113 -- systemctl enable --now claude-rc
+```
+
+**驗證**：重開 CT113（`rx` 會擋 `reboot`，在 node10 手動執行），約 45 秒後檢查：
+
+```bash
+pct reboot 113
+pct exec 113 -- bash -c 'uptime; systemctl is-active claude-rc; su - ops -c "tmux ls"'
+```
+
+看到的結果：
+
+| 檢查 | 結果 |
+| --- | --- |
+| `uptime` | up 0 分鐘（剛開機） |
+| `claude-rc` | `active` |
+| tmux | session `claude` 於 18:34:24 建立 |
+| `/remote-control` | active，手機 App 連得上 **Lab Ops** |
+
+注意：
+
+- **每次開機都是新的對話**，之前的對話內容不會接續。
+- 在 Claude Code 裡打 `/exit` 也會在 10 秒後自動重啟。真的要停用：`systemctl stop claude-rc`（開機也不要啟動再加 `systemctl disable claude-rc`）。
+- 要看畫面還是一樣：`su - ops` → `tmux attach -t claude`。
+
+### 9-2 Trusted Devices
+
+**做什麼**：限制只有驗證過的裝置能操作 Remote Control 對話；別人就算拿到 claude.ai 帳號，也不能從陌生裝置對 CT113 下指令。
+
+**怎麼做**：
+
+1. claude.ai → 設定 → 帳戶 → 開啟 **要求使用受信任的裝置**。
+2. **開啟之前就在跑的 Remote Control 對話不受保護**，所以開啟後要重啟一次：`pct exec 113 -- systemctl restart claude-rc`。
+
+**看到的結果**：受信任的裝置清單出現兩筆：
+
+| 裝置 | 怎麼來的 |
+| --- | --- |
+| Claude on iPhone | 手機 App |
+| Claude Code on ai · Linux | CT113 登入 CLI 時自動取得憑證 |
+
+- 登入超過 18 小時，手機要用 Face ID 再驗證一次。
+- 手機遺失：到同一個清單把它移除。
+
+### 9-3 GitHub 推送
+
+**做什麼**：讓 Claude Code 自己改知識庫、開分支、送 PR；但 **merge 一律由人在 GitHub 上決定**。限制分四層：
+
+| 層 | 設定 | 擋什麼 |
+| --- | --- | --- |
+| GitHub ruleset | `main` 用 `protect-main` 保護：要 PR、禁止 force push、禁止刪除；approvals 0 | 就算指令被放行，也推不進 `main` |
+| fine-grained token | 只限這個 repo；Contents、Pull requests 讀寫；90 天到期 | token 外流時影響範圍只有這個 repo |
+| `settings.json` | `gh pr create`、`git push -u origin lab-ops/` 要問；推 `main`、force push、`gh pr merge`、`gh repo`、`gh api`、`gh auth` 直接拒絕 | Claude Code 在本機就被擋 |
+| 工作守則 `CLAUDE.md` | 分支一律 `lab-ops/日期-主題`、不 merge | 告訴 Claude Code 正確流程 |
+
+> approvals 設 0：只有一個人維護，沒有其他人能審核；重點是「一定要經過 PR」，不是「要別人核准」。
+
+**安裝 gh**：
+
+```bash
+pct exec 113 -- bash -c 'apt-get install -y gh && dpkg -l gh | tail -1'
+```
+
+看到的結果：`2.45.0-1ubuntu0.3`。
+
+**登入**（以 `ops` 身分，token 不留在畫面和 history）：
+
+```bash
+pct enter 113
+```
+
+```bash
+su - ops
+```
+
+```bash
+read -rsp 'GitHub token: ' GH_TOKEN; echo
+```
+
+```bash
+gh auth login --with-token <<< "$GH_TOKEN"; unset GH_TOKEN
+gh auth setup-git
+gh auth status
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `read -rsp` | `-s` 輸入時不顯示、`-r` 不處理反斜線、`-p` 顯示提示文字 |
+| `--with-token <<<` | 從標準輸入讀 token，不會出現在指令列 |
+| `unset GH_TOKEN` | 用完就清掉變數 |
+| `gh auth setup-git` | 讓 `git push` 透過 gh 取得認證，不用另外設密碼 |
+
+> `pct enter`、`su`、`read` 這三行要**一行一行單獨貼**，原因見常見問題。
+
+`gh repo view --json viewerPermission` 顯示 `ADMIN`：那是 **GitHub 帳號在這個 repo 的角色**，實際能做什麼由 token 的權限決定（只有 Contents、Pull requests）。
+
+**`settings.json` 新增的規則**：
+
+```json
+"ask": [
+  "Bash(gh pr create:*)",
+  "Bash(git push -u origin lab-ops/:*)"
+],
+"deny": [
+  "Bash(git push origin main:*)",
+  "Bash(git push -f:*)",
+  "Bash(git push --force:*)",
+  "Bash(gh pr merge:*)",
+  "Bash(gh repo:*)",
+  "Bash(gh api:*)",
+  "Bash(gh auth:*)"
+]
+```
+
+| 規則 | 為什麼 |
+| --- | --- |
+| `gh repo`、`gh api` | 能改 repo 設定、繞過一般指令；token 權限雖然不夠，仍先擋 |
+| `gh auth` | 避免 Claude Code 讀出或換掉 token |
+| `gh pr merge` | merge 由人決定 |
+
+**工作守則** `~/.claude/CLAUDE.md` 新增：
+
+```text
+## 修改知識庫（GitHub）
+- 一律開新分支：git checkout -b lab-ops/YYYYMMDD-主題（從最新的 origin/main 開）
+- commit 訊息用繁體中文說明改了什麼
+- git push -u origin lab-ops/… 後，用 gh pr create 開 PR，內容列出修改的檔案與重點
+- 不要 merge、不要推到 main、不要 force push：merge 由使用者在 GitHub 上決定
+```
 
 ## 10. 步驟八：移除 Hermes
 
@@ -335,7 +513,15 @@ pct exec 113 -- bash -c '
 
 看到的結果：`hermes` 已移除、`~/.local/bin` 0 個、系統 Node v22.23.4 不受影響、failed 0、根目錄 16G／61G；`ops` 的 Claude Code 2.1.310 不受影響。
 
-> 刪檔案不等於 token 失效：快照、PBS 備份裡都還有。要到 Telegram（@BotFather）和 ollama.com 撤銷（見待辦）。
+> 刪檔案不等於 token 失效：快照、PBS 備份裡都還有，一定要到發行的地方撤銷。
+
+**撤銷外部憑證**（2026-10-24 都已完成）：
+
+| 憑證 | 怎麼撤銷 |
+| --- | --- |
+| Telegram 機器人 | @BotFather → Delete Bot |
+| Ollama key | ollama.com 刪除 |
+| PVE 的 `root@pam!hermesagent` token | `pveum user token remove root@pam hermesagent`（見 [Fail2Ban 那篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-fail2ban-hardening/)） |
 
 ## 11. 常見問題
 
@@ -350,15 +536,17 @@ pct exec 113 -- bash -c '
 | 安裝程式說 `~/.local/bin is not in your PATH`，`which` 卻找得到 | `su -` 讀 `.profile`，資料夾存在時才加進 PATH；照提示加進 `.bashrc` 保險 |
 | Claude Code 說被拒絕三次 | 選項直接按數字鍵 `1`，不要按 Esc |
 | 畫面一直提示 `N MCP servers need authentication` | 帳號的 connector 同步過來；這台不需要，不要授權 |
-| 關掉 MobaXterm 後手機連不上 | Claude Code 沒在 tmux 裡；重開 `tmux new -s claude` → `claude --remote-control "Lab Ops"` |
+| 關掉 MobaXterm 後手機連不上 | Claude Code 沒在 tmux 裡。已改成 systemd 開機啟動（9-1），檢查 `systemctl status claude-rc` |
+| 一次貼上多行，含 `pct enter`、`su`、`read` 的那幾行之後出事 | 這些指令會開新的互動 shell 或等待輸入，後面的行被暫存，等離開容器後才在 **node10** 上執行。10/24 實際發生：`git config` 被設到 node10 的 root（已清除）。這類指令要**單獨貼**，確認提示字元變了再貼下一行 |
 | 額度用得快 | 和其他 Claude 對話共用 Pro 額度；例行檢查用 `/model` 切到 Sonnet |
 
 ## 12. 待辦
 
-- [ ] 開啟 claude.ai 的 **Require trusted devices**（只有驗證過的裝置能操作 Remote Control）
-- [ ] 撤銷 Hermes 的 Telegram 機器人（@BotFather → Delete Bot）與 Ollama key；刪除 PVE 的 `hermesagent` token
-- [ ] CT113 開機後自動啟動 tmux + Claude Code（systemd）
-- [ ] 給 `ops` 一把只能寫這個 repo 的金鑰，讓它自己寫文件、送 PR
+- [x] 開啟 claude.ai 的 **Require trusted devices**（2026-10-24，9-2）
+- [x] 撤銷 Hermes 的 Telegram 機器人與 Ollama key；刪除 PVE 的 `hermesagent` token（2026-10-24，第 10 節）
+- [x] CT113 開機後自動啟動 tmux + Claude Code（2026-10-24，systemd `claude-rc`，9-1）
+- [x] 讓 `ops` 自己寫文件、送 PR（2026-10-24，fine-grained token + ruleset，9-3）
+- [ ] 約 2027-01-22 fine-grained token 90 天到期前換新
 - [ ] 用幾天後，把常用唯讀指令（例如 `ceph -s`、`ha-manager status`）加進 allow
 - [ ] 幾天後刪除 CT113 快照 `pre-node22`、`pre-hermes-removal`；決定 `/root/generate_pptx.js` 是否保留
 - [ ] 清掉 CT113 `known_hosts` 裡那一行黏壞的記錄
