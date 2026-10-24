@@ -12,7 +12,7 @@ last_modified_at: 2026-10-24
 | 項目 | 內容 |
 | --- | --- |
 | 原部落格 | [kbwangtw.blogspot.com](https://kbwangtw.blogspot.com/)（共 62 篇） |
-| 已搬移 | 23 篇（第一～三批） |
+| 已搬移 | 31 篇（第一～四批） |
 | 注意 | 多數文章年代較早，設備與軟體版本可能已停產；照做前先確認自己的版本 |
 
 ## 1. 怎麼看這區的文章
@@ -64,12 +64,20 @@ last_modified_at: 2026-10-24
 | [HPE 5130 忘記密碼、重設與取消 IRF](network/hpe-5130-password-reset/) | 2018-07 | 不知道密碼；要拆堆疊 |
 | [HPE Aruba 1930／1920S 網頁介面切 VLAN](network/hp-1930s-vlan/) | 2022-01 | 第一次在 HP 交換器切 VLAN |
 
-### 2-5 防火牆
+### 2-5 防火牆與資安
 
 | 文章 | 原發表 | 適合什麼時候看 |
 | --- | --- | --- |
-| [Cisco 3560G 當路由、ASA 5505 用透通模式管控上網](network/cisco-3560g-asa5505-transparent/) | 2015-02 | 不改 IP 架構加一台防火牆 |
+| [FortiGate 60D 兩廠之間建立 Site-to-Site IPsec VPN](network/fortinet-60d-site-to-site-vpn/) | 2014-04 | 兩個據點內網要互通 |
+| [FortiGate 只允許指定外網 IP ping 到 WAN](network/fortigate-local-in-policy-ping/) | 2020-08 | 限制誰能 ping 防火牆 |
+| [FortiGate 110C 讓特定電腦用另一個公開 IP 上網](network/fortigate-110c-ip-pool-outbound/) | 2011-04 | 某台電腦要固定用某個 IP 出去 |
 | [FortiGate IP/MAC 綁定](network/fortigate-ip-mac-binding/)（轉貼摘要） | 2021-09 | 只讓登記過的電腦上網 |
+| [Cisco 3560G 當路由、ASA 5505 用透通模式管控上網](network/cisco-3560g-asa5505-transparent/) | 2015-02 | 不改 IP 架構加一台防火牆 |
+| [Palo Alto PA-200 第一次安裝](network/paloalto-pa200-globalprotect/) | 2016-09 | 第一次接觸 Palo Alto |
+| [在 IBM X3105 安裝 pfSense 2.1：Squid 透明代理與內容過濾](network/pfsense-ibm-x3105-squid/) | 2013-11 | 用免費防火牆做上網快取與過濾 |
+| [pfSense 依 IP 限制頻寬](network/pfsense-bandwidth-limit/)（轉貼摘要） | 2014-08 | 少數人佔滿線路 |
+| [用舊伺服器裝 BrazilFW 免費路由器](network/brazilfw-ibm-x3105/) | 2013-10 | 想用舊電腦做路由並看流量 |
+| [裝完 Sophos 端點防護後登入黑畫面](network/sophos-endpoint-black-screen/) | 2022-01 | 部署防毒後使用者登入異常 |
 
 ## 3. 硬體與 UPS
 
