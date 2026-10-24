@@ -134,7 +134,7 @@ last_modified_at: 2026-10-22
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
-| [Blogger 舊文總覽](docs/blogger/) | 從舊部落格搬來的 Cisco、HPE、FortiGate、伺服器與 UPS 筆記，逐篇改寫成新手版中 |
+| [Blogger 舊文總覽](docs/blogger/) | 舊部落格 62 篇全數搬入：Cisco／HPE 網路設備、防火牆、伺服器硬體、Windows、Linux 與 NAS 筆記（2011–2025） |
 
 ## 5. 怎麼讀每一篇文章
 
