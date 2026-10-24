@@ -523,7 +523,42 @@ pct exec 113 -- bash -c '
 | Ollama key | ollama.com 刪除 |
 | PVE 的 `root@pam!hermesagent` token | `pveum user token remove root@pam hermesagent`（見 [Fail2Ban 那篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-fail2ban-hardening/)） |
 
-## 11. 常見問題
+## 11. 日常使用：三個入口怎麼分工
+
+建好之後，叫 Claude 做事有三個地方，依「要不要碰到內網主機」來選：
+
+| 入口 | 在哪裡跑 | 碰得到內網嗎 | 適合做什麼 |
+| --- | --- | --- | --- |
+| **Lab Ops**（CT113 的 Claude Code） | 機房 | ✅ 透過 `rx` 連 node10～12、各 LXC | 要實際對主機下指令的事：健康檢查、查日誌、更新套件、照 SOP 維護，以及把結果寫進知識庫（開 PR） |
+| 雲端的 Claude Code 對話 | Anthropic 雲端 | ❌ 要人複製貼上 | 規劃、研究、長文件、需要一步步帶著做的大工程；排定提醒 |
+| 一般 Claude 聊天（App／網頁） | Anthropic 雲端 | ❌ | 和主機無關的事：查資料、寫文件、翻譯、分析、學寫程式 |
+
+| 想做的事 | 用哪個 |
+| --- | --- |
+| 「檢查三台節點和 Ceph 狀態」、「看 Graylog 為什麼沒收到日誌」 | Lab Ops |
+| 「照 SOP 幫 LibreNMS 更新套件」 | Lab Ops（修改前會問） |
+| 「把剛才的處理過程寫進知識庫」 | Lab Ops（開 PR，人 merge） |
+| 「Wazuh 出新版，評估要不要升級」 | 先在聊天或雲端對話研究，確定後交給 Lab Ops 執行 |
+| 翻譯、會議紀錄、學 React | 一般聊天 |
+
+**Lab Ops 碰不到的地方**：
+
+| 主機 | 原因 |
+| --- | --- |
+| PBS31 | 刻意不開放：備份伺服器不給其他主機 root 權限 |
+| NAS（tokyo16、melayu17） | 沒有設定，照舊用 DSM |
+| Windows VM（DC01、DC02、CA） | `rx` 只走 SSH 到 PVE 節點 |
+| GCP 網站主機 | 不在內網 |
+
+要擴充 `rx` 的範圍（例如加入 NAS）時，先評估：每多一台就多一個風險面。
+
+**要注意**：
+
+- 三個入口共用同一個 Pro 額度；Lab Ops 預設用 Opus，例行檢查可以 `/model` 切到 Sonnet。
+- 不要讓兩個入口同時改同一篇文章，merge 會衝突。
+- 第一次由 Lab Ops 開的 PR（[kbwangtw/IT-Knowledge-Base#165](https://github.com/kbwangtw/IT-Knowledge-Base/pull/165)）merge 時按成了 **Create a merge commit**；知識庫慣例是 **Squash and merge**。可以在 repo 的 **Settings → General → Pull Requests** 只留 **Allow squash merging**，PR 頁面就只剩 Squash 按鈕。
+
+## 12. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
@@ -540,18 +575,19 @@ pct exec 113 -- bash -c '
 | 一次貼上多行，含 `pct enter`、`su`、`read` 的那幾行之後出事 | 這些指令會開新的互動 shell 或等待輸入，後面的行被暫存，等離開容器後才在 **node10** 上執行。10/24 實際發生：`git config` 被設到 node10 的 root（已清除）。這類指令要**單獨貼**，確認提示字元變了再貼下一行 |
 | 額度用得快 | 和其他 Claude 對話共用 Pro 額度；例行檢查用 `/model` 切到 Sonnet |
 
-## 12. 待辦
+## 13. 待辦
 
 - [x] 開啟 claude.ai 的 **Require trusted devices**（2026-10-24，9-2）
 - [x] 撤銷 Hermes 的 Telegram 機器人與 Ollama key；刪除 PVE 的 `hermesagent` token（2026-10-24，第 10 節）
 - [x] CT113 開機後自動啟動 tmux + Claude Code（2026-10-24，systemd `claude-rc`，9-1）
 - [x] 讓 `ops` 自己寫文件、送 PR（2026-10-24，fine-grained token + ruleset，9-3）
 - [ ] 約 2027-01-22 fine-grained token 90 天到期前換新
+- [ ] repo 設定只允許 Squash merge（第 11 節）
 - [ ] 用幾天後，把常用唯讀指令（例如 `ceph -s`、`ha-manager status`）加進 allow
 - [ ] 幾天後刪除 CT113 快照 `pre-node22`、`pre-hermes-removal`；決定 `/root/generate_pptx.js` 是否保留
 - [ ] 清掉 CT113 `known_hosts` 裡那一行黏壞的記錄
 
-## 13. 延伸閱讀
+## 14. 延伸閱讀
 
 - [Claude Code 官方文件：Remote Control](https://code.claude.com/docs/en/remote-control.md)
 - [Claude Code 官方文件：Channels（Telegram、Discord）](https://code.claude.com/docs/en/channels)
