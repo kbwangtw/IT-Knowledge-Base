@@ -4,7 +4,7 @@ title: "PBS 更新後，怎麼確認備份還能用？"
 date: 2026-09-11
 categories: [PVE, PBS, ProxCenter, DR]
 permalink: /docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/
-last_modified_at: 2026-10-19
+last_modified_at: 2026-10-24
 ---
 
 # PBS 更新後，怎麼確認備份還能用？
@@ -15,8 +15,8 @@ last_modified_at: 2026-10-19
 | --- | --- |
 | 適合誰看 | 第一次更新 PBS、不確定更新完要查什麼的人 |
 | 環境 | ProxCenter 1.4.9；PBS31（PBS 4.2.5 → 4.2.8）；PVE 三節點 |
-| 日期 | 2026-09-11 首次；2026-10-13 kernel 更新；2026-10-14 清理舊 kernel |
-| 結論 | ✅ 更新與重開後服務正常、PVE 讀得到 141 份備份；✅ CT110 還原成 CT210 可開機；✅ 四台 kernel 一致為 -23、舊 kernel 清理完成；⏳ 業務功能與完整 RTO／RPO 未驗證 |
+| 日期 | 2026-09-11 首次；2026-10-13 kernel 更新；2026-10-14 清理舊 kernel；2026-10-24 kernel -23 → -25 |
+| 結論 | ✅ 更新與重開後服務正常、PVE 讀得到 141 份備份；✅ CT110 還原成 CT210 可開機；✅ 四台 kernel 一致為 -23、舊 kernel 清理完成；✅ 10/24 再更新到 -25（第 11 節）；⏳ 業務功能與完整 RTO／RPO 未驗證 |
 
 > 文中 IP 都是文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24）；照做前請換成自己的位址。
 
@@ -327,7 +327,59 @@ Remv proxmox-kernel-7.0 [7.0.14-23]
 3. 只清有版本號的 `proxmox-kernel-7.0.14-xx-pve-signed`；`proxmox-ve`、`proxmox-default-kernel`、`proxmox-kernel-7.0` 永遠保留。
 4. 移除後確認開機選單只剩預期的版本。
 
-## 11. 常見問題：出問題時在哪裡停下來
+## 11. 2026-10-24：kernel 7.0.14-23 → 7.0.14-25
+
+PVE 三台用 ProxCenter 更新完（見 [ProxCenter 逐台更新 PVE](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/) 第 12 節）後，接著更新 PBS31。時間是中午，避開 21:00 備份、00:00 GC、02:00 Verify。
+
+**更新前檢查（PBS31）**：
+
+```bash
+proxmox-backup-manager task list 2>/dev/null | grep -i running || echo "沒有執行中的工作"
+findmnt --mountpoint /mnt/tokyo16 >/dev/null && echo "CIFS mounted" || echo "CIFS NOT mounted"
+df -h / /mnt/tokyo16 | awk 'NR==1 || /\//'
+dpkg --audit; apt-mark showhold
+apt update 2>&1 | tail -1
+apt list --upgradable 2>/dev/null | grep -v '^Listing' | cut -d/ -f1 | tr '\n' ' '; echo
+apt -s dist-upgrade | grep -cE '^Inst'; apt -s dist-upgrade | grep -E '^Remv' || echo "沒有要移除的套件"
+```
+
+| 檢查 | 結果 |
+| --- | --- |
+| 執行中的工作 | 沒有 |
+| CIFS | 已掛載，2.7T，已用 869G（33%） |
+| 根目錄 | 44G，可用 36G |
+| 可更新套件 | 11 個：`bind9-*`、`ca-certificates`、`cifs-utils`、`curl`、`libbrotli1`、`libcurl4t64`、`libexpat1`、`proxmox-kernel-7.0`、`tzdata` |
+| 模擬 | 13 個 `Inst`（含新 kernel 本身），**沒有 `Remv`** |
+
+> `echo` 的雙引號裡不要放 `!!`：bash 會把它展開成「上一個指令」的文字。只是印出來不會執行，但輸出會亂掉。
+
+**更新、確認新 kernel，再重開**：
+
+```bash
+apt dist-upgrade
+dpkg --audit
+ls -t /boot/vmlinuz-* | head -2
+reboot
+```
+
+`ls` 第一行是 `/boot/vmlinuz-7.0.14-25-pve`，`dpkg --audit` 沒有輸出。
+
+**重開後驗收**：
+
+| 檢查 | 結果 |
+| --- | --- |
+| `uname -r` | 7.0.14-25-pve（確實用新 kernel 開機） |
+| PBS | 4.2.8（本次沒有 PBS 本身的更新） |
+| failed unit | 0 |
+| `proxmox-backup`、`proxmox-backup-proxy` | active、active |
+| CIFS | 自動掛回 |
+| 可更新套件 | 0 |
+| PVE `pvesm status --storage PBS31` | active，32.53% |
+| PVE `pvesm list PBS31 \| wc -l` | 151（150 筆備份加標題列） |
+
+PBS31 和三台 PVE 的 kernel 再次一致（-25）。
+
+## 12. 常見問題：出問題時在哪裡停下來
 
 | 現象 | 先查什麼 |
 | --- | --- |
@@ -342,13 +394,13 @@ Remv proxmox-kernel-7.0 [7.0.14-23]
 
 > 回復方案要另外準備。從舊 kernel 開機只涵蓋 kernel，不代表整個 PBS、套件和 ZFS 都回到更新前。本文沒有完成整套回復演練，也沒有量到完整 RTO／RPO。
 
-## 12. 每次維護要留下的結案資料
+## 13. 每次維護要留下的結案資料
 
 - **更新**：更新前後版本、重開時間、掛載來源、PBS 服務、PVE storage 狀態與工作日誌。
 - **還原演練**：快照時間、還原開始與完成時間、開機時間、應用程式驗收結果。
 - 演練完成後要關閉或隔離測試副本，確認不會再操作正式資源（這是收尾要求，本紀錄沒有提供關機完成的證據）。
 
-## 13. 延伸閱讀
+## 14. 延伸閱讀
 
 - [備份監控：失敗通知與每日備份檢查](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)（Graylog 告警與監控（二）第 7 節）
 - [從 PBS 還原 ProxCenter：先複製一台，再確認能用](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-pbs-restore-dr-runbook/)

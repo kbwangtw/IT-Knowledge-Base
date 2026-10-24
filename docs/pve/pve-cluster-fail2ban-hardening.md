@@ -619,9 +619,17 @@ done
 | 帳號 | 金鑰 | 來源限制 | sudo |
 | --- | --- | --- | --- |
 | root（三台共用） | 見 13-3 | 2 行 | — |
-| **`proxcenter`**（三台各一份） | 1 把 `proxcenter`（ED25519，三台指紋相同） | **0 行** | **NOPASSWD**：`ovs-ofctl`、`ovs-vsctl`、`ip`、`cat`、`curl`、`echo`、`mkdir`、`qemu-img`、`rbd`、`rm`、`stat`、`tail`、`timeout`、`pvesm` |
+| **`proxcenter`**（三台各一份） | 1 把 `proxcenter`（ED25519，三台指紋相同） | **0 行** | **NOPASSWD**，見下方 |
 
-用 root 身分執行 `cat`、`rm`、`curl` 就能讀、刪、覆蓋任何檔案，所以**這個帳號實際上等於 root**。這組權限推測是 ProxCenter 的功能需要（OVS、Ceph、儲存），不隨便刪減；先補上和 root 那把 ProxCenter 金鑰一樣的來源限制。
+上面的盤點指令只取前 2 行，當時以為只有 `ovs-ofctl`、`rbd`、`pvesm` 等幾組指令。同日更新前用 `sudo -l -U proxcenter | sed -n '/may run/,$p'` 看完整清單，**更正**如下：
+
+| 清單內容（節錄） | 說明 |
+| --- | --- |
+| `ovs-*`、`ip`、`cat`、`curl`、`rm`、`qemu-img`、`rbd`、`pvesm`、`apt-get`、`mount`、`ssh`、`sed`、`pct`、`qm`、`ha-manager`、`ceph`、`reboot` 等十幾組 | ProxCenter 各功能需要的指令 |
+| `/bin/sh -c *` | 可以用 root 執行任何 shell 指令 |
+| **`ALL`** | 清單最後一行，就是 8/26 為了滾動更新加的 `proxcenter ALL=(ALL) NOPASSWD: ALL`（見 [ProxCenter 逐台更新 PVE](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/) 第 6 節） |
+
+所以**這個帳號就是完整的 root**，前面的細項清單等於沒有作用。要縮小權限，得先查 ProxCenter 實際需要哪些指令，並重新測試滾動更新（見待辦）；這次先補上和 root 那把 ProxCenter 金鑰一樣的來源限制。
 
 ### 13-5 `proxcenter` 加上來源 IP 限制
 
@@ -688,7 +696,7 @@ ssh-keygen -lf $F | awk '{print $2, $3}'
 
 `\.` 代表真正的句點，所以只會刪掉公鑰剛好是 `AAAA...` 的那一行。
 
-**⑤ 驗證**：ProxCenter 網頁上三個節點都在線，網路、儲存頁面正常。
+**⑤ 驗證**：ProxCenter 網頁上三個節點都在線，網路、儲存頁面正常。同日中午 ProxCenter 用這個帳號做完三台滾動更新，登入來源大多是 `<ProxCenter IP 1>`，node11 有 1 次來自 `<ProxCenter IP 2>`（Corosync 網段）。**兩個 IP 都允許是對的**，只寫一個的話那次登入會被擋。
 
 | 項目 | 結果 |
 | --- | --- |
@@ -727,7 +735,7 @@ ssh-keygen -lf $F | awk '{print $2, $3}'
 - [ ] 刪除舊的管理者筆電金鑰（Windows `ssh-keygen` 產生的那把；公司筆電已改用 `company-laptop-p51`；刪前確認 MobaXterm 用的是新的 `.ppk`）
 - [ ] 確認 node10 的 `/etc/pve/priv/authorized_keys.bak-*` 已刪除
 - [ ] 手機的 Termius 新增 PBS31 的 Host 並測試
-- [ ] 查 ProxCenter 官方文件，評估縮小 `proxcenter` 的 NOPASSWD sudo 清單
+- [ ] 查 ProxCenter 官方文件，評估縮小 `proxcenter` 的 sudo（目前有 `NOPASSWD: ALL` 和 `/bin/sh -c *`，等於 root）
 - [ ] 確認 ProxCenter 正常幾天後，刪除三台的 `/home/proxcenter/.ssh/authorized_keys.bak-*` 與 node10 的 `/root/authorized_keys.bak-20261024-*`
 - [ ] 確認幾天正常後，`shred -u` 刪除 node10 的 `/root/authorized_keys.bak-20261022` 和 PBS31 的 `/root/.ssh/authorized_keys.bak-20261022`
 - [x] ~~（可選）Hermes 改用只能執行唯讀指令的帳號~~：2026-10-20 決定不做（目前沒有需求；SSH 金鑰已加 `from=` 來源限制）
