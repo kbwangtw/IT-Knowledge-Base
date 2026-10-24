@@ -3,19 +3,19 @@ layout: default
 title: "ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？"
 date: 2026-08-26
 categories: [PVE, ProxCenter, Ceph]
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-24
 ---
 
 # ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？
 
-> **一句話**：用 ProxCenter 自動「一台一台」更新 PVE 叢集時，被三件事擋住：套件來源檢查讀到備份檔、SSH 連錯網段、sudo 權限不足；分開處理後就能往下走。也記錄了 10/12 實際更新的結果，以及「ProxCenter 不能更新自己所在那台」的問題。
+> **一句話**：用 ProxCenter 自動「一台一台」更新 PVE 叢集時，被三件事擋住：套件來源檢查讀到備份檔、SSH 連錯網段、sudo 權限不足；分開處理後就能往下走。也記錄了 10/12 實際更新的結果、「ProxCenter 不能更新自己所在那台」的問題，以及 10/24 分兩輪讓 ProxCenter 更新完三台的做法。
 
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 第一次用 ProxCenter 做 PVE 滾動更新的人 |
 | 環境 | 三台 PVE（node10～12）＋ Ceph；ProxCenter 是 ct:110 |
-| 實測 | 2026-08-26（排除三個卡關點，node12 進入更新階段）；2026-10-12（ProxCenter 完成 node11、node12，node10 手動） |
-| 結論 | ✅ 三個卡關點已排除；⏳ 還沒有「三台都由 ProxCenter 完成」的紀錄 |
+| 實測 | 2026-08-26（排除三個卡關點，node12 進入更新階段）；2026-10-12（ProxCenter 完成 node11、node12，node10 手動）；2026-10-24（**三台都由 ProxCenter 完成**，分兩輪） |
+| 結論 | ✅ 三個卡關點已排除；✅ 10/24 三台都由 ProxCenter 更新並重開（kernel 7.0.14-23 → -25），HA 服務沒有中斷、Ceph 回到 HEALTH_OK（第 12 節）；⏳ 把 ProxCenter 移到叢集外、縮小 sudo 權限 |
 
 > 文中 IP 都是文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24）；IP、帳號、VMID 是案例值。
 
@@ -205,7 +205,194 @@ watch -n 5 'ha-manager status | grep -E "lrm|service"; echo; ceph osd dump | gre
 
 > 用 `grep "^flags"` 只抓叢集層級的旗標那一行；寫成 `grep flags` 會連每個 pool 的資料都抓到，畫面會被洗掉。
 
-## 12. 下次可以直接照做的檢查順序
+## 12. 2026-10-24：分兩輪，三台都由 ProxCenter 更新
+
+**做什麼**：Rolling Update 頁面顯示三台各 16 個更新（`48 update(s) available on 3 node(s)`、`3 reboot(s) required`），終於可以實際跑一次。目標是**三台都交給 ProxCenter**，不再手動更新任何一台。
+
+**難題**：ProxCenter（ct:110）在 node11。讓它一輪做完三台，輪到 node11 時 HA 會把 ct:110 搬走，等於 ProxCenter 在流程中途把自己停掉；ProxCenter 會怎麼處理這種情況，release notes 裡沒有寫。
+
+**做法：分兩輪**，ProxCenter 永遠不更新自己所在的那台：
+
+```text
+第 1 輪：ProxCenter 更新 node12 → node10（ct:110 在 node11，不受影響）
+中場：  ha-manager migrate ct:110 node10（搬到已更新的節點）
+第 2 輪：ProxCenter 更新 node11（node12 陪跑，等批准時按 Cancel）
+```
+
+### 12-1 更新前檢查（唯讀）
+
+```bash
+sudo -l -U proxcenter | sed -n '/may run/,$p'
+for h in node10 node11 node12; do echo "== $h"; ssh root@$h "apt list --upgradable 2>/dev/null | grep -v '^Listing' | cut -d/ -f1 | tr '\n' ' '; echo"; done
+pvecm status | grep -E 'Quorate|Nodes'; ceph -s | grep -E 'health|osd:|pgs:'; ceph osd dump | grep '^flags'
+ha-manager status | grep -E 'ct:110|error'
+```
+
+| 檢查 | 結果 |
+| --- | --- |
+| 可更新套件 | 三台相同：`bind9-*`、`ca-certificates`、`cifs-utils`、`curl`、`libcurl*`、`libexpat1`、`libpve-storage-perl`、`libunbound8`、`linux-libc-dev`、`proxmox-kernel-7.0`、`qemu-server`、`tzdata`；**沒有 `ceph-*`** |
+| 叢集 | Quorate Yes、HEALTH_OK、OSD 3 up／3 in、97 PG active+clean、沒有 `noout` |
+| ct:110 | node11 |
+| `proxcenter` 的 sudo | 除了一長串指令清單，**最後還有 `NOPASSWD: ALL`**（就是第 6 節 8/26 加的） |
+
+另外確認兩台要更新的節點上，**沒有正在執行、又不在 HA 裡的 VM／CT**（這種的維護模式不會搬）：
+
+```bash
+for h in node10 node12; do echo "== $h"; ssh root@$h "for id in \$(qm list | awk '/running/{print \$1}'; pct list | awk '/running/{print \$1}'); do ha-manager status | grep -qE \"(vm|ct):\$id \" || echo \"  \$id\"; done"; done
+```
+
+看到的結果：兩台都沒有輸出。
+
+### 12-2 精靈設定
+
+| 設定 | 預設 | 本次 | 原因 |
+| --- | --- | --- | --- |
+| 節點 | 三台都勾 | 第 1 輪只勾 node12、node10 | 排除 ProxCenter 所在的 node11 |
+| SSH Addresses | **`198.51.100.x Cluster`** | `192.0.2.x vmbr0 (gw)` | 預設又是 Corosync 網段，就是第 5 節的卡關二；改成管理網 |
+| Migrate non-HA VMs | 開 | 開 | |
+| Automatically reboot | 開 | 開 | 有新 kernel |
+| Set Ceph noout flag | 開 | 開 | 第一台開始前設定，整輪結束時清除 |
+| Abort on failure | 開 | 開 | |
+| Manual approval between each node | **關** | **開** | 每台之間先確認服務、Ceph，再批准下一台 |
+| Reboot timeout | 300 秒 | 600 秒 | 保守值；實測重開只要 80～125 秒 |
+| Minimum healthy nodes | 1 | 1 | 見 12-3 |
+| Shutdown VMs with local storage | 關 | 關 | 搬不走的 VM 跳過，不關機 |
+| Wait for Ceph HEALTH_OK between each node | 開 | 開 | |
+
+### 12-3 坑：Minimum healthy nodes 只算勾選的節點
+
+第 1 輪原本想設 2，Verify 擋下來：
+
+```text
+Only 2 nodes are healthy, and 11 are needed to keep 10 online while one is updated.
+```
+
+（欄位被誤輸入成 10。）第 2 輪只勾 node11、設 1，又被擋：
+
+```text
+Only 1 nodes are healthy, and 2 are needed to keep 1 online while one is updated.
+```
+
+兩次都說明：**ProxCenter 只計算有勾選的節點**，不算叢集裡其他在線的節點。而且這個欄位**最小只能填 1**，填 0 會自動跳回 1。
+
+| 勾選幾台 | Minimum healthy nodes | 結果 |
+| --- | --- | --- |
+| 2 台 | 1 | ✅ 通過 |
+| 2 台 | 2 | ❌ 永遠不夠 |
+| 1 台 | 1（最小值） | ❌ 永遠不夠 |
+
+只更新一台時，改用「**陪跑**」：多勾一台已經沒有更新的節點，**排在要更新的那台後面**，開啟 Manual approval；要更新的那台完成、停在等待批准陪跑節點時按 **Cancel**。陪跑節點完全不會被動到。
+
+> 設 1 不會降低實際安全性：沒勾選的節點一直在線，quorum 和 Ceph 都夠。真正的保護是 Wait for Ceph HEALTH_OK、Abort on failure 和 Manual approval。
+
+### 12-4 第 1 輪：node12 → node10（10 分鐘）
+
+監看視窗開在**這一輪不會重開的 node11**：
+
+```bash
+watch -n 5 'ha-manager status | grep -E "lrm|service"; echo; ceph osd dump | grep "^flags"; ceph -s | grep -E "health|osd:|volumes"'
+```
+
+ProxCenter 的紀錄（節錄）：
+
+```text
+[12:11:56] [node12] Skipping VM 101 (Pihole) - has local storage
+[12:11:56] [node12] Skipping VM 105 (Graylog) - has local storage
+[12:11:56] [node12] Skipping VM 114 (grafana) - has local storage
+[12:11:56] [node12] Migrating VM 107 (DC02) to node10
+[12:12:01] [node12] Running apt update && apt full-upgrade
+[12:12:46] [node12] Package upgrade finished: 17 package(s) configured
+[12:12:46] [node12] Rebooting node
+[12:14:11] [node12] Verifying node health
+[12:14:12] Ceph also reports, not holding the update: MON_CLOCK_SKEW: clock skew detected on mon.node12
+[12:14:12] [node12] Waiting for manual approval before updating this node   ← node10
+...
+[12:19:00] [node10] Rebooting node
+[12:21:05] [node10] Verifying node health
+[12:21:06] Waiting for Ceph to recover: FS_DEGRADED: 1 filesystem is degraded
+```
+
+| 節點 | 套件 | 重開 | 備註 |
+| --- | --- | --- | --- |
+| node12 | 17 個（12:12:01～12:12:46） | 12:12:46 → 12:14:11（約 85 秒） | 回來時 `MON_CLOCK_SKEW`，對時後自己消失 |
+| node10 | 17 個（12:18:15～12:19:00） | 12:19:00 → 12:21:05（約 125 秒） | API node；回來後等 CephFS 恢復（`FS_DEGRADED`） |
+
+結果：`Rolling update completed successfully (2/2 nodes)`、`Duration: 10 minutes`。
+
+**`has local storage` 是誤判**：這幾台都是 LXC，磁碟全在 Ceph：
+
+```bash
+grep -HE '^(rootfs|mp[0-9]+):' /etc/pve/nodes/*/lxc/{101,105,114}.conf
+```
+
+```text
+/etc/pve/nodes/node12/lxc/101.conf:rootfs: VM_Pool:vm-101-disk-0,size=8G
+/etc/pve/nodes/node12/lxc/105.conf:rootfs: VM_Pool:vm-105-disk-0,size=64G
+/etc/pve/nodes/node12/lxc/114.conf:rootfs: VM_Pool:vm-114-disk-0,size=30G
+```
+
+實際上 HA 在維護模式時已經把它們搬走，重開期間它們在其他節點正常執行；從 HA 的紀錄可以看到「搬回來」的那一段（`node = node10` 就是它原本暫住的節點）：
+
+```text
+12:14:24 pve-ha-crm: node 'node12': state changed from 'maintenance' => 'online'
+12:14:24 pve-ha-crm: moving service 'ct:105' back to 'node12', node came back from maintenance.
+12:14:24 pve-ha-crm: service 'ct:105': state changed from 'started' to 'relocate'  (node = node10, target = node12)
+12:14:34 pve-ha-crm: service 'ct:105': state changed from 'relocate' to 'started'  (node = node12)
+```
+
+LXC 搬移是「先停再啟動」，所以每台 CT 會停兩次（搬走、搬回），每次約 10 秒；VM 是線上遷移，不中斷。
+
+驗收：兩台可更新套件 0、`HEALTH_OK`、`volumes: 1/1 healthy`、97 PG active+clean、**`noout` 已自動清除**、三台 lrm 都是 `active`。
+
+### 12-5 第 2 輪：node11（node12 陪跑）
+
+1. 確認 ct:110 在 node10（`ha-manager status | grep ct:110`）。
+2. 監看視窗改開在 **node12**（node11 會重開，node10 有 ProxCenter）。
+3. 精靈勾選 **node11 第一、node12 第二**，Minimum healthy nodes 1，Manual approval 開。
+
+```text
+[12:36:57] Set Ceph noout flag
+[12:36:58] [node11] Skipping VM 102 (librenms) / 109 (wireguard) / 112 (wazuh) - has local storage
+[12:36:58] [node11] Migrating 3 VM(s), up to 2 in parallel        ← VM 108、104（關機中）、VM 111
+[12:37:23] [node11] Shutting down local storage VMs
+[12:37:23] [node11] Running apt update && apt full-upgrade
+[12:38:26] [node11] Rebooting node
+[12:39:46] [node11] Verifying node health
+[12:39:48] [node11] Node update completed
+[12:39:48] [node12] Waiting for manual approval before updating this node   ← 按 Cancel
+```
+
+| 疑點 | 查證結果 |
+| --- | --- |
+| `Shutting down local storage VMs`（選項明明是關的） | 只是流程訊息。HA 紀錄顯示 102、109、112 在 12:40:05 從 node10／node12 搬回 node11，代表重開期間它們在別台執行，**沒有被關機** |
+| 「搬走」的紀錄找不到 | 當時 HA master 就是 node11，那段紀錄在 node11 自己的 journal；重開後 master 換到 node10 |
+| 取消後 `noout` | ProxCenter 取消時**也會自動清除**，`ceph osd dump` 沒有 `noout`、`HEALTH_OK` |
+| vm:111（CA） | ProxCenter 用一般遷移搬到 node12，不是 HA 搬的，所以不會自動搬回；不影響運作 |
+| 搬 WireGuard（ct:109） | 透過 VPN 連線時，畫面會斷約 10～20 秒兩次；更新在內網進行，不受影響 |
+
+### 12-6 最後驗收
+
+```bash
+for h in node10 node11 node12; do echo "$h: $(ssh root@$h 'uname -r; uptime -p' | tr '\n' ' ')"; done
+for h in node10 node11 node12; do echo -n "$h: "; ssh root@$h "apt list --upgradable 2>/dev/null | grep -vc '^Listing'"; done
+ha-manager status | grep -cE 'service .*started'; ha-manager status | grep -E 'error|fence' || echo "no error/fence"
+ssh root@node11 "pct exec 112 -- systemctl is-active wazuh-manager wazuh-indexer wazuh-dashboard"
+for h in node10 node11 node12; do echo -n "$h: "; ssh root@$h "journalctl -u ssh --since '12:00' --no-pager | grep 'for proxcenter from' | grep -oP 'from \K[0-9.]+' | sort | uniq -c | tr '\n' ' '"; echo; done
+```
+
+| 檢查 | 結果 |
+| --- | --- |
+| kernel | 三台 **7.0.14-25-pve**（pve-manager 維持 9.2.21） |
+| 可更新套件 | 三台 0 |
+| HA | 13 個 started，沒有 error／fence |
+| Wazuh | manager、indexer、dashboard 都是 active |
+| `proxcenter` 登入來源 | node10 8 次、node12 6 次，都是 `192.0.2.30`；node11 是 `192.0.2.30` 5 次、**`198.51.100.30` 1 次** |
+
+最後一列很重要：當天早上替 `proxcenter` 的金鑰加了 `from=` 來源限制，**兩個 IP 都允許**，所以那一次從 Corosync 網段來的登入沒有被擋（見 [Fail2Ban 強化文件第 13-5 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-fail2ban-hardening/)）。如果只允許管理網的 IP，這次更新可能會在 node11 失敗。
+
+同日 PBS31 也更新到 7.0.14-25，四台一致，見 [PBS 更新後，怎麼確認備份還能用？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)。
+
+## 13. 下次可以直接照做的檢查順序
 
 1. 確認 quorum、Ceph、HA 與工作負載容量
 2. 看套件來源的實際設定，區分出備份檔
@@ -215,9 +402,11 @@ watch -n 5 'ha-manager status | grep -E "lrm|service"; echo; ceph osd dump | gre
 6. 每台完成後驗證健康狀態；失敗就停下來查，不要直接處理下一台
 7. 某一台改手動更新時，`reboot` 前一定先 `node-maintenance enable`，重開驗收後再 `disable`
 8. 先按 `Check for updates` 或用 `apt list --upgradable` 確認真的有更新，並檢查有沒有 `ceph-*` 套件；沒有更新時 ProxCenter 不會執行
-9. ProxCenter 所在的那台不交給 ProxCenter 更新，改用方案 A 手動處理
+9. ProxCenter 所在的那台不要和其他台同一輪：分兩輪，中間用 `ha-manager migrate ct:110 <已更新的節點>` 把 ProxCenter 搬走（第 12 節）
+10. 精靈的 SSH Addresses 每次都確認是管理網（預設可能是 Cluster 網段）
+11. Minimum healthy nodes 只算勾選的節點；只更新一台時用「陪跑」節點加 Manual approval，等待批准時按 Cancel
 
-## 13. 常見問題
+## 14. 常見問題
 
 | 現象 | 原因與處理 |
 | --- | --- |
@@ -227,14 +416,21 @@ watch -n 5 'ha-manager status | grep -E "lrm|service"; echo; ceph osd dump | gre
 | 本機儲存的 VM 被略過 | 符合設定；另外安排停機 |
 | 手動重開後 HA error | 沒先進維護模式（見 HA error 那篇） |
 | Rolling Update 沒有執行按鈕 | 沒有可用更新 |
+| Verify：`Only N nodes are healthy, and M are needed…` | Minimum healthy nodes 只算勾選的節點；勾 2 台設 1；只勾 1 台時加一台陪跑（第 12-3 節） |
+| Minimum healthy nodes 填 0 會跳回 1 | 最小值就是 1，用陪跑做法 |
+| 紀錄寫 LXC `has local storage`，但磁碟在 Ceph | ProxCenter 誤判；HA 維護模式仍會搬走，看 `pve-ha-crm` 紀錄確認 |
+| 重開後 `MON_CLOCK_SKEW` | 剛開機還在對時，幾分鐘內自己消失；ProxCenter 不會因此停住 |
+| 重開後停在 `FS_DEGRADED` | CephFS 的 MDS 在切換，等它恢復；ProxCenter 會等 |
+| 取消後擔心 `noout` 留著 | `ceph osd dump \| grep '^flags'` 確認；10/24 實測取消時會自動清除 |
 
-## 14. 待辦
+## 15. 待辦
 
-- [ ] 有實際更新時，用方案 A 完成一次「ProxCenter 更新 node10、node12」的完整紀錄
+- [x] 三台都由 ProxCenter 完成一次更新的完整紀錄（2026-10-24，第 12 節）
 - [ ] 評估把 ProxCenter 移到叢集外
-- [ ] 評估縮小 proxcenter 帳號的 sudo 權限
+- [ ] 評估縮小 proxcenter 帳號的 sudo 權限（目前清單最後有 `NOPASSWD: ALL`，前面的細項清單等於沒有作用）
+- [ ] 回報或追蹤 ProxCenter 把 Ceph 上的 LXC 判斷成 `has local storage` 的問題
 
-## 15. 延伸閱讀
+## 16. 延伸閱讀
 
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)
