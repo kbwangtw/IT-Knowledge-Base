@@ -12,7 +12,7 @@ last_modified_at: 2026-10-24
 | 項目 | 內容 |
 | --- | --- |
 | 原部落格 | [kbwangtw.blogspot.com](https://kbwangtw.blogspot.com/)（共 62 篇） |
-| 已搬移 | 31 篇（第一～四批） |
+| 已搬移 | 42 篇（第一～五批） |
 | 注意 | 多數文章年代較早，設備與軟體版本可能已停產；照做前先確認自己的版本 |
 
 ## 1. 怎麼看這區的文章
@@ -79,7 +79,30 @@ last_modified_at: 2026-10-24
 | [用舊伺服器裝 BrazilFW 免費路由器](network/brazilfw-ibm-x3105/) | 2013-10 | 想用舊電腦做路由並看流量 |
 | [裝完 Sophos 端點防護後登入黑畫面](network/sophos-endpoint-black-screen/) | 2022-01 | 部署防毒後使用者登入異常 |
 
-## 3. 硬體與 UPS
+## 3. 伺服器硬體與 UPS
+
+### 3-1 HP／HPE 伺服器
+
+| 文章 | 原發表 | 適合什麼時候看 |
+| --- | --- | --- |
+| [HPE Gen10 透過 iLO 5 網頁更新 BIOS 與 iLO 韌體](hardware/hpe-ilo5-bios-firmware-upgrade/) | 2020-07 | 第一次幫伺服器更新韌體 |
+| [DL380 G7 改裝 1 GB Cache 後開不了機：事件紀錄與檢討](hardware/hpe-dl380g7-p410i-cache-upgrade-incident/) | 2020-07 | 要換 RAID 卡電池或 Cache |
+| [HP ML10 Gen9：Intel RST 建 RAID 1 並安裝 Windows 2012](hardware/hp-ml10-gen9-rst-raid-windows2012/) | 2016-09 | ML10 Gen9 做鏡像並裝 Windows |
+| [HP ML10 v2 安裝 Windows 2012 R2：B120i RAID 與驅動](hardware/hp-ml10-v2-b120i-windows-2012r2/) | 2015-06 | Windows 安裝時看不到硬碟 |
+| [用隨身碟裝 Windows 2016 出現 0x80070026](hardware/hp-ml10-windows2016-install-wim-0x80070026/) | 2017-05 | 安裝說找不到 install.wim |
+| [HP DL120 G6 加裝光碟機](hardware/hp-dl120g6-optical-drive/) | 2011-08 | 第一次幫伺服器加光碟機 |
+
+### 3-2 IBM／Lenovo 伺服器與 VMware
+
+| 文章 | 原發表 | 適合什麼時候看 |
+| --- | --- | --- |
+| [Lenovo SR650 的 ESXi 6.5 看不到 RAID 狀態：安裝 LSI Provider](hardware/vmware-esxi65-lsi-provider-sr650/) | 2018-09 | ESXi 監控看不到硬碟健康 |
+| [Lenovo TS150 加 NVS315 安裝 Windows 2016 藍屏](hardware/lenovo-ts150-windows2016/) | 2019-05 | 加了顯示卡就裝不了系統 |
+| [IBM X3250 用 LSI 1064e 建立 RAID 1](hardware/ibm-x3250-lsi1064e-raid1/) | 2011-08 | 舊款 IBM 伺服器做鏡像 |
+| [IBM X346 ServeRAID 錯誤碼 2807：換卡後接受新電池](hardware/ibm-serveraid-error-2807/) | 2016-12 | ServeRAID 報錯、換卡 |
+| [IBM X336 系統碟換大顆不重灌](hardware/ibm-x336-scsi-disk-upgrade/) | 2011-02 | 系統碟空間不夠 |
+
+### 3-3 UPS
 
 | 文章 | 原發表 | 適合什麼時候看 |
 | --- | --- | --- |
