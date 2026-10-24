@@ -1,0 +1,13 @@
+# 類型 | 代稱 | 真實值      （# 開頭的行不生效）
+# ip：主機 IP；沒列到的 IPv4 也會自動遮成 <IP>。公網 IP 一定要列出名稱比較好認
+ip | <node10-IP> | 192.0.2.10
+ip | <node10-cluster-IP> | 198.51.100.10
+ip | <GCP-IP> | 203.0.113.10
+# domain：網域，子網域會一起遮（node10.example.local → node10.<網域>）
+domain | <網域> | example.local
+# word：帳號這類單字，只比對完整單字、不分大小寫。不要放 root、admin 這種通用字
+word | <NAS帳號> | nas-user
+# text：可能有空格的名稱
+text | <CA名稱> | Example-Root-CA
+text | <公司名稱> | 範例股份有限公司
+# 密碼、token、私鑰不要寫進來：rx 會用規則整段遮掉

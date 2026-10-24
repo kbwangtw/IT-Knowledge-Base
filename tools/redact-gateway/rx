@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""rx：去識別化閘道。代稱換回真實值後 SSH 執行，輸出遮蔽後才印出。
+用法：rx <node10|node11|node12> '<指令>'      rx --test < 檔案（只測試遮蔽）"""
+import os, re, subprocess, sys, datetime
+
+MAP = "/root/.redact-map"
+LOG = "/var/log/rx.log"
+HOSTS = {"node10", "node11", "node12"}
+TIMEOUT = 300
+MAXOUT = 200_000
+BLOCK = [r"\brm\s+-[a-z]*r[a-z]*f?\s+/(\s|$)", r"\bmkfs", r"\bdd\b.*\bof=/dev/", r"\b(shutdown|poweroff|halt)\b",
+         r"\breboot\b", r"\bpvecm\s+delnode\b", r"\bceph\s+osd\s+(purge|destroy)\b", r"\bzpool\s+destroy\b",
+         r"\bwipefs\b", r"\bsgdisk\b.*-[zZ]", r":\(\)\s*\{"]
+
+def load():
+    rows = []
+    for ln in open(MAP, encoding="utf-8"):
+        ln = ln.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        p = [x.strip() for x in ln.split("|")]
+        if len(p) == 3 and p[0] in ("ip", "domain", "word", "text") and p[1] and p[2]:
+            rows.append(p)
+    return rows
+
+def unredact(cmd, rows):
+    for t, alias, real in sorted(rows, key=lambda r: -len(r[1])):
+        cmd = cmd.replace(alias, real)
+    return cmd
+
+SECRETS = [
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S), "<PRIVATE-KEY>"),
+    (re.compile(r"(?i)((?:pass(?:word|wd)?|secret|token|api[_-]?key|community|psk|auth[_-]?key|private[_-]?key)[\"']?\s*[:=]\s*[\"']?)[^\s\"',;]+"), r"\1<SECRET>"),
+    (re.compile(r"(?i)\b((?:r[ow])?community)\s+[\"']?[^\s\"']+[\"']?"), r"\1 <SECRET>"),
+    (re.compile(r"(?i)(PVEAPIToken=[^=\s]+=)[0-9a-f-]+"), r"\1<SECRET>"),
+    (re.compile(r"(?i)(authorization:\s*(?:bearer|basic)\s+)\S+"), r"\1<SECRET>"),
+    (re.compile(r"\$(?:1|5|6|y|2[aby])\$[^\s:]+"), "<HASH>"),
+    (re.compile(r"\b(ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp\d+) AAAA[0-9A-Za-z+/=]{20,}"), r"\1 <PUBKEY>"),
+]
+IPV4 = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.])")
+KEEP_IP = re.compile(r"^(127\.|0\.0\.0\.0$|255\.|224\.0\.0\.)")
+IPV6 = re.compile(r"(?<![\w:])(?=[0-9A-Fa-f:]*::|(?:[0-9A-Fa-f]{1,4}:){4})[0-9A-Fa-f:]*:[0-9A-Fa-f]{1,4}(?![\w:])")
+MAC = re.compile(r"\b(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b")
+
+def redact(out, rows):
+    for pat, rep in SECRETS:
+        out = pat.sub(rep, out)
+    for t, alias, real in sorted(rows, key=lambda r: -len(r[2])):
+        if t == "ip":
+            out = re.sub(r"(?<![\d.])" + re.escape(real) + r"(?![\d.])", alias, out)
+        elif t == "domain":
+            out = re.sub(re.escape(real), alias, out, flags=re.I)
+        elif t == "word":
+            out = re.sub(r"(?<![\w-])" + re.escape(real) + r"(?![\w-])", alias, out, flags=re.I)
+        else:
+            out = out.replace(real, alias)
+    out = IPV4.sub(lambda m: m.group(1) if KEEP_IP.match(m.group(1)) else "<IP>", out)
+    out = MAC.sub("<MAC>", out)
+    out = IPV6.sub("<IPv6>", out)
+    return out
+
+def log(host, cmd, rc):
+    try:
+        with open(LOG, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.datetime.now():%F %T}\t{host}\trc={rc}\t{cmd}\n")
+    except OSError:
+        pass
+
+def main():
+    os.umask(0o077)
+    rows = load()
+    if len(sys.argv) == 2 and sys.argv[1] == "--test":
+        sys.stdout.write(redact(sys.stdin.read(), rows))
+        return 0
+    if len(sys.argv) != 3 or sys.argv[1] not in HOSTS:
+        sys.stderr.write("用法：rx <node10|node11|node12> '<指令>'\n")
+        return 2
+    host, cmd = sys.argv[1], unredact(sys.argv[2], rows)
+    for b in BLOCK:
+        if re.search(b, cmd):
+            sys.stderr.write(f"rx：已封鎖高風險指令（規則 {b}），請由管理者手動執行\n")
+            log(host, "[BLOCKED] " + cmd, -1)
+            return 3
+    try:
+        p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", f"root@{host}", cmd],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=TIMEOUT)
+        out, rc = p.stdout.decode("utf-8", "replace"), p.returncode
+    except subprocess.TimeoutExpired:
+        out, rc = f"rx：逾時（{TIMEOUT} 秒）\n", 124
+    if len(out) > MAXOUT:
+        out = out[:MAXOUT] + f"\n…（輸出超過 {MAXOUT} 字元，已截斷）\n"
+    log(host, cmd, rc)
+    sys.stdout.write(redact(out, rows))
+    if rc:
+        sys.stdout.write(f"\n[exit {rc}]\n")
+    return rc
+
+if __name__ == "__main__":
+    sys.exit(main())

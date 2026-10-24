@@ -256,8 +256,8 @@ Wazuh Dashboard 建立在 OpenSearch Dashboards 上，Node.js 版本由 OpenSear
 ## 10. 待辦
 
 - [ ] 觀察幾天正常後刪除快照：`pct delsnapshot 103 pre-node22234`、`pct delsnapshot 113 pre-node22`
-- [ ] 刪除 CT113 的 `/root/node-dl`、`~/.hermes/node/bin/node.bak-v22.22.2`、`/root/nodesource.sources.bak`
-- [ ] 每次 `hermes update` 後確認 `~/.hermes/node/bin/node -v` 仍 ≥ 22.23.4
+- [ ] 刪除 CT113 的 `/root/node-dl`、`/root/nodesource.sources.bak`（`~/.hermes` 已隨 Hermes 移除）
+- [x] ~~每次 `hermes update` 後確認自帶的 Node~~：同日 Hermes 已移除，見 [用 Claude Code 取代 Hermes](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/claude-code-redact-gateway/)
 - [ ] 追蹤 ProxCenter 新版（frontend 的 Node ≥ 26.12.1）後更新
 - [ ] 追蹤 Wazuh 新版；評估 PVE 防火牆限制 CT112 的 443
 - [ ] PVE 三台、PBS31、GCP 網站主機的 Node.js 檢查（推測 PVE／PBS 沒有）
