@@ -7,12 +7,12 @@ last_modified_at: 2026-10-24
 
 # Blogger 舊文（2011–2025）
 
-> **一句話**：這裡是從舊部落格「IT、MIS 資訊黑手的維修記錄」搬過來的文章，2026-10-24 起逐篇改寫成新手版；轉貼別人的文章只留重點摘要和原文連結。
+> **一句話**：這裡是從舊部落格「IT、MIS 資訊黑手的維修記錄」搬過來的文章，2026-10-24 全部改寫成新手版；轉貼別人的文章只留重點摘要和原文連結。
 
 | 項目 | 內容 |
 | --- | --- |
 | 原部落格 | [kbwangtw.blogspot.com](https://kbwangtw.blogspot.com/)（共 62 篇） |
-| 已搬移 | 55 篇（第一～六批） |
+| 已搬移 | **62 篇全部完成**（2026-10-24）；短篇的校園網站報修紀錄合併成一頁 |
 | 注意 | 多數文章年代較早，設備與軟體版本可能已停產；照做前先確認自己的版本 |
 
 ## 1. 怎麼看這區的文章
@@ -130,3 +130,16 @@ last_modified_at: 2026-10-24
 | [CentOS 6 雙網卡綁定 bond0](linux/centos6-bonding/)（摘要） | 2015-09 | 維護舊版 CentOS |
 | [RHEL 7 的 Network Teaming](linux/rhel7-network-teaming/)（轉貼摘要） | 2014-12 | 認識 teamd |
 | [QNAP 當 LDAP、Synology 加入並提供 RADIUS](linux/qnap-synology-ldap-radius/) | 2017-09 | 沒有 AD 也想統一帳密 |
+
+## 6. 校園網站維護
+
+| 文章 | 原發表 | 適合什麼時候看 |
+| --- | --- | --- |
+| [校園「動態網頁模組系統」常見問題](linux/school-dynaweb-troubleshooting/)（合併 4 篇） | 2011-02 | 學校 PHP 網站報修：MySQL 停止、上傳失敗 |
+| [網頁寶典系統安裝在 Synology NAS：config.inc 設定](linux/campus-config-inc-synology/) | 2011-04 | 把 PHP 校園系統裝在 NAS 上 |
+
+## 7. 公告
+
+| 文章 | 原發表 |
+| --- | --- |
+| [YouTube 頻道與虛擬平台轉換紀錄](announcements/) | 2024-09、2025-03 |
