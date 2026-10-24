@@ -4,7 +4,7 @@ title: "PHP2Shell（CVE-2026-109618、109619）：檢查環境有沒有中、怎
 date: 2026-10-23
 categories: [Security, PHP, PVE, GCP]
 permalink: /docs/pve/php2shell-check/
-last_modified_at: 2026-10-23
+last_modified_at: 2026-10-24
 ---
 
 # PHP2Shell（CVE-2026-109618、109619）：檢查環境有沒有中、怎麼修補
@@ -16,7 +16,7 @@ last_modified_at: 2026-10-23
 | 適合誰看 | 聽到 PHP 漏洞，想知道自己哪些主機受影響、怎麼判斷修補了沒有的人 |
 | 環境 | PVE 三節點的 10 個 LXC（Debian 12／13、Ubuntu 22.04／24.04）；GCP 網站主機（寶塔面板 10.0.2、PHP 7.4） |
 | 日期 | 2026-10-23 |
-| 結論 | ✅ LXC 只有 LibreNMS 有 PHP，8.4.26 → 8.4.27-1~deb13u1，`validate.php` 全部 OK ✅ GCP 主機沒有入侵跡象 ✅ GCP 暫時防護（關閉 session upload progress）已在 PHP-FPM 生效 ⏳ GCP 網站升級到 PHP 8.2 以上 ⏳ Synology 官方公告 |
+| 結論 | ✅ LXC 只有 LibreNMS 有 PHP，8.4.26 → 8.4.27-1~deb13u1，`validate.php` 全部 OK ✅ GCP 主機沒有入侵跡象 ✅ GCP 暫時防護（關閉 session upload progress）已在 PHP-FPM 生效 ⏸️ GCP 網站升級到 PHP 8.2 以上（10/24 決定暫緩） ⏳ Synology 官方公告 |
 
 ## 1. 先認識幾個名詞
 
@@ -168,7 +168,7 @@ curl -s -o /dev/null -w "網站回應：%{http_code}\n" http://127.0.0.1/
 
 還原：`cp -a /www/server/php/74/etc/php.ini.bak-20261023 /www/server/php/74/etc/php.ini && /etc/init.d/php-fpm-74 reload`。
 
-### 5-3 根本解決：升級到 PHP 8.2 以上（⏳）
+### 5-3 根本解決：升級到 PHP 8.2 以上（⏸️ 10/24 決定暫緩）
 
 | 步驟 | 內容 | 網站影響 |
 | --- | --- | --- |
@@ -179,6 +179,15 @@ curl -s -o /dev/null -w "網站回應：%{http_code}\n" http://127.0.0.1/
 | 5 | 確認沒問題後停用、移除 7.4 | 無 |
 
 開始前要先確認：主機上有幾個網站、各用什麼程式；軟體商店能不能裝 8.3／8.4；網站可以暫停多久測試。
+
+**10/24 決定暫緩，短期內不執行**。在那之前要知道：
+
+| 項目 | 說明 |
+| --- | --- |
+| 目前的防護 | 只有 5-2 的暫時防護（關閉 session upload progress），**不保證**擋住兩個漏洞 |
+| PHP 7.4 本身 | 2022 年底停止支援，之後的其他 PHP 漏洞也不會有修補 |
+| 寶塔面板更新 PHP 時 | 可能覆蓋 `php.ini`，更新後用 `php-fpm -i` 確認 `session.upload_progress.enabled` 還是 `Off` |
+| 建議的觀察 | 不定期重跑 5-1 的入侵檢查（新增的 PHP 檔、排程、可疑程式） |
 
 ## 6. 常見問題
 
@@ -192,7 +201,8 @@ curl -s -o /dev/null -w "網站回應：%{http_code}\n" http://127.0.0.1/
 
 ## 7. 待辦
 
-- [ ] GCP 網站升級到 PHP 8.2 以上（5-3）
+- [ ] ⏸️ GCP 網站升級到 PHP 8.2 以上（5-3，10/24 決定暫緩）
+- [ ] GCP 主機不定期重跑 5-1 的入侵檢查，並確認暫時防護仍是 `Off`
 - [ ] 查 Synology 是否發佈 PHP2Shell 相關公告（DSM、Web Station 的 PHP 套件）
 - [ ] LibreNMS 觀察一兩天正常後 `pct delsnapshot 102 pre-php2shell`；另外 17 個非 PHP 套件找時間更新
 
