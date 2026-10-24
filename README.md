@@ -37,6 +37,7 @@
 - [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](docs/pve/pve-cluster-fail2ban-hardening.md)
 - [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](docs/pve/wireguard-remote-access-replace-8006.md)：VPN 異常會寄 Gmail
 - [PHP2Shell（CVE-2026-109618、109619）：檢查環境有沒有中、怎麼修補](docs/pve/php2shell-check.md)
+- [Node2Shell（CVE-2026-111497）與 LiteLLM 供應鏈攻擊：檢查環境有沒有中、怎麼修補](docs/pve/node2shell-litellm-check.md)
 
 ### PVE 叢集與 Ceph 儲存
 
