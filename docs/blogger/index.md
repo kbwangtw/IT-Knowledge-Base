@@ -12,7 +12,7 @@ last_modified_at: 2026-10-24
 | 項目 | 內容 |
 | --- | --- |
 | 原部落格 | [kbwangtw.blogspot.com](https://kbwangtw.blogspot.com/)（共 62 篇） |
-| 已搬移 | 42 篇（第一～五批） |
+| 已搬移 | 55 篇（第一～六批） |
 | 注意 | 多數文章年代較早，設備與軟體版本可能已停產；照做前先確認自己的版本 |
 
 ## 1. 怎麼看這區的文章
@@ -107,3 +107,26 @@ last_modified_at: 2026-10-24
 | 文章 | 原發表 | 適合什麼時候看 |
 | --- | --- | --- |
 | [APC Smart-UPS 換新電池後 Battery 燈還在閃](hardware/apc-smart-ups-battery-reset/) | 2023-08 | 換了電池，UPS 還是一直閃燈 |
+
+## 4. Windows 與常用工具
+
+| 文章 | 原發表 | 適合什麼時候看 |
+| --- | --- | --- |
+| [PuTTY、Tera Term、SecureCRT 自動存 Log 與改配色](windows/terminal-putty-teraterm-securecrt-log/) | 2021-06 | 想留下每次連線的操作紀錄 |
+| [Windows 2008 格式化 18 TB RAID 5 失敗：配置單位改 8K](windows/windows2008-format-large-raid5-8k/) | 2014-03 | 大容量磁碟格式化失敗 |
+| [EPSON L550 在 Windows 10 安裝 Fax Utility](windows/epson-l550-fax-utility-win10/) | 2021-07 | 事務機能印不能傳真 |
+| [SQL Server 服務因登入失敗無法啟動](windows/sql-server-service-logon-failure/)（摘要） | 2011-02 | 改了帳號密碼後 SQL 起不來 |
+| [Windows 10 上 Outlook 2010 點連結一直詢問程式](windows/outlook-2010-link-prompt-windows10/)（摘要） | 2016-05 | 舊版 Outlook 點連結跳視窗 |
+| [Windows Server 2012 無網域安裝遠端桌面服務與授權](windows/windows2012-rds-licensing-workgroup/)（轉貼摘要） | 2015-06 | 工作群組環境開放多人遠端 |
+| [在 Windows Server 2012 R2 安裝 MSE](windows/mse-on-windows-server-2012r2/)（轉貼摘要，已不建議） | 2016-07 | 參考用 |
+
+## 5. Linux 與 NAS
+
+| 文章 | 原發表 | 適合什麼時候看 |
+| --- | --- | --- |
+| [Ubuntu 12.04 雙網卡 Bonding：7 種模式怎麼選](linux/ubuntu-1204-bonding/) | 2014-10 | Linux 雙網卡備援與加頻寬 |
+| [RHEL／CentOS 7 把網卡名稱改回 eth0](linux/rhel7-rename-nic-eth0/) | 2021-12 | 舊腳本寫死 eth0 |
+| [在 Ubuntu 12.04 安裝 Moodle 2.7](linux/moodle27-ubuntu1204/) | 2014-10 | 自架線上課程平台 |
+| [CentOS 6 雙網卡綁定 bond0](linux/centos6-bonding/)（摘要） | 2015-09 | 維護舊版 CentOS |
+| [RHEL 7 的 Network Teaming](linux/rhel7-network-teaming/)（轉貼摘要） | 2014-12 | 認識 teamd |
+| [QNAP 當 LDAP、Synology 加入並提供 RADIUS](linux/qnap-synology-ldap-radius/) | 2017-09 | 沒有 AD 也想統一帳密 |
