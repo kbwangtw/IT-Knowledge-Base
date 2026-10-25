@@ -52,8 +52,8 @@ last_modified_at: 2026-10-24
 | [Cisco 2504 無線控制器（一）：Console 初始設定精靈](network/cisco-wlc2504-setup-1-wizard/) | 2015-10 | 第一次設定 WLC |
 | [Cisco 2504 無線控制器（二）：用網頁設定兩個 SSID 與密碼](network/cisco-wlc2504-setup-2-ssid/) | 2015-10 | 設定 SSID 與 WPA2 密碼 |
 | [Cisco 2504 無線控制器（三）：應用程式統計與 5 GHz 頻道調整](network/cisco-wlc2504-setup-3-rf-tuning/) | 2015-10 | 看流量統計、調頻道減少干擾 |
-| [Cisco 瘦 AP 怎麼找到無線控制器](network/cisco-lightweight-ap-join-controller/)（摘要） | 2015-10 | AP 加入不了 WLC |
-| [Cisco 胖 AP（Autonomous AP）基本設定](network/cisco-autonomous-ap-basic/)（摘要） | 2015-11 | 單獨一台 Cisco AP 要能用 |
+| [Cisco 瘦 AP 怎麼找到無線控制器：三種方法與手動指定 WLC](network/cisco-lightweight-ap-join-controller/) | 2015-10 | AP 加入不了 WLC |
+| [Cisco 胖 AP（Autonomous AP）基本設定](network/cisco-autonomous-ap-basic/) | 2015-11 | 單獨一台 Cisco AP 要能用 |
 
 ### 2-4 HPE 交換器
 
@@ -127,7 +127,7 @@ last_modified_at: 2026-10-24
 | [Ubuntu 12.04 雙網卡 Bonding：7 種模式怎麼選](linux/ubuntu-1204-bonding/) | 2014-10 | Linux 雙網卡備援與加頻寬 |
 | [RHEL／CentOS 7 把網卡名稱改回 eth0](linux/rhel7-rename-nic-eth0/) | 2021-12 | 舊腳本寫死 eth0 |
 | [在 Ubuntu 12.04 安裝 Moodle 2.7](linux/moodle27-ubuntu1204/) | 2014-10 | 自架線上課程平台 |
-| [CentOS 6 雙網卡綁定 bond0](linux/centos6-bonding/)（摘要） | 2015-09 | 維護舊版 CentOS |
+| [CentOS 6.4 雙網卡綁定 bond0](linux/centos6-bonding/) | 2015-09 | 維護舊版 CentOS |
 | [RHEL 7 的 Network Teaming](linux/rhel7-network-teaming/)（轉貼摘要） | 2014-12 | 認識 teamd |
 | [QNAP 當 LDAP、Synology 加入並提供 RADIUS](linux/qnap-synology-ldap-radius/) | 2017-09 | 沒有 AD 也想統一帳密 |
 
