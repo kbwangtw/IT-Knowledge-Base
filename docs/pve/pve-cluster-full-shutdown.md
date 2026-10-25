@@ -4,7 +4,7 @@ title: "整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）
 date: 2026-10-23
 categories: [PVE, Ceph, HA]
 permalink: /docs/pve/pve-cluster-full-shutdown/
-last_modified_at: 2026-10-23
+last_modified_at: 2026-10-25
 ---
 
 # 整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）
@@ -16,7 +16,7 @@ last_modified_at: 2026-10-23
 | 適合誰看 | 要搬機房、停電維護，需要把整個叢集關掉再開回來的人 |
 | 環境 | PVE 9.2.21 三節點 node10～12（Ceph、CephFS、13 個 HA 資源）；PBS31 是 NAS 上的 VM；NAS tokyo16、melayu17 |
 | 日期 | 2026-10-23 |
-| 結論 | ✅ 關機腳本跑完 HA 停止、其他 VM 關機、Ceph 旗標、兩台關機 ✅ 開機腳本 1 分半恢復 13 個服務、Ceph `HEALTH_OK` ⚠️ 最後一台（node10）被 watchdog 重開、卡在開機，長按電源關機 ⏳ 已加「停 HA 監看＋延遲卸載 CephFS」，待下次關機驗證 |
+| 結論 | ✅ 關機腳本跑完 HA 停止、其他 VM 關機、Ceph 旗標、兩台關機 ✅ 開機腳本 1 分半恢復 13 個服務、Ceph `HEALTH_OK` ⚠️ 最後一台（node10）被 watchdog 重開、卡在開機，長按電源關機 ⏳ 已加「停 HA 監看＋延遲卸載 CephFS」，待下次關機驗證 ✅ tokyo16 加裝 10G 網卡：備份、GC、Verify 時間都沒有明顯變化（第 8 節） |
 
 ## 1. 先認識幾個名詞
 
@@ -214,7 +214,63 @@ PVE 節點 ──①──▶ PBS31（tokyo16 上的 VM） ──②──▶ to
 
 - 10GBASE-T 建議 Cat6a（100 m）；Cat6 約 55 m，Cat5e 通常跑不到 10G。
 - LibreNMS 會多出新的網路介面，下次輪詢後在 tokyo16 的 Ports 頁看流量。
-- ⏳ 效果驗證：比較換網卡後的備份時間與 10/13 基準（node10 7 分 37 秒、node11 9 分 07 秒、node12 4 分 29 秒，見 [Ceph slow op 文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/)第 7 節）；PBS 是增量備份，每晚資料量不同，看趨勢即可。
+- ✅ 效果驗證（10/24 晚上起的結果見 8-1）：備份、GC、Verify 都沒有明顯變化。
+
+### 8-1 效果驗證（2026-10-24 晚上～10/25 凌晨）
+
+**備份**：10/23 是叢集重開後第一晚，VM 的 dirty bitmap（記錄哪些區塊有變動）被清空，備份要讀整顆磁碟，加上 HA 重新分配節點，所以改用「單一 VM／CT」比較。
+
+| VMID | 名稱 | 10/23 | 10/24 | 差 |
+| --- | --- | --- | --- | --- |
+| 108 | WinClient（VM） | 7m34s | 2m53s | −4m41s |
+| 106 | DC01（VM） | 2m55s | 1m15s | −1m40s |
+| 104 | UBClient（VM） | 1m41s | 9s | −1m32s |
+| 107 | DC02（VM） | 2m53s | 2m38s | −15s |
+| 111 | CA（VM） | 1m59s | 1m44s | −15s |
+| 113 | ai | 2m41s | 1m31s | −1m10s |
+| 103 | IPAM | 1m08s | 56s | −12s |
+| 110 | ProxCenter | 3m45s | 4m30s | +45s |
+| 100、101、102、105、109、112、114 | AdGuard、Pihole、LibreNMS、Graylog、WireGuard、Wazuh、Grafana | — | — | 都在 ±5 秒內 |
+
+| 分類 | 10/23 | 10/24 | 差 |
+| --- | --- | --- | --- |
+| 5 台 VM | 17m02s | 8m39s | −8m23s |
+| 10 個 CT | 12m52s | 12m10s | −42s |
+| 三台總計 | 29m54s | 20m49s | −9m05s |
+
+與換網卡**前**的基準相比：
+
+| 日期 | 三台總計 |
+| --- | --- |
+| 10/13（node10 7m37s＋node11 9m07s＋node12 4m29s） | 21m13s |
+| 10/24 | 20m49s（−24 秒，約 −2%） |
+
+> 10/13 的備份清單可能比現在少幾個 CT（例如 Grafana 較晚才建立，未確認），這個比較只能當參考。
+
+**判讀**：
+
+- VM 變快符合預期：dirty bitmap 恢復後又是增量備份，**不是網路變快**。
+- CT 幾乎沒變，才是看網卡效果的地方：網路若是瓶頸，CT 也該明顯變快。
+- ai 變快：推測是當天移除了 Hermes（約 1.5 GB）。ProxCenter 變慢：推測是當天在 CT110 下載了新的 Docker 映像檔，多了一批新檔案（未確認）。
+
+**GC 與 Verify**（PBS 通知信）：
+
+| 工作 | 10/23 | 10/24～10/25 |
+| --- | --- | --- |
+| GC（00:00 起） | 00:00～00:08，成功 | 00:00 起，信件 00:07，成功 |
+| Verify（02:00 起） | 02:00～03:04（1 小時 4 分），成功 | 信件 03:01（約 1 小時 1 分，開始時間為排程時間推測），成功，沒有驗證失敗的備份 |
+
+Verify 要讀整個資料集，若 10G 有幫助，這裡最看得出來，結果只快約 5%。GC 信件被截斷，沒有取得回收量與 dedup 倍率。
+
+**結論**：加裝 10G 網卡對**目前這個備份架構**沒有可見的效果。對照上面的流量圖，② PBS31 → tokyo16 在同一台 NAS 的虛擬交換器內，不經過實體網路；① 節點 → PBS31 的上限是節點網卡（推測 2.5G）。時間主要花在讀 Ceph、比對重複區塊（dedup）、經 SMB 寫入。10G 網卡的效益推測會在多個來源同時存取 NAS、還原大型 VM 時才看得出來（未驗證）。
+
+**還沒驗證的瓶頸**（都是推測）：
+
+| 候選 | 怎麼確認 |
+| --- | --- |
+| SMB 協定對大量小檔案（PBS 的資料區塊檔）效率差 | PBS31 執行 `proxmox-backup-client benchmark`，看 TLS 傳輸、SHA256、壓縮、Verify 速度，一次看出 CPU 和網路誰是瓶頸 |
+| NAS 的 CPU 或磁碟 | Verify 進行時，看 DSM → 資源監控的網路、CPU、磁碟使用 |
+| 節點網卡 | 從節點對 PBS31 測速 |
 
 ## 9. 常見問題
 
@@ -231,7 +287,8 @@ PVE 節點 ──①──▶ PBS31（tokyo16 上的 VM） ──②──▶ to
 ## 10. 待辦
 
 - [ ] 下次整個叢集關機時，驗證修正版（node10 正常關機、不被重開）
-- [ ] 比較 10/23 晚上起的備份時間與 10/13 基準，確認 10G 網卡的效果（第 8 節）
+- [x] 比較備份時間確認 10G 網卡的效果（2026-10-25，8-1）：沒有明顯變化
+- [ ] （可選）找出備份真正的瓶頸：Verify 時看 DSM 資源監控，或在 PBS31 執行 `proxmox-backup-client benchmark`
 - [x] 三台的 `/usr/local/sbin/cluster-shutdown.sh` 已換成 5-2 的修正版（10/23，`bash -n` 通過，scp 到 node11、node12）
 - [ ] 修正版驗證後，刪除 node10 的 `/usr/local/sbin/cluster-shutdown.sh.bak-20261023`
 
