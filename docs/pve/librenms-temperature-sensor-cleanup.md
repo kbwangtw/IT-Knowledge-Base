@@ -306,7 +306,7 @@ WHERE SUBSTRING_INDEX(d.hostname,'.',1)='tokyo16' AND e.type='temperature'
 | 10/24～25 搬動後、10/23 加裝 10G 網卡後，曲線都沒有再出現階梯 | 搬動與 10G 網卡都**看不出可量測的效果** |
 | 48 小時曲線：每晚兩個尖峰，分別在約 00:00～01:00 與 02:10～03:10，最高 72.2 °C；48 小時平均 51.3 °C、最低 46.0 °C | 尖峰時間對得上 PBS GC（00:00）與 Verify、NAS 複寫（02:00～03:11） |
 
-> **推測，未確認**：基準線在 10/20 下降的原因。已知 tokyo16 的 DSM 風扇模式是**靜音模式**，Active Backup for Business 有一個為了測試 DP340 而設的 03:10 排程，**已取消**，但取消日期尚未對照（DSM → Active Backup for Business → 活動 → 看最後一次執行日）。若日期落在 10/19～10/20，就是主因。尖峰由 GC、Verify、複寫造成也是依時間對照的推論，尚未用 DSM 資源監控驗證。
+> **推測，未確認**：基準線在 10/20 下降的原因。已知 tokyo16 的 DSM 風扇模式是**靜音模式**；除此之外沒有找到其他線索。尖峰由 GC、Verify、複寫造成也是依時間對照的推論，尚未用 DSM 資源監控驗證。
 
 **怎麼辦**（2026-10-28 決定）：不調整門檻（61 °C），改成把備份相關工作重排，同時符合「先驗證、再複製」的資料安全順序：
 
@@ -398,7 +398,6 @@ smartctl -A $dev | grep -iE "temperature|warning|critical|percentage used|data u
 - [x] tokyo16：10/24～25 調整擺放位置，10/26～28 比較搬動前後：看不出效果（第 7-1 節）
 - [ ] tokyo16：確認 PBS 的 Prune 排在 GC 之前、備份實際結束時間，並確認 Verify 的 Skip Verified 是否開啟
 - [ ] tokyo16：10/28 重排為 Verify 22:45、GC 00:30（複寫維持 02:00），觀察 2～3 個夜晚的曲線與事件數
-- [ ] 找出 10/19 晚～10/20 基準線下降的原因：對照 Active Backup for Business（DP340 測試）最後一次執行日期
 - [ ] 視結果再決定是否把 DSM 風扇模式由靜音改為酷涼
 - [ ] 以後新增 LXC 到 LibreNMS 時，加入後就關掉 sensors 模組
 - [x] node12 的 2 TB NVMe（KINGSTON SNV3S）內部感測器 71.8 °C：10/21 確認是讀數卡住、碟本身健康（第 8 節）
