@@ -4,7 +4,7 @@ title: "圖書館 Nebula 網路改造（附錄）：設定清單與實作紀錄"
 permalink: /docs/network/zyxel-nebula-library-vlan-implementation-record/
 date: 2026-10-22
 categories: [Network, VLAN, Zyxel, Nebula, Dual WAN]
-last_modified_at: 2026-10-22
+last_modified_at: 2026-10-28
 ---
 
 # 圖書館 Nebula 網路改造（附錄）：設定清單與實作紀錄
@@ -15,8 +15,8 @@ last_modified_at: 2026-10-22
 | --- | --- |
 | 適合誰看 | 要照抄同樣架構的人；之後接手維護這個環境的人；想對照「規劃」和「實際結果」差在哪的人 |
 | 環境 | USG FLEX 100H ×1、XGS2220 ×1、GS1920 ×3（1F～3F）、NWA90AX ×9，全部由 Nebula 管理；FTTB ×2 |
-| 日期 | 2026-10-21～22 實作；設定狀態以 2026-10-22 為準 |
-| 結論 | ✅ 四個網段、出口分流、讀者 CIP 過濾與隔離都已設定完成；⏳ 現場驗收、Layer 2 isolation、授權到期影響待確認（見第 9 節） |
+| 日期 | 2026-10-21～22 實作；2026-10-28 現場驗收；設定狀態以 2026-10-28 為準 |
+| 結論 | ✅ 四個網段、出口分流、讀者 CIP 過濾與隔離、Layer 2 isolation 都已設定完成；✅ 現場驗收通過（CIP 攔截未實測）；⏳ CIP 攔截實測、讀者存取館員公用電腦的例外、授權到期影響待確認（見第 13 節） |
 | 去識別化 | 外網 IP、內網網段、SSID、電腦名稱、MAC、電路編號、機構名稱都已改為代稱或移除 |
 
 ## 1. 代稱說明
@@ -71,7 +71,7 @@ last_modified_at: 2026-10-22
 | SSID | VLAN ID | 加密 | Forwarding mode | 隔離 | Band | 802.11r |
 | --- | --- | --- | --- | --- | --- | --- |
 | `<館員 SSID>`（新增） | 110 | WPA2-Personal | Local bridge | 都關 | 5／6 GHz | 開 |
-| `<讀者 SSID>`（原有） | 80（原本 1） | WPA2-Personal | Local bridge | **Intra-BSS traffic blocking 開**；Layer 2 isolation 關（待補） | 5／6 GHz | 開 |
+| `<讀者 SSID>`（原有） | 80（原本 1） | WPA2-Personal | Local bridge | **Intra-BSS traffic blocking 開**；**Layer 2 isolation 開**（白名單：防火牆 p3 的 MAC） | 5／6 GHz | 開 |
 
 > 兩個 SSID 都只開 5 GHz（這款 AP 沒有 6 GHz），只支援 2.4 GHz 的舊設備連不上。這是原有設定，這次沒有改。
 
@@ -106,7 +106,8 @@ last_modified_at: 2026-10-22
 | --- | --- | --- |
 | 1F-GS1920 | 5、6、7 | 館員用公用電腦 |
 | 1F-GS1920 | 8（下接小型交換器） | 館員用公用電腦、1F 印表機、一台不明筆電 |
-| 1F-GS1920 | 17、20 | 用途不明的設備（待查） |
+| 1F-GS1920 | 17 | 用途不明的設備（待查） |
+| 1F-GS1920 | 20 | RFID 設備（2026-10-28 現場確認） |
 | 2F-GS1920 | 13、15～22 | 館員電腦 |
 | 2F-GS1920 | 14 | 2F 事務機 |
 
@@ -156,16 +157,19 @@ Destination、Service、Source port 都是 Any，Schedule 是 Always，Connectiv
 
 | # | Name | Action | 設定檔 | From → To | Source | Destination | Service | Log |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Reader_to_Staff_Deny | Deny | — | LAN → LAN | Reader_All | Staff_Net | Any | 開 |
-| 2 | Reader_to_Device_Deny | Deny | — | LAN → ZyWALL | Reader_All | Any | Mgmt_Service_Group | 開 |
-| 3 | Reader_CIP_Outgoing | Allow | default_profile、CIP | LAN → Any (Excluding ZyWALL) | Reader_All | Any | Any | 開 |
-| 4 | LAN_Outgoing | Allow | — | LAN → Any (Excluding ZyWALL) | Any | Any | Any | 關 |
-| 5 之後 | 原有的 DMZ／VPN／LAN_to_Device／WAN 相關規則 | | | | | | | |
+| 1 | Reader_PC_to_PC0_Allow | Allow | — | LAN → LAN | Reader_PC_Net | PC0 | Any（暫時全開） | 開 |
+| 2 | Reader_to_Staff_Deny | Deny | — | LAN → LAN | Reader_All | Staff_Net | Any | 開 |
+| 3 | Reader_to_Device_Deny | Deny | — | LAN → ZyWALL | Reader_All | Any | Mgmt_Service_Group | 開 |
+| 4 | Reader_CIP_Outgoing | Allow | default_profile、CIP | LAN → Any (Excluding ZyWALL) | Reader_All | Any | Any | 開 |
+| 5 | LAN_Outgoing | Allow | — | LAN → Any (Excluding ZyWALL) | Any | Any | Any | 關 |
+| 6 之後 | 原有的 DMZ／VPN／LAN_to_Device／WAN 相關規則 | | | | | | | |
 | 最後 | Default | Deny | | | | | | 開 |
 
-> ⚠️ **第 4 條一定要在第 3 條下面**：放在上面，讀者會先被不過濾的規則放行，CIP 就失效了。
+> ⚠️ **第 1 條例外一定要在第 2 條拒絕規則上面**，否則不會生效。
 >
-> ⚠️ **第 4 條不能少**：少了它，館員和網路設備的對外流量都會掉到最後的 Default Deny（見第 8 節 2026-10-22 的事件）。
+> ⚠️ **第 5 條一定要在第 4 條下面**：放在上面，讀者會先被不過濾的規則放行，CIP 就失效了。
+>
+> ⚠️ **第 5 條不能少**：少了它，館員和網路設備的對外流量都會掉到最後的 Default Deny（見第 8 節 2026-10-22 的事件）。
 >
 > 已刪除：原本的 `Reader_PC_Policy`（為讀者套用 CIP，但因排序與條件問題從未生效）。
 
@@ -215,7 +219,10 @@ Destination、Service、Source port 都是 Any，Schedule 是 Always，Connectiv
 | 10-22 | Clients 改名，讀者電腦名稱跟 DHCP Hostname 一致 | ✅ |
 | 10-22 | 2F 第 1～5 埠改 VLAN 90 | ✅ 5 台都取得新 IP，讀者電腦全部搬完 |
 | 10-22 | 收尾：刪除 LAN1 的讀者舊綁定、過渡用路由規則、舊物件；讀者群組改成只用 VLAN 劃分 | ✅ |
-| 10-22 | ⚠️ 刪除舊的讀者規則時，`LAN_Outgoing` 一起被刪 → 館員與網路設備對外流量落到 Default Deny | ✅ 已補回，排在第 4 條 |
+| 10-22 | ⚠️ 刪除舊的讀者規則時，`LAN_Outgoing` 一起被刪 → 館員與網路設備對外流量落到 Default Deny | ✅ 已補回，排在讀者 CIP 規則下面 |
+| 10-22 | 新增例外：讀者有線可存取館員用公用電腦（Service 暫時 Any），排第 1 條 | ⏳ 待回報測試結果 |
+| 10-28 | 現場確認清單回收：館員上網、館員 SSID、櫃台借還書、讀者電腦與手機的出口和隔離都正常；兒童區小交換器只接兒童區電腦；1F 第 20 埠是 RFID 設備；取得閘道 MAC | ✅（CIP 攔截兩項因未提供測試網址而未測） |
+| 10-28 | 讀者 SSID 補開 Layer 2 isolation，白名單填閘道 MAC | ✅ 手機可正常上網，證實讀者 VLAN 與館員網段共用同一個 MAC |
 
 ## 10. 規劃過程中的變更
 
@@ -225,12 +232,15 @@ Destination、Service、Source port 都是 Any，Schedule 是 Always，Connectiv
 | 館員走 WAN A、讀者走 WAN B | 對調：館員走 WAN B、讀者走 WAN A | 案主決定 |
 | 館員 SSID 給館員筆電作業用 | 只給館員手機上網 | 館員電腦全部是有線的，所以不需要列印測試 |
 | 櫃台電腦另外處理 | 歸類為讀者電腦，一起搬到 VLAN 90 | 案主決定 |
-| 讀者 SSID 開 Layer 2 isolation | 先開 Intra-BSS blocking | Layer 2 isolation 要填閘道 MAC，先用不需要 MAC 的做法 |
+| 讀者 SSID 開 Layer 2 isolation | 先開 Intra-BSS，10-28 再補開 Layer 2 isolation | Layer 2 isolation 要填閘道 MAC，等現場查到 MAC 才補 |
+| 讀者完全不能連館員網段 | 讀者有線可存取一台館員用公用電腦 | 案主需求，用置頂的例外規則開放 |
 | 只隔離無線 | 讀者有線也搬到 VLAN 90 | 原本讀者電腦和館員電腦同網段，風險比無線更大 |
 
 ## 11. 現場確認清單（範本）
 
 改完之後請現場人員逐項確認。結果欄勾「正常」或「異常」，異常要拍照回報。
+
+> **交付前要填好**：測試網址（不當網站）和資訊人員聯絡方式。本案第一次交付時沒附測試網址，3-3、4-3 就沒測成。現場也可能刪掉不適用的項目（例如印表機不走網路、櫃台不需要列印）。
 
 | 編號 | 用哪台 | 怎麼做 | 應該看到 |
 | --- | --- | --- | --- |
@@ -254,17 +264,18 @@ Destination、Service、Source port 都是 Any，Schedule 是 Always，Connectiv
 
 | 現象 | 怎麼辦 |
 | --- | --- |
+| 讀者需要存取館員網段的某一台設備 | 在拒絕規則上面加 Allow 例外（第 7-2 節第 1 條）；確認該設備自己的 Windows 防火牆允許讀者網段 |
 | 刪了一條安全政策後，館員突然不能上網、Nebula 設備離線 | 檢查 `LAN_Outgoing`（LAN 對外放行）還在不在。刪除規則前先截圖，刪完再對一次清單 |
 | 照著這份清單做，畫面欄位名稱不一樣 | 本案 Nebula 版本 20.20；不同版本選單名稱可能不同 |
 | 要把某台讀者電腦改回舊網段 | LAN1 的讀者舊綁定已刪除，要先把綁定加回 LAN1，再把交換器埠改回 PVID 1 |
 
 ## 13. 待辦
 
-- [ ] 現場確認清單（第 11 節）全部完成並回收
-- [ ] 取得閘道 MAC，讀者 SSID 補開 Layer 2 isolation
+- [ ] 實測 CIP 過濾會擋下不當網站
+- [ ] 讀者存取館員公用電腦的例外：回報測試結果、確認用途後收緊 Service
 - [ ] 確認 CIP 過濾依賴的授權與到期日（Pro Pack 試用約 30 天後到期）
 - [ ] 拔線測試：單一 WAN 斷線時的切換；預設路由走哪條線
-- [ ] 查出用途不明的有線設備（1F 第 8、17、20 埠）
+- [ ] 查出用途不明的有線設備（1F 第 17 埠）
 - [ ] 確認新網段沒有和 VPN 或其他分館重疊
 - [ ] 觀察讀者無線尖峰時段的 IP 使用量
 - [ ] （選用）路由規則 3 的 Source 改成 Any；網路設備管理獨立成一個 VLAN
