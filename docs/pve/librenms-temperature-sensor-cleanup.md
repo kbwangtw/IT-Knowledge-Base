@@ -326,10 +326,23 @@ WHERE SUBSTRING_INDEX(d.hostname,'.',1)='tokyo16' AND e.type='temperature'
 | --- | --- |
 | 資料安全 | 複寫排在 Verify 之前，來源若有壞掉的 chunk 會被一起複製；先驗證再複製可降低這個風險 |
 | 溫度 | 三個工作各自獨立、互不重疊；缺點是 21:00～00:40 連續約 3.5 小時有負載，要用曲線觀察 |
-| Verify 排在備份後 | Verify 的起始時間要晚於最晚的備份結束時間（以 PBS → Administration → Tasks 的實際結束時間為準），上面的 22:45 是估算 |
-| GC 要在 Prune 之後 | 確認 PBS → Datastore → Prune & GC 裡 Prune 排在 GC 之前（目前排程尚未確認） |
+| Verify 排在備份後 | PVE 備份是三個工作：node10 21:00、node11 21:30、node12 22:00。Verify log 顯示最晚一份快照 22:03:48 才開始，所以最晚的備份**推估約 22:05～22:10 結束**（用開始時間推的，未看結束時間），22:45 有約 35 分鐘緩衝 |
+| GC 要在 Prune 之後 | PBS 的 Prune Jobs 是空的；Prune 由 PVE 備份工作的保留設定（`keep-daily=7,keep-last=3`）在備份後順便執行，所以一定在 GC 之前，不用另外排 |
 
 > 2026-10-28 白天還改過一次「Verify 改 04:00」，同一天決定改成上表的排法，因為 04:00 會讓複寫排在 Verify 之前。
+
+**PBS 現況與 10/28 Verify 實測**（只讀取，來自 PBS 的 Verify Jobs、Prune & GC Jobs 畫面與 10/28 02:00 的 Verify log）：
+
+| 項目 | 看到 | 意思 |
+| --- | --- | --- |
+| Skip Verified | Yes | 只驗新快照，舊的顯示 `SKIPPED (recently verified)` |
+| Re-Verify After | 15 Days | 保留設定只留約 7 天，快照活不到 15 天，實際上每份快照只驗一次；不建議改小，改成 7 天會讓每晚 Verify 約加倍 |
+| 10/28 Verify | 02:00～03:07，1 小時 7 分，`TASK OK`，0 errors | 15 個 group（10 個 CT、5 個 VM）各驗 1 份新快照 |
+| 驗證量與速度 | 約 142 GiB，平均約 36 MiB/s；log 寫 `using 1 read and 4 verify thread(s)` | 只有 1 條讀取執行緒，瓶頸比較像單執行緒讀 CIFS，不是 10G 網路（推測） |
+| 時間分布 | 5 台 VM 約 54 分鐘（vm/108 16.1、vm/111 10.1、vm/106 9.8、vm/107 9.5、vm/104 8.4），10 個 CT 合計約 13 分鐘 | 03:00 左右的尖峰對得上 vm/108、vm/111 這段（時間對應，同時段 NAS 複寫也在跑，不能證明因果） |
+| GC | 排程 daily（00:00），上次 00:06:49、耗時 6m49s、OK；清除 30.17 GB、待清除 39.37 GB | 預計改 00:30 |
+
+> 這份 log 是裝 10G 網卡**之後**的數據，沒有裝網卡前的 Verify log 可以比較。
 
 **改完後怎麼判斷**（觀察 2～3 個夜晚，用第 7 節同一段查詢加 LibreNMS 48 小時圖）：
 
@@ -396,8 +409,9 @@ smartctl -A $dev | grep -iE "temperature|warning|critical|percentage used|data u
 
 - [x] 觀察到隔天早上，LXC 與 node10～12 都沒有再出現 `Temperature above threshold`（見 6-1）
 - [x] tokyo16：10/24～25 調整擺放位置，10/26～28 比較搬動前後：看不出效果（第 7-1 節）
-- [ ] tokyo16：確認 PBS 的 Prune 排在 GC 之前、備份實際結束時間，並確認 Verify 的 Skip Verified 是否開啟
-- [ ] tokyo16：10/28 重排為 Verify 22:45、GC 00:30（複寫維持 02:00），觀察 2～3 個夜晚的曲線與事件數
+- [x] tokyo16：確認 Skip Verified 已開（Yes）、Prune 由 PVE 備份工作處理（一定在 GC 之前）、備份推估約 22:10 結束（第 7-1 節）
+- [ ] tokyo16：在 PBS 把 Verify Job 改為 22:45（現為 04:00）、GC 由 `daily` 改為 00:30（複寫維持 02:00），觀察 2～3 個夜晚的曲線與事件數
+- [ ] （選做）PVE 備份保留設定是 `keep-daily=7`，但每組仍有 10 份快照；確認是設定剛改過還是 Prune 沒執行
 - [ ] 視結果再決定是否把 DSM 風扇模式由靜音改為酷涼
 - [ ] 以後新增 LXC 到 LibreNMS 時，加入後就關掉 sensors 模組
 - [x] node12 的 2 TB NVMe（KINGSTON SNV3S）內部感測器 71.8 °C：10/21 確認是讀數卡住、碟本身健康（第 8 節）
