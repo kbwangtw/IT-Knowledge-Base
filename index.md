@@ -122,7 +122,7 @@ last_modified_at: 2026-10-22
 | [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | ping 得到外網，網址卻打不開 |
 | [圖書館 Nebula 網路改造：VLAN 隔離讀者、CIP 過濾、兩條 FTTB 分流](docs/network/zyxel-nebula-library-vlan-dual-wan-plan/) | 第一次用 Nebula 切 VLAN；館員、讀者共用網路，想分開、過濾讀者上網並讓兩條線分工（已完成並現場驗收） |
 | [圖書館 Nebula 網路改造（附錄）：設定清單與實作紀錄](docs/network/zyxel-nebula-library-vlan-implementation-record/) | 要照抄同樣架構，或接手維護這個環境 |
-| [Nebula 兩層樓 Site-to-Site VPN 規劃：6F USG FLEX 100 × 10F USG FLEX 50HP](docs/network/zyxel-nebula-site-to-site-vpn-6f-10f-plan/) | 兩個地點的防火牆都在 Nebula，想讓兩邊內網互通；H 系列配舊款 USG FLEX 要用 Hub-and-Spoke（規劃，未實作） |
+| [Nebula 兩層樓 Site-to-Site VPN：6F USG FLEX 100 × 10F USG FLEX 50HP](docs/network/zyxel-nebula-site-to-site-vpn-6f-10f-plan/) | 兩個地點的防火牆都在 Nebula，想讓兩邊內網互通；用 VPN 規劃工具自動建立（2026-10-29 結案：兩層樓互 ping 成功） |
 
 ### 4-6 雲端、超融合與硬體
 
