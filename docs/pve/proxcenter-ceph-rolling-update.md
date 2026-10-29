@@ -554,5 +554,6 @@ DC01（vm:106，node10）與 DC02（vm:107，node11）在不同節點；AdGuard�
 
 ## 17. 延伸閱讀
 
+- [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-enterprise-update/)：同日更新 ProxCenter 本身與 CT110 擴容
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)

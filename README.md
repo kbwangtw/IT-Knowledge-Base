@@ -50,6 +50,7 @@
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](docs/pve/pve-ha-service-error-after-reboot.md)
 - [整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）](docs/pve/pve-cluster-full-shutdown.md)：腳本在 `tools/pve-cluster-power/`
 - [ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？](docs/pve/proxcenter-ceph-rolling-update.md)
+- [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](docs/pve/proxcenter-enterprise-update.md)：重跑安裝腳本帶 token、`up -d` 的陷阱、CT110 擴容、Node 仍是 26.12.0
 - [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal.md)
 - [一次檢查並統一所有 LXC 的時區](docs/pve/pve-lxc-timezone.md)：從 node10 查全部容器、先盤點排程、改成 Asia/Taipei、LibreNMS 的 PHP 與 MariaDB
 - [LXC 自動更新後，怎麼檢查「待重啟的服務」：逐一重啟 dbus 的坑與整個容器重開](docs/pve/lxc-needrestart-service-restart.md)：唯讀盤點、應用服務單獨重啟、dbus／logind 整個容器重開、CT112／CT114 重開前後對照

@@ -568,7 +568,7 @@ ha-manager migrate ct:112 node10
 | 結果 | Lab Ops 回報 `ct:112` 在 node10；沒有重試、沒有拍快照；中斷時間**沒有量測** |
 | 還原方式 | `ha-manager migrate ct:112 node11` |
 
-搬完後的分布（**5／4／4**，依搬移前的畫面加上這一次搬移推定）：
+搬完後的分布（**5／4／4**，Lab Ops 用 `ha-manager status` 實際查到）：
 
 | 節點 | HA 資源 |
 | --- | --- |
@@ -578,7 +578,20 @@ ha-manager migrate ct:112 node10
 
 三套監控各在一台（Wazuh node10、LibreNMS node11、Graylog node12）；DNS（node10／node12）、DC（node10／node11）都仍分開。CT112 的備份也會由 node11 的 21:30 工作改成 node10 的 21:00 工作（備份是各節點各跑各的，這是推論）。
 
-**未驗證**：搬移後 Wazuh 的三個服務是否都 active、dashboard 能不能開、agent 數量（預期 19 個、Active 約 17，UBClient 與 WinClient 因關機是 Disconnected）。Lab Ops 回報沒有檢查這幾項，驗收結果補進本節。
+**搬移後的驗收**（Lab Ops 唯讀查詢加上人工看 dashboard）：
+
+| 項目 | 結果 |
+| --- | --- |
+| HA | quorum OK、master node11、3 個 LRM 都 active；13 個資源全部 started，沒有 error 或 freeze；ct:112 在 node10 |
+| VM 104（UBClient）、VM 108（WinClient） | 都在 node11、都是 stopped、都不在 HA；其餘 13 個 VM／CT 都是 running |
+| Wazuh 服務 | `wazuh-manager`、`wazuh-indexer`、`wazuh-dashboard` 第一次查就都是 active |
+| Wazuh dashboard（Endpoints 頁） | 能打開；Agent 18 台，**Active 16、Disconnected 2**、Pending 0、Never connected 0 |
+| `agent_control -l` | 總數 19（含 Wazuh server 本機 ID 000）、Active 17（含 server）；Disconnected 的兩台是 ubclient（ID 011）、WinClient（ID 012） |
+| CT112 uptime | 約 441 秒，和搬移時間大致吻合 |
+
+> **兩個數字不一樣是正常的**：`agent_control -l` 會把 Wazuh server 自己算成一台（ID 000），Dashboard 的 Endpoints 頁**不算**。之後寫 agent 數量要註明是哪一個來源。
+
+兩台 Disconnected 對應關機的 VM 104、108，**推測**這就是原因（沒有看 agent 端的紀錄）。搬移後其餘 16 台 agent 都是 Active，代表搬移後都已重新連上。中斷時間**沒有量測**。
 
 **UBClient 與 WinClient**：10/29 起都**暫時關機、要用才開**。關機期間仍然每晚備份與 Verify；要開 WinClient 只能在 node11（有 VGA 直通）；做 ProxCenter 滾動更新前，如果開著要先關機（第 11 節）。
 
@@ -607,7 +620,7 @@ ha-manager migrate ct:112 node10
 | ProxCenter DRS 停用、規則改由 PVE 統一管理 | ✅ 2026-10-13（第 12 節） |
 | ProxCenter Operation mode 改為 Manual（保險） | ✅ 2026-10-19，Guest types 同時改為只留 VMs（第 12-2 節） |
 | ProxCenter DRS 以 Manual 模式重新開啟，Guest types 加回 LXC | ⏳ 2026-10-29 開啟，觀察 3～5 天後決定留或關（第 12-5 節） |
-| 2026-10-29 Wazuh 搬到 node10 後的驗收（服務、agent 數、dashboard） | ⏳ 尚未驗證（第 13 節） |
+| 2026-10-29 Wazuh 搬到 node10 後的驗收（服務、agent 數、dashboard） | ✅ 三個服務 active、dashboard 正常、Active 16／Disconnected 2（第 13 節） |
 | HA 資源集中在 node10，是否再分散 | ✅ 2026-10-19 由 8／1／4 分散為 4／5／4（第 13 節） |
 
 **單節點故障的預期行為**（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，而且在節點回來前沒有再壞一顆硬碟的餘裕。
