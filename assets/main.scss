@@ -10,3 +10,50 @@ table th:first-child,
 table td:first-child {
   min-width: 5em;
 }
+
+/* 影片嵌入：.video-grid > .video-card > .video-frame > iframe，以 16:9 比例撐滿卡片寬度。 */
+/* 使用頁面：docs/pve/synology-dp340-pve-cluster-validation.md、docs/synology/dp340-google-workspace-apm20-sop.md */
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.video-card {
+  border: 1px solid #d8e0e5;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+}
+.video-card h3,
+.video-card p {
+  margin: .85rem 1rem;
+}
+.video-frame {
+  position: relative;
+  padding-top: 56.25%;
+  background: #111;
+}
+.video-frame iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+@media (max-width: 760px) {
+  .video-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 列印時影片無法播放，只保留標題與 YouTube 連結。 */
+@media print {
+  .video-frame {
+    display: none;
+  }
+  .video-card {
+    break-inside: avoid;
+  }
+}
