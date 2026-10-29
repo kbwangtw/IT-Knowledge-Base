@@ -49,6 +49,7 @@
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy.md)
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](docs/pve/pve-ha-service-error-after-reboot.md)
 - [整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）](docs/pve/pve-cluster-full-shutdown.md)：腳本在 `tools/pve-cluster-power/`
+- [從 VMware ESXi 滾動式轉換到 PVE：新機先上、舊機回收（規劃 SOP）](docs/pve/esxi-to-pve-rolling-migration-sop.md)：Unity 380 走 FC 的 shared LVM、QDevice 隨節點數調整、舊 DL360 回收成節點（規劃，未實測）
 - [ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？](docs/pve/proxcenter-ceph-rolling-update.md)
 - [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal.md)
 - [一次檢查並統一所有 LXC 的時區](docs/pve/pve-lxc-timezone.md)：從 node10 查全部容器、先盤點排程、改成 Asia/Taipei、LibreNMS 的 PHP 與 MariaDB

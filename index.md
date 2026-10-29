@@ -74,6 +74,7 @@ last_modified_at: 2026-10-22
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
+| [從 VMware ESXi 滾動式轉換到 PVE：新機先上、舊機回收（規劃 SOP）](docs/pve/esxi-to-pve-rolling-migration-sop/) | 要把 ESXi 換成 PVE，但硬體不夠多；Unity 走 FC 的 shared LVM、搬 VM、舊機回收成節點（規劃，未實測） |
 | [ProxCenter 逐台更新 PVE：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 想用工具一次一台安全地更新叢集 |
 | [PVE 更新重開後 HA 服務卡在 error](docs/pve/pve-ha-service-error-after-reboot/) | HA 服務顯示 error；要手動重開節點 |
 | [整個 PVE 叢集安全關機與開機：一鍵腳本](docs/pve/pve-cluster-full-shutdown/) | 搬機房、停電維護，要把三台全關再開回來 |
