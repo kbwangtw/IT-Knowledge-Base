@@ -9,7 +9,7 @@ last_modified_at: 2026-10-29
 
 # Nebula 兩層樓 Site-to-Site VPN：6F USG FLEX 100 × 10F USG FLEX 50HP
 
-> **一句話**：6 樓已經有一台 USG FLEX 100（PPPoE 固定 IP），10 樓新增一台 USG FLEX 50HP 和一台 NWA50BE 無線 AP。10F 線路原以為是浮動 IP，經查證是 **PPPoE 固定 IP（6 個）**，設好撥號就能上網。兩台防火牆在 Nebula **同一個組織、各自一個站點**，在「站點-到-站點 VPN」頁面點 **VPN 規劃工具**，Nebula 就自動把兩邊設成「中心和分支」（Hub-and-Spoke，6F 是 Hub、10F 是 Spoke），不用手動填金鑰和對方 IP。互通的只有 6F lan1 和 10F LAN，6F lan2 不加入。
+> **一句話**：6 樓已經有一台 USG FLEX 100（PPPoE 固定 IP），10 樓新增一台 USG FLEX 50HP 和一台 NWA50BE 無線 AP。10F 線路是 **PPPoE 固定 IP（6 個）**，設好撥號就能上網。兩台防火牆在 Nebula **同一個組織、各自一個站點**，在「站點-到-站點 VPN」頁面點 **VPN 規劃工具**，Nebula 就自動把兩邊設成「中心和分支」（Hub-and-Spoke，6F 是 Hub、10F 是 Spoke），不用手動填金鑰和對方 IP。互通的只有 6F lan1 和 10F LAN，6F lan2 不加入。
 
 | 項目 | 內容 |
 | --- | --- |
@@ -86,10 +86,10 @@ last_modified_at: 2026-10-29
 | 6F lan2 加入 VPN？ | ✅ **不要** | 6F 的 lan2「使用 VPN」為關，10F 連不到 192.168.200.x |
 | AP 型號 | ✅ **NWA50BE** | Wi-Fi 7、**雙頻**（2.4 GHz＋5 GHz，**沒有 6 GHz**）、2.5G 網路埠、典型耗電約 16 W |
 | 10F 規模 | ✅ **1 人、3 台設備** | DHCP Pool 不需放大 |
-| 10F 的 WAN | ✅ **PPPoE 固定 IP（6 個）** | 原本得知是浮動 IP，經查證為固定 IP。兩邊都是固定 IP，VPN 不必依賴 DDNS，最穩定 |
+| 10F 的 WAN | ✅ **PPPoE 固定 IP（6 個）** | 兩邊都是固定 IP，VPN 不必依賴 DDNS，最穩定 |
 | AP 供電 | ✅ **變壓器** | 50HP 的 PoE 埠是 P5，但 NWA50BE 無法由 50HP 的 P5 供電，改用變壓器（經銷商規格標示支援 PoE+，與現場結果不一致，原因未確認）。AP 網路線接 P2～P5 任一埠即可 |
 
-> **為什麼「查證線路型態」很重要**：中華電信 PPPoE 帳號的後綴決定拿到哪種 IP。固定 IP 用 `<HiNet 帳號>@ip.hinet.net`，浮動 IP 用 `<HiNet 帳號>@hinet.net`。如果照「浮動 IP」的資訊填成 `@hinet.net`，雖然可能撥得通，但拿到的不是申請的固定 IP。
+> **帳號後綴要填對**：中華電信固定 IP 的 PPPoE 帳號是 `<HiNet 帳號>@ip.hinet.net`。如果填成 `@hinet.net`，雖然可能撥得通，但拿到的不是申請的固定 IP。
 
 ## 4. 步驟一：在 Nebula 建立 10F 站點並註冊設備
 
