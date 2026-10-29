@@ -110,6 +110,8 @@ last_modified_at: 2026-10-29
 
 ### 3-4 VM 盤點表（每台 VM 一列）
 
+> **有網頁版可以直接填**：[ESXi 轉 PVE 盤點清單](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/esxi-to-pve-inventory/)。可輸入每台 VM、各 ESXi 主機容量，自動算出 RAM 下限，並追蹤每批搬遷與各階段驗收。資料只存在你的瀏覽器，不會上傳；可匯出 CSV／JSON。
+
 | 要記錄的欄位 | 為什麼要 |
 | --- | --- |
 | 名稱、用途、負責人 | 決定搬遷順序與誰來驗收 |
