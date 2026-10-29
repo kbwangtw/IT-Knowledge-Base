@@ -135,7 +135,7 @@ cd /opt/proxcenter && docker compose ps
 | metrics 保留 | 維持預設 14 天（決定不調整） |
 | **前端 Node.js** | `docker exec proxcenter-frontend node -v` → **v26.12.0**，**低於修補版 26.12.1** ❌ |
 
-右下角有個紅色 `1 error`。**推測**是 Task Center 裡 10/24 故意取消的那一筆 `1/2 Cancelled`（見[兩輪更新第 12-5 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/)）；清單只列了 50 筆中的 7 筆，**沒有逐筆確認**。
+右下角有個紅色 `1 error`，**已確認**就是 Task Center 裡 10/24 故意取消的那一筆 `1/2 Cancelled`（見[兩輪更新第 12-5 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/)），是預期的，不是這次更新造成的。
 
 **為什麼 Node 沒變**：1.4.12 的更新紀錄沒有提到 Node.js 升級，而且 10/19 發布，早於 10/21 的 Node 漏洞公告。漏洞背景與其他主機的處理見 [Node2Shell 與 LiteLLM 檢查](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/node2shell-litellm-check/)。1.4.12 仍然值得更新（其他套件的安全修補），但**不能因此把 Node 待辦打勾**。
 
@@ -191,7 +191,7 @@ Swap 已用的 221 MB 是原本 1 GB 記憶體吃緊時被換出去的，擴容�
 | pre-flight 警告 CPU／RAM、磁碟不足 | 更新能跑，但建議擴容（第 6 節）；磁碟不足時 pull 可能失敗 |
 | 更新時 `no space left on device` | 先停下來，不要 `docker system prune`；更新成功後再 `docker image prune` |
 | token 要怎麼輸入 | 用 `read -rsp`，不要直接打在指令列、不要貼給別人 |
-| 右下角 `1 error` | 先看 Task Center 有沒有紅色項目；可能只是 10/24 故意取消的那一筆 |
+| 右下角 `1 error` | 先看 Task Center 有沒有紅色項目；本案就是 10/24 故意取消的那一筆（已確認） |
 | 更新後 metrics 少了 | 1.4.12 預設只留 14 天，到 Settings → Alert thresholds 調高 |
 | `pct resize` 後 `df` 沒變大 | 檔案系統沒跟著長，先看輸出，不要重打 `pct resize`（本案正常，沒有發生） |
 
@@ -199,7 +199,7 @@ Swap 已用的 221 MB 是原本 1 GB 記憶體吃緊時被換出去的，擴容�
 
 - [ ] 追蹤 ProxCenter 下一版，**前端 Node.js 要 ≥ v26.12.1**；有新版時先看 Releases 有沒有提到 Node 升級，更新後用 `docker exec proxcenter-frontend node -v` 確認（已排 11/05 提醒）
 - [ ] 穩定 3～5 天後清舊 docker 映像檔：先 `docker system df` 看可回收量，再 `docker image prune`（只清沒標籤的）；不要用 `docker system prune`
-- [ ] 確認右下角 `1 error` 是不是 10/24 取消的那一筆
+- [x] 確認右下角 `1 error` 是不是 10/24 取消的那一筆（2026-10-29 確認就是那一筆）
 - [ ] 決定要不要把 metrics 保留天數調到 14 天以上（目前維持預設）
 
 ## 9. 延伸閱讀
