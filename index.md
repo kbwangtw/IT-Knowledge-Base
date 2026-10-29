@@ -74,6 +74,7 @@ last_modified_at: 2026-10-22
 
 | 文章 | 適合什麼時候看 |
 | --- | --- |
+| [從 VMware ESXi 滾動式轉換到 PVE：新機先上、舊機回收（規劃 SOP）](docs/pve/esxi-to-pve-rolling-migration-sop/) | 要把 ESXi 換成 PVE，但硬體不夠多；Unity 走 FC 的 shared LVM、搬 VM、舊機回收成節點（規劃，未實測） |
 | [ProxCenter 逐台更新 PVE：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 想用工具一次一台安全地更新叢集 |
 | [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](docs/pve/proxcenter-enterprise-update/) | 企業版 ProxCenter 自己要怎麼更新；`docker compose up -d` 的陷阱；CT110 擴容 |
 | [PVE 更新重開後 HA 服務卡在 error](docs/pve/pve-ha-service-error-after-reboot/) | HA 服務顯示 error；要手動重開節點 |
