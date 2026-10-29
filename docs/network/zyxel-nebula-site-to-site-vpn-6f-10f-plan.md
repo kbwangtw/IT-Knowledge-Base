@@ -16,9 +16,9 @@ last_modified_at: 2026-10-29
 | 適合誰看 | 公司有兩個地點（兩層樓、總部與分點），想讓兩邊電腦互相連線；第一次在 Nebula 做 Site-to-Site VPN 的人 |
 | 環境 | 6F：USG FLEX 100（既有，ZLD 韌體，PPPoE 固定 IP）；10F：USG FLEX 50HP（H 系列，uOS 韌體，PPPoE 固定 IP ×6）、NWA50BE（Wi-Fi 7 雙頻 AP，接 P5 PoE）；全部由 Nebula 管理（介面為繁體中文） |
 | 規模 | 10F：1 人、3 台設備 |
-| 日期 | 2026-10-22 規劃；2026-10-28 確認 PoE 埠；2026-10-29 10F 上線、VPN 建立、兩層樓互 ping 成功 |
+| 日期 | 2026-10-22 規劃；2026-10-28 確認 PoE 埠；2026-10-29 10F 上線、VPN 建立、兩層樓互 ping 成功，結案 |
 | 資料來源 | 現場設定與 Nebula 設定畫面截圖；Zyxel 社群官方 FAQ（H 系列當 Spoke 的設定方式，2025-03）與社群討論；NWA50BE 規格取自經銷商頁面與 Zyxel 社群回覆，正式數字以 Zyxel 官方 datasheet 為準 |
-| 結論 | ✅ 10F PPPoE 固定 IP 撥號成功、可上網；✅ 用 VPN 規劃工具自動建立 VPN：兩邊 SD-VPN 啟用、VPN 區域「預設值」、拓撲「中心和分支」、Hub 為六樓；✅ 6F lan1 加入 VPN、lan2 不加入；✅ 兩個樓層互相 ping 得到（VPN 通道可用）；⏳ 檔案分享、lan2 隔離、外網 IP 等其餘驗收（第 9 節）待補；⏳ 10F LAN 閘道實際為 192.168.10.254（原規劃 .1），DHCP 的 Pool、DNS、約期待確認 |
+| 結論 | ✅ **2026-10-29 結案**：VPN 上線、兩層樓互 ping 成功；未實測的項目改列「結案後選做」，不影響使用。✅ 10F PPPoE 固定 IP 撥號成功、可上網；✅ 用 VPN 規劃工具自動建立 VPN：兩邊 SD-VPN 啟用、VPN 區域「預設值」、拓撲「中心和分支」、Hub 為六樓；✅ 6F lan1 加入 VPN、lan2 不加入；✅ 兩個樓層互相 ping 得到（VPN 通道可用）；✅ 10F LAN 閘道實際為 192.168.10.254（原規劃 .1）；結案後選做：檔案分享、lan2 隔離、外網 IP 驗收，DHCP Pool／DNS／約期核對 |
 
 ## 1. 先認識幾個名詞
 
@@ -300,7 +300,9 @@ tracert 192.168.0.1
 | 手機看不到 6 GHz | NWA50BE 是雙頻機種，本來就沒有 6 GHz |
 | 英文教學和中文介面對不起來 | 對照：Site-to-Site VPN＝站點-到-站點 VPN；Nebula VPN＝Nebula SD-VPN；Hub-and-Spoke＝中心和分支；VPN orchestrator＝VPN 規劃工具；Local networks／Use VPN＝本地網路／使用 VPN；Outgoing interface＝主介面 |
 
-## 11. 待辦
+## 11. 待辦（結案後選做）
+
+> 2026-10-29 結案：VPN 已上線並通過互 ping 驗收。以下項目尚未實測，建議有空時補做，結果再更新到 9-4。
 
 - [x] 兩個樓層互 ping（2026-10-29）
 - [ ] 依第 9 節完成其餘驗收（檔案分享／印表機、lan2 隔離、無線設備、外網 IP）並更新 9-4
