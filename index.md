@@ -81,6 +81,7 @@ last_modified_at: 2026-10-22
 | [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新 PBS 前後要查什麼；怎麼安全清理舊 kernel |
 | [PVE 9 登入一直跳「No valid subscription」](docs/pve/pve9-subscription-nag-removal/) | 沒買訂閱，想取消登入提示 |
 | [一次檢查並統一所有 LXC 的時區](docs/pve/pve-lxc-timezone/) | 容器時間差 8 小時；改時區前先看排程會不會移位；補上缺少的 en_US.UTF-8 語系 |
+| [LXC 自動更新後，怎麼檢查「待重啟的服務」：逐一重啟 dbus 的坑與整個容器重開](docs/pve/lxc-needrestart-service-restart/) | 想確認自動更新有沒有生效；needrestart 列出 dbus／logind；networkd-dispatcher failed、networkctl 卡住 |
 | [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification/) | 備份通知信看不懂，想改成中文 |
 
 ### 4-3 備份與還原
