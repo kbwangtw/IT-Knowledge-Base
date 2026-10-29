@@ -447,6 +447,8 @@ HA Resources 清單中 12 台的 `Auto-Rebalance` 都顯示 `true`，但 `datace
 
 **未確認**：DRS 是否曾經出過建議、Manual 模式有沒有任何預設自動動作（目前沒有觀察到）、Trigger thresholds 與評估週期的實際數值（沒有查看）。
 
+**補充（同日）**：UBClient（VM 104）與 WinClient（VM 108）10/29 起都暫時關機、要用才開；Wazuh（CT112）搬到 node10，見第 13 節。
+
 **觀察 3～5 天後決定**：有出過合理建議、當警報器用起來順手，就留著；沒用到或造成混亂，就改回關閉，並把 Guest types 改回只留 VMs。
 
 ## 13. 再次手動分散 HA 資源（2026-10-19）
@@ -542,6 +544,44 @@ ssh root@node11 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | node11 | LibreNMS、WireGuard、ProxCenter、Wazuh、CA |
 | node12 | Pi-hole、Graylog、Grafana、DC02 |
 
+**2026-10-29：更新後 node11 偏多，Wazuh 搬到 node10**
+
+PBS 與 PVE 更新（見 [ProxCenter 更新第 13 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/)）後，VM 107、111 與非 HA 的 VM 104 都在 node11，位置如下：
+
+| 節點 | HA 資源 | 非 HA |
+| --- | --- | --- |
+| node10 | AdGuard、IPAM、ai、DC01（4） | — |
+| node11 | LibreNMS、WireGuard、**Wazuh**、DC02、CA（5） | UBClient（VM 104）、WinClient（VM 108，關機） |
+| node12 | Pihole、Graylog、ProxCenter、Grafana（4） | — |
+
+問題不是負載（當天 node11 CPU 1.4%、RAM 約 32%），而是**違反本節的原則**：LibreNMS 與 Wazuh 同在 node11，node11 故障時會同時失去 VPN、兩套監控、DC02、CA。
+
+**處理**：把 Wazuh（ct:112）搬到 node10。這是容器的重啟式搬移，由 Lab Ops 透過 `rx` 執行（授權範圍只限這一件事、每個指令都由人按允許）：
+
+```bash
+ha-manager migrate ct:112 node10
+```
+
+| 觀察 | 說明 |
+| --- | --- |
+| `rx` 沒有擋 `ha-manager migrate` | 指令正常執行 |
+| 結果 | Lab Ops 回報 `ct:112` 在 node10；沒有重試、沒有拍快照；中斷時間**沒有量測** |
+| 還原方式 | `ha-manager migrate ct:112 node11` |
+
+搬完後的分布（**5／4／4**，依搬移前的畫面加上這一次搬移推定）：
+
+| 節點 | HA 資源 |
+| --- | --- |
+| node10 | AdGuard、IPAM、ai、DC01、**Wazuh** |
+| node11 | LibreNMS、WireGuard、DC02、CA（＋非 HA：VM 104、VM 108，兩台目前都關機） |
+| node12 | Pihole、Graylog、ProxCenter、Grafana |
+
+三套監控各在一台（Wazuh node10、LibreNMS node11、Graylog node12）；DNS（node10／node12）、DC（node10／node11）都仍分開。CT112 的備份也會由 node11 的 21:30 工作改成 node10 的 21:00 工作（備份是各節點各跑各的，這是推論）。
+
+**未驗證**：搬移後 Wazuh 的三個服務是否都 active、dashboard 能不能開、agent 數量（預期 19 個、Active 約 17，UBClient 與 WinClient 因關機是 Disconnected）。Lab Ops 回報沒有檢查這幾項，驗收結果補進本節。
+
+**UBClient 與 WinClient**：10/29 起都**暫時關機、要用才開**。關機期間仍然每晚備份與 Verify；要開 WinClient 只能在 node11（有 VGA 直通）；做 ProxCenter 滾動更新前，如果開著要先關機（第 11 節）。
+
 ## 14. 常見問題
 
 | 現象 | 怎麼辦 |
@@ -567,6 +607,7 @@ ssh root@node11 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | ProxCenter DRS 停用、規則改由 PVE 統一管理 | ✅ 2026-10-13（第 12 節） |
 | ProxCenter Operation mode 改為 Manual（保險） | ✅ 2026-10-19，Guest types 同時改為只留 VMs（第 12-2 節） |
 | ProxCenter DRS 以 Manual 模式重新開啟，Guest types 加回 LXC | ⏳ 2026-10-29 開啟，觀察 3～5 天後決定留或關（第 12-5 節） |
+| 2026-10-29 Wazuh 搬到 node10 後的驗收（服務、agent 數、dashboard） | ⏳ 尚未驗證（第 13 節） |
 | HA 資源集中在 node10，是否再分散 | ✅ 2026-10-19 由 8／1／4 分散為 4／5／4（第 13 節） |
 
 **單節點故障的預期行為**（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，而且在節點回來前沒有再壞一顆硬碟的餘裕。
