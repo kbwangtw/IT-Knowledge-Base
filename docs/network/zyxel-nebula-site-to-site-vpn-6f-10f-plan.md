@@ -9,12 +9,12 @@ last_modified_at: 2026-10-29
 
 # Nebula 兩層樓 Site-to-Site VPN：6F USG FLEX 100 × 10F USG FLEX 50HP
 
-> **一句話**：6 樓已經有一台 USG FLEX 100（PPPoE 固定 IP），10 樓新增一台 USG FLEX 50HP 和一台 NWA50BE 無線 AP。10F 線路是 **PPPoE 固定 IP（6 個）**，設好撥號就能上網。兩台防火牆在 Nebula **同一個組織、各自一個站點**，在「站點-到-站點 VPN」頁面點 **VPN 規劃工具**，Nebula 就自動把兩邊設成「中心和分支」（Hub-and-Spoke，6F 是 Hub、10F 是 Spoke），不用手動填金鑰和對方 IP。互通的只有 6F lan1 和 10F LAN，6F lan2 不加入。
+> **一句話**：6 樓已經有一台 USG FLEX 100（PPPoE 固定 IP），10 樓新增一台 USG FLEX 50HP 和一台 NWA50BE 無線 AP。10F 線路是**中華電信固定 6 IP 制**，設好 PPPoE 撥號就能上網。兩台防火牆在 Nebula **同一個組織、各自一個站點**，在「站點-到-站點 VPN」頁面點 **VPN 規劃工具**，Nebula 就自動把兩邊設成「中心和分支」（Hub-and-Spoke，6F 是 Hub、10F 是 Spoke），不用手動填金鑰和對方 IP。互通的只有 6F lan1 和 10F LAN，6F lan2 不加入。
 
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 公司有兩個地點（兩層樓、總部與分點），想讓兩邊電腦互相連線；第一次在 Nebula 做 Site-to-Site VPN 的人 |
-| 環境 | 6F：USG FLEX 100（既有，ZLD 韌體，PPPoE 固定 IP）；10F：USG FLEX 50HP（H 系列，uOS 韌體，PPPoE 固定 IP ×6）、NWA50BE（Wi-Fi 7 雙頻 AP，**變壓器供電**）；全部由 Nebula 管理（介面為繁體中文） |
+| 環境 | 6F：USG FLEX 100（既有，ZLD 韌體，PPPoE 固定 IP）；10F：USG FLEX 50HP（H 系列，uOS 韌體，中華電信固定 6 IP 制）、NWA50BE（Wi-Fi 7 雙頻 AP，**變壓器供電**）；全部由 Nebula 管理（介面為繁體中文） |
 | 規模 | 10F：1 人、3 台設備 |
 | 日期 | 2026-10-22 規劃；2026-10-28 確認 PoE 埠；2026-10-29 10F 上線、VPN 建立、兩層樓互 ping 成功，結案；同日確認 AP 改用變壓器供電 |
 | 資料來源 | 現場設定與 Nebula 設定畫面截圖；Zyxel 社群官方 FAQ（H 系列當 Spoke 的設定方式，2025-03）與社群討論；NWA50BE 規格取自經銷商頁面與 Zyxel 社群回覆，正式數字以 Zyxel 官方 datasheet 為準 |
@@ -47,7 +47,7 @@ last_modified_at: 2026-10-29
 ```text
                           網際網路
              ┌───────────────┴───────────────┐
-   PPPoE 固定 IP：<6F 固定 IP>        PPPoE 固定 IP（6 個）：<10F 固定 IP>
+   PPPoE 固定 IP：<6F 固定 IP>        固定 6 IP 制：<10F 固定 IP>
              │ wan1                            │ ge1（P1）
    ┌─────────┴─────────┐   IPsec 通道   ┌───────┴──────────┐
    │ 6F USG FLEX 100   │◀═════════════▶│ 10F USG FLEX 50HP │
@@ -75,7 +75,7 @@ last_modified_at: 2026-10-29
 | --- | --- |
 | 三個網段有沒有重疊 | ✅ 沒有。192.168.0.x、192.168.200.x、192.168.10.x 前三碼都不同 |
 | 6F 的 WAN | wan1，PPPoE 撥接帶固定 IP（本文以 `<6F 固定 IP>` 代稱） |
-| 10F 的 WAN | ge1（P1），PPPoE 撥接帶固定 IP，共 6 個（本文以 `<10F 固定 IP>` 代稱）；其餘 IP 目前沒有規劃用途 |
+| 10F 的 WAN | ge1（P1），中華電信固定 6 IP 制，PPPoE 撥接（本文以 `<10F 固定 IP>` 代稱）；其餘 IP 目前沒有規劃用途 |
 | 10F 的 IP 夠不夠 | ✅ 1 人、3 台設備，原規劃 Pool 41 個綽綽有餘 |
 
 ## 3. 規劃確認結果
@@ -86,10 +86,10 @@ last_modified_at: 2026-10-29
 | 6F lan2 加入 VPN？ | ✅ **不要** | 6F 的 lan2「使用 VPN」為關，10F 連不到 192.168.200.x |
 | AP 型號 | ✅ **NWA50BE** | Wi-Fi 7、**雙頻**（2.4 GHz＋5 GHz，**沒有 6 GHz**）、2.5G 網路埠、典型耗電約 16 W |
 | 10F 規模 | ✅ **1 人、3 台設備** | DHCP Pool 不需放大 |
-| 10F 的 WAN | ✅ **PPPoE 固定 IP（6 個）** | 兩邊都是固定 IP，VPN 不必依賴 DDNS，最穩定 |
+| 10F 的 WAN | ✅ **中華電信固定 6 IP 制** | 兩邊都是固定 IP，VPN 不必依賴 DDNS，最穩定 |
 | AP 供電 | ✅ **變壓器** | 50HP 的 PoE 埠是 P5，但 NWA50BE 無法由 50HP 的 P5 供電，改用變壓器（經銷商規格標示支援 PoE+，與現場結果不一致，原因未確認）。AP 網路線接 P2～P5 任一埠即可 |
 
-> **帳號後綴要填對**：中華電信固定 IP 的 PPPoE 帳號是 `<HiNet 帳號>@ip.hinet.net`。如果填成 `@hinet.net`，雖然可能撥得通，但拿到的不是申請的固定 IP。
+> **帳號後綴要填對**：中華電信固定 IP 制的 PPPoE 帳號是 `<HiNet 帳號>@ip.hinet.net`，後綴打錯會撥不通或拿不到固定 IP。
 
 ## 4. 步驟一：在 Nebula 建立 10F 站點並註冊設備
 
@@ -286,8 +286,7 @@ tracert 192.168.0.1
 
 | 現象 | 怎麼辦 |
 | --- | --- |
-| PPPoE 撥不通 | 1. 帳號後綴：固定 IP 用 `@ip.hinet.net`、浮動 IP 用 `@hinet.net`；2. 認證方式改「全選」；3. 確認光纖數據機是橋接、沒有自己撥號 |
-| PPPoE 撥通了，但 IP 不是申請的固定 IP | 帳號後綴填成 `@hinet.net`，改成 `@ip.hinet.net` 重撥 |
+| PPPoE 撥不通，或撥通但不是申請的固定 IP | 1. 帳號後綴要是 `@ip.hinet.net`；2. 認證方式改「全選」；3. 確認光纖數據機是橋接、沒有自己撥號 |
 | 本機設好 PPPoE，交給 Nebula 後斷線 | Nebula 的 WAN 設定蓋過本機設定。到 Nebula 該站點把 WAN 設成同一組 PPPoE |
 | Nebula 一直顯示 VPN 未連線 | 1. 兩個站點在不在**同一個組織**、同一個 VPN 區域；2. 兩邊 SD-VPN 都啟用，拓撲為中心和分支、Hub 是六樓；3. 10F 的 WAN 是不是公網 IP |
 | 設定都對，VPN 還是建不起來，log 一直出現 `try to nail up` | 社群回報過 H 系列 VPN 的 DDNS 不更新、導致 SD-VPN 建不起來的韌體 bug（Zyxel 承認並私下提供修正）。先升級兩台防火牆韌體；仍不行就聯絡 Zyxel 客服，或改用第 7 節的手動 IPsec |
