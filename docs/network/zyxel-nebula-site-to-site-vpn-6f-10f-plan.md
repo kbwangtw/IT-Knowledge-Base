@@ -9,16 +9,16 @@ last_modified_at: 2026-10-29
 
 # Nebula 兩層樓 Site-to-Site VPN：6F USG FLEX 100 × 10F USG FLEX 50HP
 
-> **一句話**：6 樓已經有一台 USG FLEX 100（PPPoE 固定 IP），10 樓新增一台 USG FLEX 50HP 和一台 NWA50BE 無線 AP。10F 線路是**中華電信固定 6 IP 制**，設好 PPPoE 撥號就能上網。兩台防火牆在 Nebula **同一個組織、各自一個站點**，在「站點-到-站點 VPN」頁面點 **VPN 規劃工具**，Nebula 就自動把兩邊設成「中心和分支」（Hub-and-Spoke，6F 是 Hub、10F 是 Spoke），不用手動填金鑰和對方 IP。互通的只有 6F lan1 和 10F LAN，6F lan2 不加入。
+> **一句話**：6 樓已經有一台 USG FLEX 100（PPPoE 固定 IP），10 樓新增一台 USG FLEX 50HP 和一台 NWA30BE 無線 AP。10F 線路是**中華電信固定 6 IP 制**，設好 PPPoE 撥號就能上網。兩台防火牆在 Nebula **同一個組織、各自一個站點**，在「站點-到-站點 VPN」頁面點 **VPN 規劃工具**，Nebula 就自動把兩邊設成「中心和分支」（Hub-and-Spoke，6F 是 Hub、10F 是 Spoke），不用手動填金鑰和對方 IP。互通的只有 6F lan1 和 10F LAN，6F lan2 不加入。
 
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 公司有兩個地點（兩層樓、總部與分點），想讓兩邊電腦互相連線；第一次在 Nebula 做 Site-to-Site VPN 的人 |
-| 環境 | 6F：USG FLEX 100（既有，ZLD 韌體，PPPoE 固定 IP）；10F：USG FLEX 50HP（H 系列，uOS 韌體，中華電信固定 6 IP 制）、NWA50BE（Wi-Fi 7 雙頻 AP，**變壓器供電**）；全部由 Nebula 管理（介面為繁體中文） |
+| 環境 | 6F：USG FLEX 100（既有，ZLD 韌體，PPPoE 固定 IP）；10F：USG FLEX 50HP（H 系列，uOS 韌體，中華電信固定 6 IP 制）、NWA30BE（Wi-Fi 7 雙頻桌上型 AP，不支援 PoE，**變壓器供電**）；全部由 Nebula 管理（介面為繁體中文） |
 | 規模 | 10F：1 人、3 台設備 |
-| 日期 | 2026-10-22 規劃；2026-10-28 確認 PoE 埠；2026-10-29 10F 上線、VPN 建立、兩層樓互 ping 成功，結案；同日確認 AP 改用變壓器供電 |
-| 資料來源 | 現場設定與 Nebula 設定畫面截圖；Zyxel 社群官方 FAQ（H 系列當 Spoke 的設定方式，2025-03）與社群討論；NWA50BE 規格取自經銷商頁面與 Zyxel 社群回覆，正式數字以 Zyxel 官方 datasheet 為準 |
-| 結論 | ✅ **2026-10-29 結案**：VPN 上線、兩層樓互 ping 成功<br>✅ 10F PPPoE 固定 IP 撥號成功、可上網<br>✅ VPN 規劃工具自動建立：SD-VPN 啟用、VPN 區域「預設值」、拓撲「中心和分支」、Hub 為六樓<br>✅ 6F lan1 加入 VPN、lan2 不加入<br>✅ 10F LAN 閘道實際為 192.168.10.254（原規劃 .1）<br>✅ NWA50BE 改用變壓器供電（無法由 P5 PoE 供電）<br>✅ 10F DHCP：Pool 192.168.10.10～50、DNS 8.8.4.4／101.101.101.101、約期 2 天（與規劃一致）<br>⏳ 結案後選做：檔案分享、lan2 隔離、外網 IP 驗收 |
+| 日期 | 2026-10-22 規劃；2026-10-29 10F 上線、VPN 建立、兩層樓互 ping 成功，結案；同日確認 AP 型號為 NWA30BE、變壓器供電 |
+| 資料來源 | 現場設定與 Nebula 設定畫面截圖；Zyxel 社群官方 FAQ（H 系列當 Spoke 的設定方式，2025-03）與社群討論；NWA30BE 規格取自經銷商頁面，正式數字以 Zyxel 官方 datasheet 為準 |
+| 結論 | ✅ **2026-10-29 結案**：VPN 上線、兩層樓互 ping 成功<br>✅ 10F PPPoE 固定 IP 撥號成功、可上網<br>✅ VPN 規劃工具自動建立：SD-VPN 啟用、VPN 區域「預設值」、拓撲「中心和分支」、Hub 為六樓<br>✅ 6F lan1 加入 VPN、lan2 不加入<br>✅ 10F LAN 閘道實際為 192.168.10.254（原規劃 .1）<br>✅ AP 為 NWA30BE，不支援 PoE，用變壓器供電<br>✅ 10F DHCP：Pool 192.168.10.10～50、DNS 8.8.4.4／101.101.101.101、約期 2 天（與規劃一致）<br>⏳ 結案後選做：檔案分享、lan2 隔離、外網 IP 驗收 |
 
 ## 1. 先認識幾個名詞
 
@@ -39,7 +39,6 @@ last_modified_at: 2026-10-29
 | **WAN／LAN** | 防火牆接網際網路的那一側叫 WAN；接內部電腦的那一側叫 LAN |
 | **DHCP Pool／約期** | 防火牆自動發 IP 的範圍；約期是發出去的 IP 可以用多久，到期前電腦會自動續約 |
 | **網段重疊** | 兩邊用了同一個網段（例如都是 192.168.1.0/24），防火牆分不出封包該留在本地還是送進 VPN，VPN 會不通 |
-| **PoE／PoE+（802.3at）** | 用網路線同時供電。50HP 的 P5 有 PoE；本案 NWA50BE 現場無法用 PoE 供電，改用變壓器 |
 | **MTU／MSS** | 一個封包最大能多大。PPPoE 和 IPsec 都會吃掉封包空間，太大的封包可能被丟掉 |
 
 ## 2. 全貌圖
@@ -57,7 +56,7 @@ last_modified_at: 2026-10-29
   lan1（P3～P5）  lan2（P6）              192.168.10.0/24
   192.168.0.0/24  192.168.200.0/24        閘道 192.168.10.254
   使用 VPN：開     使用 VPN：關                   │
-                  （10F 連不到）           NWA50BE（變壓器供電）
+                  （10F 連不到）           NWA30BE（變壓器供電）
                                            1 人、3 台設備
 
         ▲ 兩個站點在 Nebula 同一個組織、VPN 區域「預設值」 ▲
@@ -84,10 +83,10 @@ last_modified_at: 2026-10-29
 | --- | --- | --- |
 | 6F 機型 | ✅ **USG FLEX 100**（ZLD，非 H 系列） | 和 10F 的 50HP（uOS）是不同韌體。Zyxel 官方 FAQ 的做法是 **Hub-and-Spoke，H 系列當 Spoke**；VPN 規劃工具建出來的結果也一樣（6F Hub、10F Spoke） |
 | 6F lan2 加入 VPN？ | ✅ **不要** | 6F 的 lan2「使用 VPN」為關，10F 連不到 192.168.200.x |
-| AP 型號 | ✅ **NWA50BE** | Wi-Fi 7、**雙頻**（2.4 GHz＋5 GHz，**沒有 6 GHz**）、2.5G 網路埠、典型耗電約 16 W |
+| AP 型號 | ✅ **NWA30BE** | 桌上型 Wi-Fi 7 AP（BE5100）、**雙頻**（2.4 GHz＋5 GHz，**沒有 6 GHz**）、2.5G 網路埠、支援 Nebula 管理 |
 | 10F 規模 | ✅ **1 人、3 台設備** | DHCP Pool 不需放大 |
 | 10F 的 WAN | ✅ **中華電信固定 6 IP 制** | 兩邊都是固定 IP，VPN 不必依賴 DDNS，最穩定 |
-| AP 供電 | ✅ **變壓器** | 50HP 的 PoE 埠是 P5，但 NWA50BE 無法由 50HP 的 P5 供電，改用變壓器（經銷商規格標示支援 PoE+，與現場結果不一致，原因未確認）。AP 網路線接 P2～P5 任一埠即可 |
+| AP 供電 | ✅ **變壓器** | NWA30BE 不支援 PoE，用變壓器供電；網路線接 50HP 的 P2～P5 任一埠即可 |
 
 > **帳號後綴要填對**：中華電信固定 IP 制的 PPPoE 帳號是 `<HiNet 帳號>@ip.hinet.net`，後綴打錯會撥不通或拿不到固定 IP。
 
@@ -98,7 +97,7 @@ last_modified_at: 2026-10-29
 **怎麼做**：
 
 1. 在 6F（站點「六樓」）所在的**同一個組織**底下新增站點，本案命名為「十樓」
-2. 在「十樓」站點註冊兩台設備（USG FLEX 50HP、NWA50BE），需要機身上的 **MAC 位址** 和 **序號（S/N）**
+2. 在「十樓」站點註冊兩台設備（USG FLEX 50HP、NWA30BE），需要機身上的 **MAC 位址** 和 **序號（S/N）**
 3. 設備上線後，建議兩台防火牆都升到最新韌體（社群回報過 H 系列和舊款 USG FLEX 之間的 SD-VPN 問題是韌體 bug，見第 10 節）
 
 **應該看到什麼**：畫面上方「站點」下拉選單可以切換「六樓」「十樓」，十樓的設備清單出現兩台設備。
@@ -115,7 +114,6 @@ last_modified_at: 2026-10-29
 | --- | --- | --- |
 | P1 | ge1（WAN） | 接中華電信光纖數據機 |
 | P2～P5 | ge3（LAN） | 接電腦、AP |
-| P5 | ge3（有 PoE） | 可供電給 PoE 設備；本案 NWA50BE **不靠 P5 供電**，用變壓器 |
 
 ### 5-2 設定固定 IP（50HP 本機網頁介面）
 
@@ -208,14 +206,13 @@ H 系列的頁面分成「Nebula SD-VPN」和「手動連接VPN」兩個分頁�
 
 > 本案用 VPN 規劃工具已建立完成，目前不需要這個備案。
 
-## 8. 步驟四：設定 10F 的 NWA50BE 與 SSID
+## 8. 步驟四：設定 10F 的 NWA30BE 與 SSID
 
 **做什麼**：讓 10F 的無線設備也在 192.168.10.x，自然就能走 VPN 連到 6F。
 
 **怎麼做**：
 
-1. NWA50BE 接**變壓器**供電，網路線接 50HP 的 P2～P5 任一埠，AP 會從 ge3 拿到 192.168.10.x 的管理 IP
-   - 現場確認 NWA50BE 無法由 50HP 的 P5 供電，改用變壓器（經銷商規格標示支援 PoE+，與現場結果不一致，原因未確認）
+1. NWA30BE 不支援 PoE，接**變壓器**供電；網路線接 50HP 的 P2～P5 任一埠，AP 會從 ge3 拿到 192.168.10.x 的管理 IP
 2. 切到「十樓」站點 → 設定 → 無線 AP 的 SSID 設定，新增 SSID：
 
 | 欄位 | 填法 |
@@ -223,7 +220,7 @@ H 系列的頁面分成「Nebula SD-VPN」和「手動連接VPN」兩個分頁�
 | SSID 名稱 | `<10F SSID>` |
 | 安全性 | WPA2/WPA3 Personal（混合模式，舊裝置用 WPA2、新裝置用 WPA3） |
 | VLAN | 不設（Untagged），直接走 ge3 |
-| 頻段 | 2.4 GHz＋5 GHz（NWA50BE 是雙頻，沒有 6 GHz） |
+| 頻段 | 2.4 GHz＋5 GHz（NWA30BE 是雙頻，沒有 6 GHz） |
 
 **應該看到什麼**：手機連上 `<10F SSID>`，拿到 192.168.10.x 的 IP，可以上網。
 
@@ -296,8 +293,8 @@ tracert 192.168.0.1
 | ping 得通，但大檔案傳一半卡住、某些網頁打不開 | PPPoE 加 IPsec 讓封包可用空間變小（推測 MTU／MSS 問題）。在防火牆的 VPN 或介面設定裡調整 TCP MSS（例如 1350），再測一次 |
 | 10F ping 得到 6F lan2 | 6F 的 lan2「使用 VPN」應為關，回 6-1 檢查 |
 | 以後員工在家用 Remote Access VPN 連回 6F 不通 | 家用路由器常用 192.168.0.0/24 或 192.168.1.0/24，和 6F lan1 **重疊**。這是既有網段的潛在風險，若之後要開放遠端連線，需評估是否調整網段 |
-| NWA50BE 插 50HP 的 P5 不開機 | 本案現場就是這個狀況，改用變壓器供電即可。經銷商規格標示支援 PoE+，與現場結果不一致，原因未確認（推測可能是 P5 供電或協商問題）；若想改回 PoE，可詢問 Zyxel 客服 |
-| 手機看不到 6 GHz | NWA50BE 是雙頻機種，本來就沒有 6 GHz |
+| AP 插 50HP 的 P5（PoE 埠）不開機 | NWA30BE 不支援 PoE，要接變壓器供電 |
+| 手機看不到 6 GHz | NWA30BE 是雙頻機種，本來就沒有 6 GHz |
 | 英文教學和中文介面對不起來 | 對照：Site-to-Site VPN＝站點-到-站點 VPN；Nebula VPN＝Nebula SD-VPN；Hub-and-Spoke＝中心和分支；VPN orchestrator＝VPN 規劃工具；Local networks／Use VPN＝本地網路／使用 VPN；Outgoing interface＝主介面 |
 
 ## 11. 待辦（結案後選做）
@@ -308,7 +305,7 @@ tracert 192.168.0.1
 - [ ] 依第 9 節完成其餘驗收（檔案分享／印表機、lan2 隔離、無線設備、外網 IP）並更新 9-4
 - [x] 確認 10F 的 DHCP 設定：Pool、DNS、約期（與規劃一致）
 - [ ] 確認 Nebula「十樓」站點的 WAN 與本機 PPPoE 設定一致、閒置時間 0
-- [ ] 確認 NWA50BE 已上線、SSID 可用
+- [ ] 確認 NWA30BE 已上線、SSID 可用
 - [ ] 確認兩台防火牆韌體為最新版
 - [ ] 確認 USG FLEX 50HP 的授權是否影響 SD-VPN
 - [ ] 驗收後評估用安全政策收斂 VPN 只放行需要的服務
@@ -321,5 +318,4 @@ tracert 192.168.0.1
 - Zyxel 社群官方 FAQ：[How to Set Up Nebula Hub-and-Spoke VPN and the USG FLEX H series model as the Spoke site?](https://community.zyxel.com/en/discussion/28770/how-to-set-up-nebula-hub-and-spoke-vpn-and-the-usg-flex-h-series-model-as-the-spoke-site)
 - Zyxel 社群討論：[Nebula Site-to-Site SD-VPN between USG Flex and USG Flex H doesn't work](https://community.zyxel.com/en/discussion/comment/85199/)（DDNS 韌體 bug）
 - Zyxel 社群討論：[IPSec VPN among USG Flex 50 H and USG Flex 100](https://community.zyxel.com/en/discussion/comment/86255/)（WAN 在 192.168.1.0/24 時不通）
-- Zyxel 社群討論：[NWA50BE no wifi when on POE+](https://community.zyxel.com/en/discussion/comment/83558/)（其他使用者的 PoE 供電問題）
 - Nebula 線上說明：在 Nebula 介面右上角的說明（?）圖示可開啟對應頁面的官方文件
