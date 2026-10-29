@@ -159,12 +159,6 @@
   font-weight: 600;
 }
 
-/* 一般表格第一欄（項目、名詞、現象）保留最小寬度，避免被長內容擠成一字一行。 */
-table th:first-child,
-table td:first-child {
-  min-width: 5em;
-}
-
 .result-table {
   display: block;
   overflow-x: auto;

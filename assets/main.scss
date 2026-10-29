@@ -1,0 +1,12 @@
+---
+---
+
+@import "minima";
+
+/* 網站實際載入的樣式（覆寫 minima 主題的 assets/main.scss）。 */
+
+/* 一般表格第一欄（項目、名詞、現象）保留最小寬度，避免被長內容擠成一字一行。 */
+table th:first-child,
+table td:first-child {
+  min-width: 5em;
+}
