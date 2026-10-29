@@ -259,7 +259,7 @@ Wazuh Dashboard 建立在 OpenSearch Dashboards 上，Node.js 版本由 OpenSear
 
 ## 10. 待辦
 
-- [ ] 觀察幾天正常後刪除快照：`pct delsnapshot 103 pre-node22234`、`pct delsnapshot 113 pre-node22`
+- [x] 觀察幾天正常後刪除快照：`pct delsnapshot 103 pre-node22234`、`pct delsnapshot 113 pre-node22`（2026-10-29 已刪）
 - [ ] 刪除 CT113 的 `/root/node-dl`、`/root/nodesource.sources.bak`（`~/.hermes` 已隨 Hermes 移除）
 - [x] ~~每次 `hermes update` 後確認自帶的 Node~~：同日 Hermes 已移除，見 [用 Claude Code 取代 Hermes](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/claude-code-redact-gateway/)
 - [ ] 追蹤 ProxCenter 新版（frontend 的 Node ≥ 26.12.1）後更新；10/29 的 v1.4.12 仍是 26.12.0，已排 11/05 檢查有沒有新版

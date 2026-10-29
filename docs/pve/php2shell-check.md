@@ -204,7 +204,8 @@ curl -s -o /dev/null -w "網站回應：%{http_code}\n" http://127.0.0.1/
 - [ ] ⏸️ GCP 網站升級到 PHP 8.2 以上（5-3，10/24 決定暫緩）
 - [ ] GCP 主機不定期重跑 5-1 的入侵檢查，並確認暫時防護仍是 `Off`
 - [ ] 查 Synology 是否發佈 PHP2Shell 相關公告（DSM、Web Station 的 PHP 套件）
-- [ ] LibreNMS 觀察一兩天正常後 `pct delsnapshot 102 pre-php2shell`；另外 17 個非 PHP 套件找時間更新
+- [x] LibreNMS 觀察一兩天正常後 `pct delsnapshot 102 pre-php2shell`（2026-10-29 已刪）
+- [ ] 另外 17 個非 PHP 套件找時間更新
 
 ## 8. 延伸閱讀
 
