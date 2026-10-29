@@ -4,19 +4,19 @@ title: "PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？"
 date: 2026-10-02
 categories: [PVE, HA, ProxCenter]
 permalink: /docs/pve/pve-ha-placement-policy/
-last_modified_at: 2026-10-23
+last_modified_at: 2026-10-29
 ---
 
 # PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？
 
-> **一句話**：節點維護或故障時，真正在搬 HA 服務的是 **PVE**，不是 ProxCenter；所以互斥規則（例如兩台 DNS 不能放同一台）要設在 PVE HA rules。2026-10-13 起決定**只留 PVE 原生機制**，ProxCenter DRS 停用、規則刪除，也不另裝 ProxLB。
+> **一句話**：節點維護或故障時，真正在搬 HA 服務的是 **PVE**，不是 ProxCenter；所以互斥規則（例如兩台 DNS 不能放同一台）要設在 PVE HA rules。2026-10-13 起決定**只留 PVE 原生機制**，ProxCenter DRS 停用、規則刪除，也不另裝 ProxLB；2026-10-29 起 DRS 以 **Manual（只給建議）** 模式重新開啟，觀察中（第 12-5 節）。
 
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 同時用 PVE 和 ProxCenter，不確定規則該設在哪邊的人 |
 | 環境 | Proxmox VE 9.2.20 → 9.2.21，三節點（node10、node11、node12，皆為 Win element M600：Ryzen 9 8945HS、64 GB），Ceph 共用儲存 |
-| 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案；10/19 再次分散 |
-| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；✅ 10/19 HA 資源分散為 4／5／4；⏳ 單節點故障演練 |
+| 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案；10/19 再次分散；10/29 DRS 以 Manual 模式重新開啟 |
+| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；✅ 10/19 HA 資源分散為 4／5／4；⏳ 10/29 DRS 以 Manual 模式重新開啟、VM＋LXC 都評估，觀察中（第 12-5 節）；⏳ 單節點故障演練 |
 
 ## 1. 先認識幾個名詞
 
@@ -159,6 +159,8 @@ ha-manager status | grep -E 'ct:'
 ## 8. ProxCenter DRS 的注意事項
 
 DRS 關閉時，ProxCenter 平常不搬任何東西，和 PVE 的設定不衝突。
+
+> 2026-10-29 起 DRS 已開啟（Manual 模式，只給建議），Guest types 也改回 VMs＋LXC，見第 12-5 節；下面是當時的說明。
 
 如果將來要開啟，先改這幾項再打開開關：
 
@@ -363,7 +365,7 @@ ProxLB 的 README 也提到，PVE 9.2 起內建 Dynamic Load Balancing，可以�
 | PVE HA Node Affinity Rules | 無 |
 | `grep crs /etc/pve/datacenter.cfg` | `crs: ha=static,ha-rebalance-on-start=1`，和 10/02 相同，沒有自動平衡 |
 
-- **10/19 保險設定**：ProxCenter **DRS → Configuration → General settings** 改成下表後按 Save，重新整理確認已保存。就算日後有人誤開 DRS，也只會在 Recommendations 頁列出建議，不會自己搬。
+- **10/19 保險設定**（10/29 已改：DRS 開啟、Guest types 加回 LXC，見 12-5）：ProxCenter **DRS → Configuration → General settings** 改成下表後按 Save，重新整理確認已保存。就算日後有人誤開 DRS，也只會在 Recommendations 頁列出建議，不會自己搬。
 
   | 欄位 | 修改前 | 修改後 |
   | --- | --- | --- |
@@ -386,6 +388,68 @@ HA Resources 清單中 12 台的 `Auto-Rebalance` 都顯示 `true`，但 `datace
 - **非 HA 的 guest 沒人自動平衡、也沒有規則保護。** WinClient（108）、UBClient（104）有顯示卡直通，本來就無法遷移；更新前照第 11 節先關機。
 - **新增重要服務時，要記得加入 HA resources**，必要時一併建立 HA rules，否則 PVE 不會管它。
 - **服務集中只能人工分散。** 10/13 的 HA 資源分布：node10 7 台（AdGuard、librenms、IPAM、Graylog、wireguard、ai、DC02）、node11 1 台（ProxCenter）、node12 4 台（Pihole、wazuh、DC01、CA）。`static` CRS 只影響啟動和故障轉移時放哪裡，不會搬動正在運作的服務（10/19 已再分散，見第 13 節）。
+
+### 12-5 2026-10-29：重新開啟 DRS，維持 Manual（觀察中）
+
+**為什麼**：10/29 的 PBS 與 PVE 更新後，VM 104、107、111 從 node12 搬到 node11，node11 上同時有 Wazuh，看起來比另外兩台重，所以決定開啟 DRS 看建議。**維持 Manual（Recommendations only）**，不會自動搬任何東西。
+
+**設定**（ProxCenter → DRS → Configuration → General settings，按 Save 後確認儲存）：
+
+| 欄位 | 10/19 | 10/29 |
+| --- | --- | --- |
+| DRS enabled | 關閉 | **開啟** |
+| Operation mode | Manual | Manual（Recommendations only，沒變） |
+| Per-cluster mode（ITBH-Cluster） | Global default (Manual) | 同左 |
+| Excluded nodes | 無 | 無 |
+| Guest types to balance | 只留 VMs (QEMU) | **VMs (QEMU) ＋ Containers (LXC)** |
+
+**當天看到的**（DRS Load Overview 與 Recommendations）：
+
+| 項目 | 結果 |
+| --- | --- |
+| DRS Health | 分數 80、「To optimize」、不平衡度 18%；叢集 CPU 約 3%、RAM 約 21% |
+| node11 | CPU 5.3%、RAM 33.0%、6／7（標為 Source，可卸載） |
+| node10、node12 | CPU 1.3%、RAM 15.0%／14.8%、4／4（標為 Target，可接收） |
+| Recommendations | `All clusters are balanced. No action needed.` |
+
+「6／7」的意思我沒有查證，**推測**是 node11 上 7 個客體（3 個容器＋4 台 VM）中 6 個在執行，VM 108 關機。
+
+**同一時間用 `pvesh` 與 `uptime` 取得的實際數字**（三台都是 16 核、62.08 GiB）：
+
+| 節點 | CPU | 記憶體 | Load average（1／5／15 分） |
+| --- | --- | --- | --- |
+| node10 | 1.24% | 9.35 GiB（約 15%） | 0.83／0.56／0.48 |
+| node11 | 1.41% | 19.76 GiB（約 32%） | 0.70／0.82／1.01 |
+| node12 | 1.18% | 9.16 GiB（約 15%） | 1.89／1.54／0.97 |
+
+**判讀**：node11 只有**記憶體相對偏高**（約另外兩台的 2 倍，因為 VM 104、107、111 與 Wazuh 都在上面），絕對數字很低，**沒有過重**，也沒有達到 DRS 觸發建議的門檻。
+
+**開著 DRS 要注意的**：
+
+| 項目 | 說明 |
+| --- | --- |
+| DRS 看不到 PVE 的 HA rules | ProxCenter 的 DNS、DC、VGA 三條規則在 10/13 已刪除，所以 DRS 不認得「AdGuard 與 Pihole 要分開」、「DC01 與 DC02 要分開」。**每一則建議套用前都要自己對照** |
+| 加入 LXC 之後 | 容器是重啟式搬移，每套用一則就中斷一次；套用前先看對象 |
+| 不要改成 Automatic | 會繞過 PVE 的互斥規則自動搬 |
+
+套用建議前的檢查表：
+
+| 如果建議搬的是 | 怎麼判斷 |
+| --- | --- |
+| CT100、CT101（AdGuard、Pihole） | 先停，DRS 看不到 DNS 互斥規則 |
+| VM 106、VM 107（DC01、DC02） | 確認目標節點不是另一台 DC 所在 |
+| CT110（ProxCenter） | 不要，ProxCenter 搬自己會中途斷線 |
+| CT113（Lab Ops） | 會中斷 Lab Ops 對話 |
+| CT109（WireGuard） | VPN 會斷，在內網操作 |
+| CT112（Wazuh） | 重啟 1～2 分鐘，indexer 還要一兩分鐘才恢復 |
+| VM 108（WinClient，關機、VGA 直通） | 不能搬，忽略 |
+| VM 104（UBClient） | 磁碟在 Ceph、無直通、不在 HA，live migrate 風險最低 |
+
+**未確認**：DRS 是否曾經出過建議、Manual 模式有沒有任何預設自動動作（目前沒有觀察到）、Trigger thresholds 與評估週期的實際數值（沒有查看）。
+
+**補充（同日）**：UBClient（VM 104）與 WinClient（VM 108）10/29 起都暫時關機、要用才開；Wazuh（CT112）搬到 node10，見第 13 節。
+
+**觀察 3～5 天後決定**：有出過合理建議、當警報器用起來順手，就留著；沒用到或造成混亂，就改回關閉，並把 Guest types 改回只留 VMs。
 
 ## 13. 再次手動分散 HA 資源（2026-10-19）
 
@@ -480,6 +544,44 @@ ssh root@node11 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | node11 | LibreNMS、WireGuard、ProxCenter、Wazuh、CA |
 | node12 | Pi-hole、Graylog、Grafana、DC02 |
 
+**2026-10-29：更新後 node11 偏多，Wazuh 搬到 node10**
+
+PBS 與 PVE 更新（見 [ProxCenter 更新第 13 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/)）後，VM 107、111 與非 HA 的 VM 104 都在 node11，位置如下：
+
+| 節點 | HA 資源 | 非 HA |
+| --- | --- | --- |
+| node10 | AdGuard、IPAM、ai、DC01（4） | — |
+| node11 | LibreNMS、WireGuard、**Wazuh**、DC02、CA（5） | UBClient（VM 104）、WinClient（VM 108，關機） |
+| node12 | Pihole、Graylog、ProxCenter、Grafana（4） | — |
+
+問題不是負載（當天 node11 CPU 1.4%、RAM 約 32%），而是**違反本節的原則**：LibreNMS 與 Wazuh 同在 node11，node11 故障時會同時失去 VPN、兩套監控、DC02、CA。
+
+**處理**：把 Wazuh（ct:112）搬到 node10。這是容器的重啟式搬移，由 Lab Ops 透過 `rx` 執行（授權範圍只限這一件事、每個指令都由人按允許）：
+
+```bash
+ha-manager migrate ct:112 node10
+```
+
+| 觀察 | 說明 |
+| --- | --- |
+| `rx` 沒有擋 `ha-manager migrate` | 指令正常執行 |
+| 結果 | Lab Ops 回報 `ct:112` 在 node10；沒有重試、沒有拍快照；中斷時間**沒有量測** |
+| 還原方式 | `ha-manager migrate ct:112 node11` |
+
+搬完後的分布（**5／4／4**，依搬移前的畫面加上這一次搬移推定）：
+
+| 節點 | HA 資源 |
+| --- | --- |
+| node10 | AdGuard、IPAM、ai、DC01、**Wazuh** |
+| node11 | LibreNMS、WireGuard、DC02、CA（＋非 HA：VM 104、VM 108，兩台目前都關機） |
+| node12 | Pihole、Graylog、ProxCenter、Grafana |
+
+三套監控各在一台（Wazuh node10、LibreNMS node11、Graylog node12）；DNS（node10／node12）、DC（node10／node11）都仍分開。CT112 的備份也會由 node11 的 21:30 工作改成 node10 的 21:00 工作（備份是各節點各跑各的，這是推論）。
+
+**未驗證**：搬移後 Wazuh 的三個服務是否都 active、dashboard 能不能開、agent 數量（預期 19 個、Active 約 17，UBClient 與 WinClient 因關機是 Disconnected）。Lab Ops 回報沒有檢查這幾項，驗收結果補進本節。
+
+**UBClient 與 WinClient**：10/29 起都**暫時關機、要用才開**。關機期間仍然每晚備份與 Verify；要開 WinClient 只能在 node11（有 VGA 直通）；做 ProxCenter 滾動更新前，如果開著要先關機（第 11 節）。
+
 ## 14. 常見問題
 
 | 現象 | 怎麼辦 |
@@ -491,6 +593,7 @@ ssh root@node11 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | 維護後服務沒回到原節點 | 正常；對照第 13 節的分布表，手動 `ha-manager migrate` |
 | Rolling Update 中途中斷 | 可能是 ProxCenter 自己被搬走；先更新沒有 ProxCenter 的節點 |
 | 叢集使用率很平均，但某台服務特別多 | DRS 只看使用率；可用性風險要人工分散 |
+| DRS 顯示分數 80「To optimize」，Recommendations 卻是 balanced | 分數反映目前的不平衡度，建議要超過觸發門檻才會出現；10/29 實測不平衡度 18% 仍沒有建議（第 12-5 節） |
 
 ## 15. 待驗證與後續
 
@@ -503,6 +606,8 @@ ssh root@node11 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | Dynamic Load 與 Automatic Rebalance 的實際行為 | ✅ 10/20 查證（未找到官方 admin guide 章節，依開發者郵件論壇與官方論壇公告）：pve-ha-manager 5.2.0（pve-manager 9.1.8）起加入 Dynamic Load，可勾選 Automatic Rebalance 並設定不平衡門檻等參數，避免不必要的遷移；**只平衡 HA 資源**，且遷移一定遵守 node／resource affinity 規則；開發者標示為 technology preview，目標在 9.2 穩定。本叢集維持 `ha=static`、不開自動平衡（LXC 遷移會重啟） |
 | ProxCenter DRS 停用、規則改由 PVE 統一管理 | ✅ 2026-10-13（第 12 節） |
 | ProxCenter Operation mode 改為 Manual（保險） | ✅ 2026-10-19，Guest types 同時改為只留 VMs（第 12-2 節） |
+| ProxCenter DRS 以 Manual 模式重新開啟，Guest types 加回 LXC | ⏳ 2026-10-29 開啟，觀察 3～5 天後決定留或關（第 12-5 節） |
+| 2026-10-29 Wazuh 搬到 node10 後的驗收（服務、agent 數、dashboard） | ⏳ 尚未驗證（第 13 節） |
 | HA 資源集中在 node10，是否再分散 | ✅ 2026-10-19 由 8／1／4 分散為 4／5／4（第 13 節） |
 
 **單節點故障的預期行為**（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，而且在節點回來前沒有再壞一顆硬碟的餘裕。
