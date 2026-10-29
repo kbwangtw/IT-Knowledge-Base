@@ -9,7 +9,7 @@ last_modified_at: 2026-10-29
 
 # Nebula 兩層樓 Site-to-Site VPN：6F USG FLEX 100 × 10F USG FLEX 50HP
 
-> **一句話**：6 樓已經有一台 USG FLEX 100（PPPoE 固定 IP），10 樓新增一台 USG FLEX 50HP 和一台 NWA30BE 無線 AP。10F 線路是**中華電信固定 6 IP 制**，設好 PPPoE 撥號就能上網。兩台防火牆在 Nebula **同一個組織、各自一個站點**，在「站點-到-站點 VPN」頁面點 **VPN 規劃工具**，Nebula 就自動把兩邊設成「中心和分支」（Hub-and-Spoke，6F 是 Hub、10F 是 Spoke），不用手動填金鑰和對方 IP。互通的只有 6F lan1 和 10F LAN，6F lan2 不加入。
+> **一句話**：6 樓已經有一台 USG FLEX 100（PPPoE 固定 IP），10 樓新增一台 USG FLEX 50HP 和一台 NWA30BE 無線 AP。10F 線路是**中華電信固定 6 IP 制**。兩台防火牆在 Nebula **同一個組織、各自一個站點**，在「站點-到-站點 VPN」頁面點 **VPN 規劃工具**，Nebula 就自動把兩邊設成「中心和分支」（Hub-and-Spoke，6F 是 Hub、10F 是 Spoke），不用手動填金鑰和對方 IP。互通的只有 6F lan1 和 10F LAN，6F lan2 不加入。
 
 | 項目 | 內容 |
 | --- | --- |
