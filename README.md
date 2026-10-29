@@ -52,6 +52,7 @@
 - [ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？](docs/pve/proxcenter-ceph-rolling-update.md)
 - [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal.md)
 - [一次檢查並統一所有 LXC 的時區](docs/pve/pve-lxc-timezone.md)：從 node10 查全部容器、先盤點排程、改成 Asia/Taipei、LibreNMS 的 PHP 與 MariaDB
+- [LXC 自動更新後，怎麼檢查「待重啟的服務」：逐一重啟 dbus 的坑與整個容器重開](docs/pve/lxc-needrestart-service-restart.md)：唯讀盤點、應用服務單獨重啟、dbus／logind 整個容器重開、CT112／CT114 重開前後對照
 - [把 PVE／PBS 通知改成繁體中文](docs/pve/proxmox-zh-tw-notification.md)：程式在 [`tools/proxmox-zh-tw-notification/`](tools/proxmox-zh-tw-notification/)（2026-10-16 以新手角度改寫）
 
 ### 備份與還原

@@ -4,7 +4,7 @@ title: "LibreNMS 溫度告警誤報：LXC 重複感測器與門檻整理"
 date: 2026-10-19
 categories: [PVE, LibreNMS, Monitoring]
 permalink: /docs/pve/librenms-temperature-sensor-cleanup/
-last_modified_at: 2026-10-28
+last_modified_at: 2026-10-29
 ---
 
 # LibreNMS 溫度告警誤報：LXC 重複感測器與門檻整理
@@ -326,7 +326,7 @@ WHERE SUBSTRING_INDEX(d.hostname,'.',1)='tokyo16' AND e.type='temperature'
 | --- | --- |
 | 資料安全 | 複寫排在 Verify 之前，來源若有壞掉的 chunk 會被一起複製；先驗證再複製可降低這個風險 |
 | 溫度 | 三個工作各自獨立、互不重疊；缺點是 21:00～00:40 連續約 3.5 小時有負載，要用曲線觀察 |
-| Verify 排在備份後 | PVE 備份是三個工作：node10 21:00、node11 21:30、node12 22:00。Verify log 顯示最晚一份快照 22:03:48 才開始，所以最晚的備份**推估約 22:05～22:10 結束**（用開始時間推的，未看結束時間），22:45 有約 35 分鐘緩衝 |
+| Verify 排在備份後 | PVE 備份是三個工作：node10 21:00、node11 21:30、node12 22:00。Verify log 顯示最晚一份快照 22:03:48 才開始，所以最晚的備份約 22:07 結束；備份通知信（總執行時間）算出實際結束：node10 21:12、node11 21:36、node12 **22:07:48**，22:45 有約 37 分鐘緩衝（第 7-2 節） |
 | GC 要在 Prune 之後 | PBS 的 Prune Jobs 是空的；Prune 由 PVE 備份工作的保留設定（`keep-daily=7,keep-last=3`）在備份後順便執行，所以一定在 GC 之前，不用另外排 |
 
 > 2026-10-28 白天還改過一次「Verify 改 04:00」，同一天決定改成上表的排法，因為 04:00 會讓複寫排在 Verify 之前。
@@ -353,6 +353,28 @@ WHERE SUBSTRING_INDEX(d.hostname,'.',1)='tokyo16' AND e.type='temperature'
 | Verify 或 GC 在 PBS → Tasks 顯示失敗 | 先回復原排程，再查原因（可能是備份還沒結束就開始 Verify） |
 
 **風扇模式**：現在是靜音模式，重負載時溫度容易衝高。**一次只改一個變數**，先觀察排程重排的效果，再決定要不要改成「酷涼」（風扇聲變大，要看 tokyo16 放的位置能否接受）。
+
+### 7-2. 2026-10-29 補充：新排程第一晚、備份結束時間與干擾因素
+
+**新排程第一晚（10/28）**：Verify 在 22:45 開始，**23:50:10 結束、耗時約 1 小時 5 分、OK**，和預估的 23:52 幾乎一樣。
+
+**備份實際結束時間**（用備份通知信的總執行時間算，並用最後一份快照的「開始時間 ＋ 耗時」交叉驗證，兩種算法吻合）：
+
+| 備份工作 | 開始 | 總執行時間 | 結束 |
+| --- | --- | --- | --- |
+| node10（21:00） | 21:00:01 | 12m 16s | 約 21:12:17 |
+| node11（21:30） | 21:30:01 | 6m 36s | 約 21:36:37 |
+| node12（22:00） | 22:00:04 | 7m 44s | 約 22:07:48 |
+
+**GC 通知信**（10/29 凌晨）：成功，回收 54.098 GiB、22,825 個區塊，損壞區塊 0，等待移除 0 B；索引檔案數 **270**。
+
+270 剛好等於「10 個 CT × 10 份 × 2 個索引＋4 台 VM × 10 份 × 1＋VM 111 × 10 份 × 3」，代表**每個 group 仍是 10 份快照**，和 `keep-daily=7` 對不上。但 PBS 的 Prune 任務 30 天有 450 筆（436 成功、14 警告），所以 Prune 有在跑，為什麼是 10 份**未確認**。
+
+**30 天任務摘要裡的失敗**：Verify 失敗 1、GC 失敗 1，點進去是 **10/19 測試中文通知時在 `zhtest`（測試用 datastore）故意製造的失敗**，不是正式的 Tokyo16（見[中文通知文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-zh-tw-notification/)）；Tokyo16 的 Backups 438 次、Verify、GC 在 30 天內沒有失敗。
+
+**Re-Verify After**：原本 15 天；10/29 曾改成 7 天，又在當晚 22:45 前改回 15 天。快照約活 10 天，15 天大於壽命，等於不重驗；Verify 每晚驗最新那份快照，會把它引用的 chunk 幾乎全部重讀一遍（例如 vm/108 每晚約 37 GiB），所以還在使用的資料其實每天都在被檢查。這是依 Verify log 的推論，沒有實測。想再加一層保障，觀察完再考慮改成 9 天（每份快照在被刪前多驗一次）。
+
+> **干擾因素（10/29）**：上午 PBS 更新並重開（kernel -26）；09:21～約 14:00 PVE 三台由 ProxCenter 分兩輪更新、逐台重開，VM 104、107、111 搬到 node11。**10/29 晚上的曲線不能直接和前幾晚比**；VM 被搬移後 dirty bitmap 可能重置，當晚備份可能比平常久（推測，未實測）。細節見 [PBS 更新 SOP 第 12 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) 與 [ProxCenter 更新第 13 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/)。
 
 ## 8. node12 NVMe 的 Sensor 2：讀數卡住，不是過熱（2026-10-21）
 
@@ -409,9 +431,11 @@ smartctl -A $dev | grep -iE "temperature|warning|critical|percentage used|data u
 
 - [x] 觀察到隔天早上，LXC 與 node10～12 都沒有再出現 `Temperature above threshold`（見 6-1）
 - [x] tokyo16：10/24～25 調整擺放位置，10/26～28 比較搬動前後：看不出效果（第 7-1 節）
-- [x] tokyo16：確認 Skip Verified 已開（Yes）、Prune 由 PVE 備份工作處理（一定在 GC 之前）、備份推估約 22:10 結束（第 7-1 節）
+- [x] tokyo16：確認 Skip Verified 已開（Yes）、Prune 由 PVE 備份工作處理（一定在 GC 之前）、備份最晚約 22:07 結束（第 7-1、7-2 節）
 - [ ] tokyo16：在 PBS 把 Verify Job 改為 22:45（現為 04:00）、GC 由 `daily` 改為 00:30（複寫維持 02:00），觀察 2～3 個夜晚的曲線與事件數
-- [ ] （選做）PVE 備份保留設定是 `keep-daily=7`，但每組仍有 10 份快照；確認是設定剛改過還是 Prune 沒執行
+- [ ] （選做）PVE 備份保留設定是 `keep-daily=7`，但每組仍有 10 份快照；Prune 每天都有跑（30 天 436 次成功、14 次警告），原因未確認：看 Storage 層級的保留設定、Prune 警告內容
+- [ ] 查 PBS「最長工作」裡約 1 小時 17 分的 8 筆 GC 是哪幾天（10/28 的 GC 只花 6 分 49 秒），對照 10/20 基準線下降
+- [ ] 10/31 判讀時，把 10/29 的 PBS 與 PVE 更新、節點重開、VM 搬移算進干擾因素
 - [ ] 視結果再決定是否把 DSM 風扇模式由靜音改為酷涼
 - [ ] 以後新增 LXC 到 LibreNMS 時，加入後就關掉 sensors 模組
 - [x] node12 的 2 TB NVMe（KINGSTON SNV3S）內部感測器 71.8 °C：10/21 確認是讀數卡住、碟本身健康（第 8 節）

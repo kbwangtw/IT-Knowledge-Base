@@ -4,7 +4,7 @@ title: "PBS 更新後，怎麼確認備份還能用？"
 date: 2026-09-11
 categories: [PVE, PBS, ProxCenter, DR]
 permalink: /docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/
-last_modified_at: 2026-10-24
+last_modified_at: 2026-10-29
 ---
 
 # PBS 更新後，怎麼確認備份還能用？
@@ -422,7 +422,52 @@ grep -oE 'vmlinuz-[0-9.]+-[0-9]+-pve' /boot/grub/grub.cfg | sort -u
 
 **看到的結果**：四台都只剩 `proxmox-kernel-7.0`、-23、-25，開機選單只有 -23、-25。不需要重開，也沒有重啟服務。
 
-## 12. 常見問題：出問題時在哪裡停下來
+## 12. 2026-10-29：kernel 7.0.14-25 → 7.0.14-26（用網頁更新）
+
+這次先更新 PBS31，再用 ProxCenter 更新 PVE 三台（見 [ProxCenter 逐台更新 PVE](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/) 第 13 節）。時間是上午 08:45 開始，離 21:00 備份還很久。
+
+**更新前確認**（PBS 網頁）：右上角 Tasks 是 0，Administration → Updates 列出 **10 個套件**：
+
+| 套件 | 版本 |
+| --- | --- |
+| `proxmox-kernel-7.0`、`proxmox-kernel-7.0.14-26-pve`（含 signed） | 7.0.14-25 → 7.0.14-26 |
+| `proxmox-kernel-helper` | 9.2.0 → 9.2.1 |
+| `pve-firmware` | 3.18-7 → 3.18-8 |
+| `libjs-extjs`、`pbs-i18n`、`pve-xtermjs` | 網頁介面與翻譯 |
+| `proxmox-offline-mirror-docs`、`proxmox-offline-mirror-helper` | 0.7.4 → 0.8.0 |
+
+**`proxmox-backup-server` 本體（4.2.8）不在清單**，所以服務不會被更新中途重啟，只有 kernel 與 firmware 需要重開。
+
+**怎麼做**：Administration → **Updates** → **Upgrade**，等終端機視窗跑完；再到 Server Status → **Reboot**。
+
+**重開後的驗收**（PBS 網頁，約 3 分鐘）：
+
+| 檢查 | 看到 |
+| --- | --- |
+| Uptime、Kernel Version | Uptime 約 2 分鐘；`Linux 7.0.14-26-pve` |
+| Datastore Tokyo16 → Summary | 容量 2.87 TB、已用 905.49 GB（31.55%），**沒有 unavailable**（它掛在 CIFS 上，重開後要確認有掛回來） |
+| Administration → Services | `chrony`、`cron`、`postfix`、`proxmox-backup`、`proxmox-backup-proxy`、`sshd`、`systemd-journald` 全部 running |
+| Updates → Refresh | `No updates available` |
+| Tasks | 0 |
+
+**PVE 端也要確認連得到**（三台節點各查一次，唯讀）：
+
+```bash
+pvesm status
+```
+
+**看到的結果**：node10、node11、node12 的 `PBS31` 都是 `active`、31.56%，總量約 2.61 TiB、已用約 843 GiB，和 PBS 網頁（905.49 GB）換算後一致。`active` 只代表 PVE 查得到容量，**不代表備份一定成功**；當晚三封備份通知信才是最後驗證。
+
+**舊 kernel -25 先留著**，穩定幾天後再依第 10-4 節的原則清理。
+
+### 12-1 儀表板上的兩個提示，不是這次造成的
+
+| 看到 | 原因 |
+| --- | --- |
+| Repository Status 黃色驚嘆號 `Non production-ready repository enabled!` | 沒有訂閱、用 no-subscription 來源，更新前就有 |
+| 30 天任務摘要 Verify 失敗 1、Garbage collections 失敗 1 | 點進去看資料儲存區名稱與日期：這次是 **2026-10-19 測試中文通知時，故意在測試用的 `zhtest` datastore 製造的失敗**（GC：`EACCES: Permission denied`；Verify：1 個 chunk 驗證失敗），**不是正式的 Tokyo16**。`zhtest` 已刪除，見[中文通知文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-zh-tw-notification/) |
+
+## 13. 常見問題：出問題時在哪裡停下來
 
 | 現象 | 先查什麼 |
 | --- | --- |
@@ -436,16 +481,17 @@ grep -oE 'vmlinuz-[0-9.]+-[0-9]+-pve' /boot/grub/grub.cfg | sort -u
 | `apt-cache rdepends` 說某套件依賴舊 kernel | 它會算到套件庫裡的舊版；以 `apt remove -s` 的模擬結果為準 |
 | `--failed` 出現 `session-x.scope` | 登入連線不是服務；確認後 `reset-failed` |
 | 容量數字和 PBS UI 不同 | G 和 GiB 單位不同 |
+| 儀表板顯示 Verify 或 GC 失敗 | 點進去看資料儲存區名稱與日期，確認是不是測試用的 datastore（第 12-1 節） |
 
 > 回復方案要另外準備。從舊 kernel 開機只涵蓋 kernel，不代表整個 PBS、套件和 ZFS 都回到更新前。本文沒有完成整套回復演練，也沒有量到完整 RTO／RPO。
 
-## 13. 每次維護要留下的結案資料
+## 14. 每次維護要留下的結案資料
 
 - **更新**：更新前後版本、重開時間、掛載來源、PBS 服務、PVE storage 狀態與工作日誌。
 - **還原演練**：快照時間、還原開始與完成時間、開機時間、應用程式驗收結果。
 - 演練完成後要關閉或隔離測試副本，確認不會再操作正式資源（這是收尾要求，本紀錄沒有提供關機完成的證據）。
 
-## 14. 延伸閱讀
+## 15. 延伸閱讀
 
 - [備份監控：失敗通知與每日備份檢查](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)（Graylog 告警與監控（二）第 7 節）
 - [從 PBS 還原 ProxCenter：先複製一台，再確認能用](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-pbs-restore-dr-runbook/)
