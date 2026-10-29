@@ -1,7 +1,7 @@
 ---
 layout: default
 title: "jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理"
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-29
 ---
 
 # jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理
@@ -12,7 +12,7 @@ last_modified_at: 2026-10-17
 | --- | --- |
 | 適合誰看 | 想了解 IP 位址管理（IPAM）怎麼導入的人；要維護這套 jt-ipam 的人 |
 | 部署 | PVE 叢集上的 Debian 13 LXC，HTTPS 網頁 |
-| 版本 | 2026-10-15 由 v0.6.19 升級到 v1.0.11 |
+| 版本 | 2026-10-15 由 v0.6.19 升級到 v1.0.11；2026-10-29 升級到 v1.0.16 |
 | 進度 | 依官方 Adoption Roadmap：掃描、PVE、LibreNMS、Graylog 已完成；機櫃 U 位待實機確認 |
 
 公開文件不記錄密碼、Token Secret、私鑰或完整憑證。
@@ -89,6 +89,66 @@ bash /opt/jt-ipam/scripts/jt-ipam.sh doctor
 - 升級中途失敗時，doctor 會顯示「frontend build is 0.6.x but backend is 1.0.x」和缺少的排程，照 `→` 的提示重跑 upgrade 即可。
 - `perl: warning: Setting locale failed` 是容器沒有產生 en_US.UTF-8 語系，和升級無關。
 
+### 4-1 2026-10-29：升級到 v1.0.16
+
+**為什麼**：版本落後 v1.0.12～v1.0.16 共五版，順便確認 Node.js 22.23.4 的建置環境。
+
+**升級前確認**：
+
+| 項目 | 結果 |
+| --- | --- |
+| 快照 | `pct snapshot 103 pre-update-20261029`（15:11） |
+| 本機有沒有改過檔案 | `git -c safe.directory=/opt/jt-ipam status --short` **沒有輸出** |
+| 記憶體、swap、磁碟 | 8 GB（已用約 1 GB）、swap 2 GB、根目錄 40 GB（已用 4.4 GB） |
+| PATH | 用 `pct enter` 進容器的 shell 只有 `/sbin:/bin:/usr/sbin:/usr/bin`，**先補** `export PATH=/usr/local/sbin:/usr/local/bin:$PATH`；`command -v pnpm` 要看得到 `/usr/local/bin/pnpm` |
+
+`git status` 直接執行會出現 `fatal: detected dubious ownership in repository at '/opt/jt-ipam'`：`/opt/jt-ipam` 的擁有者不是 root，git 為了安全拒絕操作，不代表有人改過檔案。**不要照提示執行 `git config --global --add safe.directory`**（會寫進 root 的全域設定），用 `git -c safe.directory=… status` 做一次性放行即可。
+
+**升級**（同一個 console 視窗，不要中途換視窗）：
+
+```bash
+bash /opt/jt-ipam/scripts/jt-ipam.sh upgrade 2>&1 | tee /root/upgrade-$(date +%Y%m%d-%H%M).log
+bash /opt/jt-ipam/scripts/jt-ipam.sh doctor
+```
+
+**看到的結果**：
+
+| 輸出 | 意思 |
+| --- | --- |
+| `✔ built in 14.80s`、黃字 `Some chunks are larger than 500 kB` | 前端建置只花 15 秒；黃字是 vite 的提示，不是錯誤 |
+| `Backend is answering …/api/v1/system/version`、`Ping tool: ready` | 後端重啟後有回應，有權限送 ping |
+| `Local scan agent already registered; leaving it as is.` | 本機掃描 agent 沒被動到，仍在跑 |
+| `Upgrade complete: 1.0.16 (2de826f2) -> 1.0.16 (2de826f2)  alembic 0231_warroom_intel (head)` | 升級完成；資料庫 migration 到 0231 |
+| 結尾的 `SECURITY HEADERS` 長段說明 | 腳本的通用提醒：若在它前面另外放反向代理，那一層也要設相同的安全標頭；**本環境前面有沒有另外的代理未確認** |
+
+升級前是 v1.0.11，輸出卻是 `1.0.16 -> 1.0.16`，**推測**是腳本先 `git pull`，之後顯示的「舊版」已是更新後的檔案，只是顯示問題；實際以 `doctor` 為準。
+
+**`doctor`：All checks passed**。重點項目：
+
+| 區塊 | 結果 |
+| --- | --- |
+| Services | backend、nginx running；`/healthz` 有回應；HTTPS 端到端 HTTP 401（沒登入打 API 的正常回應）；WebSocket 轉發正常；guacd 1.6.1-pre.d9ec474（build 4）在 127.0.0.1:4822 回應 |
+| Database | PostgreSQL 17、pgvector、稽核表權限正確、schema 在 head（`0231_warroom_intel`） |
+| Frontend | 前後端版本一致（1.0.16）；建前端用 Node.js **v22.23.4** |
+| Scheduled work | sync、ai-audit、backup、geoip、oui、recog 六個 timer 都 enabled；最新備份 `jt-ipam-2026-10-29.jtbak`（加密備份）；last sync run completed |
+| Scanning／Remote console | 本機 scan agent running；RDP 引擎 guacd |
+
+升級紀錄用 `grep -inE 'error|fatal|fail' /root/upgrade-*.log` 檢查：今天的紀錄只比對到**檔名含 error**（`test_ldap_tls_and_errors.py`、`wsError-….js`），沒有 `FATAL`；10/15 的紀錄裡有當時的 pnpm 失敗與 locale 警告（已知）。
+
+**這五版和我們有關的變更**（依專案 CHANGELOG 的摘要，我只讀到前面一小部分，升級前請自己再對照最新版說明）：
+
+| 版本 | 重點 |
+| --- | --- |
+| v1.0.12～v1.0.16 | 共 17 個資料庫 migration（0215～0231），腳本自動執行 |
+| v1.0.12 | 每日備份資料夾改為只有 root 可讀；備份腳本記錄目錄總大小 |
+| v1.0.13 | 自動分配 IP 會跳過保留與 DHCP 範圍；LibreNMS 離線或停用的設備不再餵給 ARP／MAC 表；不再附 `jt-ipam-worker.service`；本機帳號不再需要 email |
+| v1.0.16 | **通知矩陣改成每個聊天頻道各自勾選**，原本的通知路由可能改變 |
+| Graylog | 這幾版的紀錄沒有提到 Graylog 變更 |
+
+**回滾**（只有升級失敗到無法補救才用）：`pct rollback 103 pre-update-20261029`，整個回到快照當時的狀態，包含資料庫。
+
+**待確認**：JT-IPAM 網頁登入與查詢、通知矩陣設定有沒有被改變、Graylog 的 Lookup Table 是否仍每 5 分鐘更新、03:30 的加密備份（`last-run` 要是 `status=ok、encrypted=1`）。確認後才刪快照。
+
 ## 5. 每日備份加密（2026-10-15）
 
 **為什麼要做**：jt-ipam 每天 03:30 備份到 `/var/backups/jt-ipam/`（保留 14 天）。沒加密時，每份備份同時含資料庫和 `backend.env`，而 `backend.env` 正是解開資料庫裡 PVE、LibreNMS、Wazuh 憑證的鑰匙。備份檔一旦外流，等於所有憑證外流。
@@ -132,6 +192,7 @@ find /var/backups/jt-ipam -maxdepth 1 -type d -name '2026-*' -exec rm -rf {} +  
 | 機櫃 U 位 | 機櫃到貨後補上設備與層板位置 |
 | LibreNMS Token | jt-ipam 使用的 LibreNMS Token 屬於 admin 且不過期，評估改用權限較小的帳號（見戰情中心（二）） |
 | 自動化 | 之後再評估告警、異常偵測、IP 申請等 |
+| 升級後確認（2026-10-29） | 通知矩陣、Graylog Lookup Table、03:30 加密備份；確認後刪快照 `pre-update-20261029`，並清理 `/root/upgrade-*.log`（見 4-1） |
 
 **導入原則**：目前已把 Scan Agent 的實際網路狀態、PVE 的虛擬化資產和 LibreNMS 的監控資料串起來。下一階段優先確保**資料可信、來源可追蹤**，再擴大自動建立與自動化。
 

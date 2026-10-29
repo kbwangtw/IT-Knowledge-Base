@@ -4,7 +4,7 @@ title: "Node2Shell（CVE-2026-111497）與 LiteLLM 供應鏈攻擊：檢查環�
 date: 2026-10-24
 categories: [Security, Node.js, PVE]
 permalink: /docs/pve/node2shell-litellm-check/
-last_modified_at: 2026-10-24
+last_modified_at: 2026-10-29
 ---
 {% raw %}
 
@@ -17,7 +17,7 @@ last_modified_at: 2026-10-24
 | 適合誰看 | 聽到 Node.js 或 Python 套件出事，想知道自己哪些主機受影響、怎麼判斷修補了沒有的人 |
 | 環境 | PVE 三節點的 10 個 LXC（Debian 12／13、Ubuntu 22.04／24.04） |
 | 日期 | 2026-10-24 |
-| 結論 | ✅ 沒有 LiteLLM ✅ CT103 IPAM 22.23.3 → 22.23.4 ✅ CT113 ai 系統 20.20.2 → 22.23.4（NodeSource 換成 22.x）✅ CT113 Hermes 自帶 22.22.2 → 22.23.4 ⏳ CT110 ProxCenter 前端容器 v26.10.0（新映像檔 v26.12.0 仍未修補）⏳ CT112 Wazuh Dashboard 自帶 Node 18／14 ⏳ PVE、PBS31、GCP 主機未掃 |
+| 結論 | ✅ 沒有 LiteLLM ✅ CT103 IPAM 22.23.3 → 22.23.4 ✅ CT113 ai 系統 20.20.2 → 22.23.4（NodeSource 換成 22.x）✅ CT113 Hermes 自帶 22.22.2 → 22.23.4 ⏳ CT110 ProxCenter 前端容器：10/24 是 v26.10.0；10/29 更新到 v1.4.12 後是 v26.12.0，**仍低於修補版 26.12.1**⏳ CT112 Wazuh Dashboard 自帶 Node 18／14 ⏳ PVE、PBS31、GCP 主機未掃 |
 
 ## 1. 先認識幾個名詞
 
@@ -234,7 +234,11 @@ pct exec 110 -- sh -c '
 
 **看到的結果**：有新映像檔（`e231971ce488` → `9fd230eff246`），但裡面是 **v26.12.0**，仍比 26.12.1 舊，要等下一版。
 
-> pull 之後本機的 `latest` 已指向新版；下次 `docker compose up -d` 就會換成它。這次沒有重啟，執行中的還是舊版。
+> pull 之後本機的 `latest` 已指向新版；這次沒有重啟，執行中的還是舊版。
+
+> ⚠️ **不要在只 pull 了 frontend 之後就 `docker compose up -d`**（本文原本寫「下次 `up -d` 就會換成它」，這樣做不妥）。那只會換前端，orchestrator、weasyprint、postgres 仍是舊的，變成新舊混搭；ProxCenter **企業版**要重跑官方安裝腳本帶 token 才會一起更新。
+
+**2026-10-29 更新結果**：ProxCenter 由 1.4.11 更新到 v1.4.12（做法見 [ProxCenter 企業版更新與擴容](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-enterprise-update/)），更新後 `docker exec proxcenter-frontend node -v` 仍是 **v26.12.0**，**低於 26.12.1**。v1.4.12 的更新紀錄沒有提到 Node.js 升級，且發布時間（10/19）早於漏洞公告，Node 待辦**不能打勾**。
 
 ### 8-2 Wazuh Dashboard
 
@@ -258,7 +262,7 @@ Wazuh Dashboard 建立在 OpenSearch Dashboards 上，Node.js 版本由 OpenSear
 - [ ] 觀察幾天正常後刪除快照：`pct delsnapshot 103 pre-node22234`、`pct delsnapshot 113 pre-node22`
 - [ ] 刪除 CT113 的 `/root/node-dl`、`/root/nodesource.sources.bak`（`~/.hermes` 已隨 Hermes 移除）
 - [x] ~~每次 `hermes update` 後確認自帶的 Node~~：同日 Hermes 已移除，見 [用 Claude Code 取代 Hermes](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/claude-code-redact-gateway/)
-- [ ] 追蹤 ProxCenter 新版（frontend 的 Node ≥ 26.12.1）後更新
+- [ ] 追蹤 ProxCenter 新版（frontend 的 Node ≥ 26.12.1）後更新；10/29 的 v1.4.12 仍是 26.12.0，已排 11/05 檢查有沒有新版
 - [ ] 追蹤 Wazuh 新版；評估 PVE 防火牆限制 CT112 的 443
 - [ ] PVE 三台、PBS31、GCP 網站主機的 Node.js 檢查（推測 PVE／PBS 沒有）
 
