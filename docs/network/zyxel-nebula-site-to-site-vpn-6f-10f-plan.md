@@ -308,20 +308,7 @@ tracert 192.168.0.1
 | 手機看不到 6 GHz | NWA30BE 是雙頻機種，本來就沒有 6 GHz |
 | 英文教學和中文介面對不起來 | 對照：Site-to-Site VPN＝站點-到-站點 VPN；Nebula VPN＝Nebula SD-VPN；Hub-and-Spoke＝中心和分支；VPN orchestrator＝VPN 規劃工具；Local networks／Use VPN＝本地網路／使用 VPN；Outgoing interface＝主介面 |
 
-## 11. 待辦（結案後選做）
-
-> 2026-10-29 結案：VPN 已上線並通過互 ping 驗收。以下項目尚未實測，建議有空時補做，結果再更新到 9-4。
-
-- [x] 兩個樓層互 ping（2026-10-29）
-- [x] 檔案分享／印表機、lan2 隔離、無線設備、外網 IP 驗收（2026-10-29）
-- [x] 確認 10F 的 DHCP 設定：Pool、DNS、約期（與規劃一致）
-- [ ] 確認 Nebula「十樓」站點的 WAN 與本機 PPPoE 設定一致、閒置時間 0
-- [ ] 確認 NWA30BE 已上線、SSID 可用
-- [ ] 確認兩台防火牆韌體為最新版
-- [x] 確認授權是否影響 SD-VPN：組織目前為 Nebula Base Pack，SD-VPN 可正常建立與連線（2026-10-29 實測）
-- [ ] 驗收後評估用安全政策收斂 VPN 只放行需要的服務
-
-## 12. 延伸閱讀
+## 11. 延伸閱讀
 
 - [圖書館 Nebula 網路改造：VLAN 隔離讀者、CIP 過濾、兩條 FTTB 分流](../zyxel-nebula-library-vlan-dual-wan-plan/)：同樣是 Nebula 環境，介紹 VLAN、Port、Zone、安全政策
 - [圖書館 Nebula 網路改造（附錄）：設定清單與實作紀錄](../zyxel-nebula-library-vlan-implementation-record/)：設定清單與驗收紀錄的寫法可參考
