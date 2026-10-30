@@ -3,7 +3,7 @@ layout: default
 title: "ML30 Gen11 擴充紀錄：哪些零件裝好了？哪些還要測？"
 date: 2026-09-04
 categories: [Hardware, HPE, ML30 Gen11]
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-30
 ---
 
 # ML30 Gen11 擴充紀錄：哪些零件裝好了？哪些還要測？
@@ -126,11 +126,11 @@ P65106-B21 Front PCI Fan and Baffle Kit 需不需要，取決於**完整 SKU 與
 
 ## 10. 官方資料來源
 
-- [HPE ProLiant ML30 Gen11 QuickSpecs](https://www.hpe.com/psnow/doc/a50007008enw.html)
+- [HPE ProLiant ML30 Gen11 QuickSpecs](https://www.hpe.com/us/en/collaterals/collateral.a50007008enw.html)
 - [User Guide：iLO-M.2-serial module option](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00003390en_us&page=GUID-ECB17AD0-D417-4423-8953-388D17BBFB94.html)
 - [User Guide：iLO-M.2-serial module components](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00003390en_us&docLocale=en_US&page=GUID-7DED8FBE-383D-4227-B481-30FCE01C26F9.html)
 - [User Guide：Installing the iLO-M.2-serial module](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00003390en_us&docLocale=en_US&page=GUID-8BC7ACD9-F979-4D26-BEEE-F709C64C7B95.html)
 - [User Guide：Intel VROC support](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00003390en_us&page=GUID-473A3C6B-AA6C-4C0C-89B1-4A3AD962BB15.html)
-- [HPE Intel VROC Gen11 OS-specific guides and downloads](https://hpe.com/support/VROC-Gen11-UG)
+- [HPE Intel VROC Gen11 OS-specific guides and downloads](https://www.hpe.com/support/VROC-Gen11-UG)
 
-查證日期：2026-09-04。HPE 可能更新 QuickSpecs、地區 SKU、支援矩陣與驅動下載位置；採購或部署前請再查最新版本。
+查證日期：2026-09-04（2026-10-30 QuickSpecs 連結改為 HPE 新網址）。HPE 可能更新 QuickSpecs、地區 SKU、支援矩陣與驅動下載位置；採購或部署前請再查最新版本。

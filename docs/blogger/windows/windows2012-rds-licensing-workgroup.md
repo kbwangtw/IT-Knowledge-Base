@@ -4,7 +4,7 @@ title: "Windows Server 2012 無網域單機安裝遠端桌面服務與授權（�
 date: 2015-06-29
 categories: [Windows, RDS, Blogger 舊文, 轉貼摘要]
 permalink: /docs/blogger/windows/windows2012-rds-licensing-workgroup/
-last_modified_at: 2026-10-24
+last_modified_at: 2026-10-30
 ---
 
 # Windows Server 2012 無網域單機安裝遠端桌面服務與授權（摘要）
@@ -46,6 +46,6 @@ last_modified_at: 2026-10-24
 
 ## 3. 延伸閱讀
 
-- [原文來源（展碁國際，已無法連線）](http://i-services.dsmynas.org/wordpress/?p=4432)
+- [原文來源（展碁國際，原站已無法連線，改連 Wayback Machine 2022-05-16 封存版）](https://web.archive.org/web/20220516141209/http://i-services.dsmynas.org/wordpress/?p=4432)
 - [Microsoft Learn：授權 RDS 部署](https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/rds-client-access-license)
 - [Blogger 轉貼頁](https://kbwangtw.blogspot.com/2015/06/windows-server-2012.html)

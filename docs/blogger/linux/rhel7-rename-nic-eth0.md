@@ -4,7 +4,7 @@ title: "RHEL／CentOS 7 把網卡名稱 eno*、ens* 改回 eth0"
 date: 2021-12-08
 categories: [Linux, RHEL, CentOS, Network, Blogger 舊文]
 permalink: /docs/blogger/linux/rhel7-rename-nic-eth0/
-last_modified_at: 2026-10-24
+last_modified_at: 2026-10-30
 ---
 
 # RHEL／CentOS 7 把網卡名稱 eno*、ens* 改回 eth0
@@ -121,5 +121,5 @@ ifconfig
 
 ## 9. 延伸閱讀
 
-- [Red Hat 文件：停用一致性網卡命名（RHEL 7）](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/7/html/networking_guide/sec-disabling_consistent_network_device_naming)
+- [Red Hat 文件：RHEL 7 Networking Guide 第 11 章 Consistent Network Device Naming](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/7/html/networking_guide/ch-consistent_network_device_naming)（原本的「停用」小節已從官方文件移除；本章開頭註明 Red Hat 不支援停用一致性命名的系統）
 - [Blogger 原文](https://kbwangtw.blogspot.com/2021/12/redhat-7centos-7-eno-eth0.html)

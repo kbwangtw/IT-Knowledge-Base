@@ -4,7 +4,7 @@ title: "RHEL 7 的 Network Teaming（摘要）"
 date: 2014-12-29
 categories: [Linux, RHEL, Network, Blogger 舊文, 轉貼摘要]
 permalink: /docs/blogger/linux/rhel7-network-teaming/
-last_modified_at: 2026-10-24
+last_modified_at: 2026-10-30
 ---
 
 # RHEL 7 的 Network Teaming（摘要）
@@ -44,6 +44,6 @@ ifcfg-team0-eth1 ：DEVICETYPE=TeamPort，TEAM_MASTER=team0
 
 ## 3. 延伸閱讀
 
-- [原文（恆逸教育訓練中心）](http://www.uuu.com.tw/Public/content/article/141229tips.htm)
+- [原文（恆逸教育訓練中心，原站已無法連線，改連 Wayback Machine 2015-01-02 封存版）](https://web.archive.org/web/20150102060419/http://www.uuu.com.tw:80/Public/content/article/141229tips.htm)
 - [Ubuntu 12.04 雙網卡 Bonding：7 種模式比較](../ubuntu-1204-bonding/)
 - [Blogger 轉貼頁](https://kbwangtw.blogspot.com/2014/12/rhel-7network-teaming.html)
