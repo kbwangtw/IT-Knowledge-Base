@@ -460,6 +460,13 @@ pvesm status
 
 **舊 kernel 的處理**：保留使用中的 -26 和上一版 -25（新 kernel 有問題時可以從開機選單選回），**清理對象是更舊的 -23**，穩定幾天後再依第 10-4 節的原則做。
 
+### 12-1 儀表板上的兩個提示，不是這次造成的
+
+| 看到 | 原因 |
+| --- | --- |
+| Repository Status 黃色驚嘆號 `Non production-ready repository enabled!` | 沒有訂閱、用 no-subscription 來源，更新前就有 |
+| 30 天任務摘要 Verify 失敗 1、Garbage collections 失敗 1 | 點進去看資料儲存區名稱與日期：這次是 **2026-10-19 測試中文通知時，故意在測試用的 `zhtest` datastore 製造的失敗**（GC：`EACCES: Permission denied`；Verify：1 個 chunk 驗證失敗），**不是正式的 Tokyo16**。`zhtest` 已刪除，見[中文通知文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-zh-tw-notification/) |
+
 ### 12-2 2026-10-30：清理舊 kernel -23
 
 四台（PBS31、node10、node11、node12）都在 -26 開機正常、穩定一天後清理。**容器（LXC）沒有自己的 kernel，不用也不要在容器裡做**（容器裡 `uname -r` 顯示的是主機的 kernel，`apt autoremove -s` 會顯示 `nothing to remove`，沒有意義）。
@@ -477,13 +484,6 @@ apt autoremove -y >/dev/null 2>&1; dpkg -l 'proxmox-kernel-*' | awk '/^ii/{print
 ```
 
 **看到的結果**：四台都只剩 `proxmox-kernel-7.0`、`proxmox-kernel-7.0.14-25-pve-signed`、`proxmox-kernel-7.0.14-26-pve-signed`（以及 `proxmox-kernel-helper`），開機選單只有 `vmlinuz-7.0.14-25-pve`、`vmlinuz-7.0.14-26-pve`，沒有 -23。不需要重開機，也沒有重啟服務。
-
-### 12-1 儀表板上的兩個提示，不是這次造成的
-
-| 看到 | 原因 |
-| --- | --- |
-| Repository Status 黃色驚嘆號 `Non production-ready repository enabled!` | 沒有訂閱、用 no-subscription 來源，更新前就有 |
-| 30 天任務摘要 Verify 失敗 1、Garbage collections 失敗 1 | 點進去看資料儲存區名稱與日期：這次是 **2026-10-19 測試中文通知時，故意在測試用的 `zhtest` datastore 製造的失敗**（GC：`EACCES: Permission denied`；Verify：1 個 chunk 驗證失敗），**不是正式的 Tokyo16**。`zhtest` 已刪除，見[中文通知文件](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-zh-tw-notification/) |
 
 ## 13. 常見問題：出問題時在哪裡停下來
 
