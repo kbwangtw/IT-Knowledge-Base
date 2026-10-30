@@ -1,0 +1,29 @@
+name: check site
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install Jekyll
+        run: gem install --no-document jekyll:4.4.1 minima:2.5.2 kramdown-parser-gfm:1.1.0
+
+      - name: Build site
+        run: jekyll build --baseurl /IT-Knowledge-Base
+
+      - name: Check for unused stylesheets
+        run: ruby tools/check-unused-css/check.rb _site /IT-Knowledge-Base
