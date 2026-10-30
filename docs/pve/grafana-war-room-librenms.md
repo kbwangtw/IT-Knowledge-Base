@@ -4,19 +4,19 @@ title: "用 Grafana 建立戰情中心（二）：接上 LibreNMS"
 date: 2026-10-14
 categories: [PVE, Grafana, LibreNMS]
 permalink: /docs/pve/grafana-war-room-librenms/
-last_modified_at: 2026-10-22
+last_modified_at: 2026-10-30
 ---
 
 # 用 Grafana 建立戰情中心（二）：接上 LibreNMS
 
-> **一句話**：讓 Grafana 戰情中心也看得到「哪些設備斷線了」：以**唯讀**帳號的 API Token 讀取 LibreNMS，做出一格「斷線設備」數字和一張設備清單。
+> **一句話**：讓 Grafana 戰情中心也看得到「哪些設備斷線了」：以**唯讀**帳號的 API Token 讀取 LibreNMS，做出一格「斷線設備」數字和一張設備清單；10/30 再補上 LibreNMS 原本完全沒有的**告警規則與寄信**，設備斷線和恢復都會收到信。
 
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 想把監控系統的資料接到 Grafana 的人 |
 | 環境 | LibreNMS 26.9.1（LXC，CT 102，nginx）、Grafana 13.2.3（CT 114）、Infinity plugin |
-| 紀錄日期 | 2026-10-14（10/15 補充設備清單欄位與 SNMP 修正；10/22 補上 DC01、DC02、CA） |
-| 結果 | ✅ 斷線設備數字、設備清單（16 台，10/22 起 19 台）已上線；Token 屬唯讀使用者、寫入測試被拒（403）；✅ DC01、DC02、CA 以 Ping 監控，斷線實測會變紅 |
+| 紀錄日期 | 2026-10-14（10/15 補充設備清單欄位與 SNMP 修正；10/22 補上 DC01、DC02、CA；10/30 告警寄信） |
+| 結果 | ✅ 斷線設備數字、設備清單（16 台，10/22 起 19 台）已上線；Token 屬唯讀使用者、寫入測試被拒（403）；✅ DC01、DC02、CA 以 Ping 監控，斷線實測會變紅；✅ 設備斷線告警：CA 實測斷線約 1.5 分鐘收到信、恢復也收到信 |
 
 > 第一階段見 [戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)。文中 IP 都是文件示範位址。
 
@@ -243,6 +243,8 @@ Get-NetFirewallRule -DisplayName "LibreNMS ICMPv4 Echo" | Get-NetFirewallAddress
 
 **看到的結果**：再跑一次 fping，ca 變成 `3/3/0%`。新增規則可能產生一筆 Wazuh 的防火牆變更事件，屬預期。
 
+> **10/30 更新**：之後作者刻意改用 Windows 內建的「核心網路診斷 - ICMP 回應要求 (ICMPv4-In)」規則（Domain 設定檔、內部名稱 `CoreNet-Diag-ICMP4-EchoRequest-In-NoScope`，允許任何來源），`LibreNMS ICMPv4 Echo` 已不存在，跟兩台 DC 一樣網域內都能 Ping。Windows 防火牆事件記錄查不到新增或刪除的紀錄（推測已被新紀錄蓋掉）。之後測試斷線要改停用這條內建規則（10-5）。
+
 ### 9-3 加入 LibreNMS
 
 ```bash
@@ -282,7 +284,171 @@ pct exec 102 -- mysql librenms -e "select hostname, status, status_reason from d
 
 恢復：`Enable-NetFirewallRule -DisplayName "LibreNMS ICMPv4 Echo"`，再 `device:poll` 一次，`status` 回到 1、Grafana 回到綠色 0。
 
-## 10. 還原方式
+當時 LibreNMS **沒有任何告警規則**，所以這次斷線只在畫面上看得到、`alert_log` 沒有紀錄，也沒有寄信，補在第 10 節。
+
+## 10. LibreNMS 告警：規則、Operation 與寄信（2026-10-30）
+
+**為什麼**：9-4 實測時發現 LibreNMS 從來沒寄過告警。盤點結果：
+
+```bash
+pct exec 102 -- mysql librenms -e "select (select count(*) from alert_rules) as 規則總數, (select count(*) from alert_rules where disabled=0) as 啟用中, (select count(*) from alerts where state=1) as 觸發中, (select count(*) from alert_log where time_logged > now() - interval 7 day) as 近7天紀錄;"
+pct exec 102 -- postconf -h relayhost myhostname inet_interfaces
+```
+
+**看到的結果**：四個數字都是 **0**（沒有任何規則）；容器裡 postfix 有裝、只聽本機，但 `relayhost` 是空白，`myhostname` 是 `librenms.localdomain`。也就是「沒有規則」和「寄不出去」兩個缺口都要補。
+
+> `mysql -e` 查不到資料時**什麼都不顯示**，空白不代表出錯；所以改用 `count(*)`，一定會印出數字。
+
+```text
+規則 Devices up/down → Operation「Gmail 立即通知」→ 傳送方式 Mail → postfix（CT 102）→ Gmail → 信箱
+```
+
+| 名詞 | 白話解釋 |
+| --- | --- |
+| **警報規則（Alert Rule）** | 什麼情況算告警，例如 `macros.device_down = 1` |
+| **警報操作（Operation）** | LibreNMS 26.x 新增：何時寄、隔多久再寄、寄到哪裡。**規則沒有選 Operation 時照樣觸發，但不會寄任何信** |
+| **警報傳送（Transport）** | 寄送的管道，例如 Mail |
+| **relayhost** | postfix 把信交給誰轉寄，本環境是 Gmail |
+
+### 10-1 postfix 透過 Gmail 轉寄（照抄 PVE 節點）
+
+先看範本（node10）和 CT 102 的差異，只看參數與權限，不看密碼內容：
+
+```bash
+postconf -n | grep -E '^(relayhost|smtp_sasl|smtp_tls|smtp_use_tls|myhostname|inet_interfaces)'
+ls -l /etc/postfix/sasl_passwd*
+pct exec 102 -- bash -c "postconf -n | grep -E '^(relayhost|smtp_sasl|smtp_tls|myhostname|inet_interfaces|mydestination)'; ls -l /etc/postfix/sasl_passwd* 2>&1; dpkg -l libsasl2-modules 2>/dev/null | tail -1"
+```
+
+**看到的結果**：node10 是 `relayhost = smtp.gmail.com:587`、`smtp_sasl_auth_enable = yes`、`smtp_tls_security_level = encrypt`；CT 102 沒有 `sasl_passwd`，**`libsasl2-modules` 也沒裝**（`un`），沒有它 postfix 無法用帳密登入 Gmail。
+
+在 **CT 102 所在節點**執行（當天 CT 102 在 node11；不確定時先 `ha-manager status | grep 102`）：
+
+```bash
+pct exec 102 -- apt install -y libsasl2-modules
+ssh root@node10 cat /etc/postfix/sasl_passwd | pct exec 102 -- sh -c 'umask 077; cat > /etc/postfix/sasl_passwd'
+pct exec 102 -- bash -c "
+cp -a /etc/postfix/main.cf /etc/postfix/main.cf.bak-\$(date +%Y%m%d)
+postconf -e 'relayhost = smtp.gmail.com:587' \
+  'smtp_sasl_auth_enable = yes' \
+  'smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd' \
+  'smtp_sasl_security_options = noanonymous' \
+  'smtp_tls_security_level = encrypt' \
+  'myhostname = librenms.<網域>'
+postmap /etc/postfix/sasl_passwd
+chmod 600 /etc/postfix/sasl_passwd /etc/postfix/sasl_passwd.db
+postfix check && echo CHECK-OK
+systemctl reload postfix
+"
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `ssh … cat … \| pct exec 102 -- sh -c '…'` | 帳密直接從 node10 用管線送進容器，不顯示在畫面、不留暫存檔；沿用同一組 Gmail 應用程式密碼 |
+| `umask 077` | 新檔權限 600 |
+| `relayhost` | 要跟 `sasl_passwd` 裡的寫法**一字不差** |
+| `noanonymous` | 不允許匿名登入；node10 是空白（全部允許），這裡稍微嚴格，搭配強制加密照樣能登入 Gmail |
+| `chmod 600 … .db` | `.db` 是 `postmap` 產生的查詢檔，**同樣含有密碼**，也要 600 |
+
+**看到的結果**：`CHECK-OK`；兩個檔案都是 `-rw-------`。`postfix: Postfix is using backwards-compatible default settings` 三行是提醒，不影響寄信。
+
+> ⚠️ `pct` 只能操作本節點的容器。在 node10 執行會出現 `Configuration file 'nodes/node10/lxc/102.conf' does not exist`，帳密不會寫到任何地方，換到正確的節點再執行即可。
+
+寄一封測試信：
+
+```bash
+read -p "收件 Gmail：" TO
+printf 'Subject: [TEST] LibreNMS CT102 mail relay\nContent-Type: text/plain; charset=UTF-8\n\n這是 LibreNMS 容器（CT 102）透過 postfix + Gmail 寄出的測試信。\n' | pct exec 102 -- /usr/sbin/sendmail "$TO"
+pct exec 102 -- bash -c "journalctl --since '5 min ago' --no-pager | grep -E 'postfix/.*status=' | tail -3"
+```
+
+**看到的結果**：`relay=smtp.gmail.com[…]:587 … status=sent (250 2.0.0 OK …)`，3 秒寄出；信進收件匣，寄件人顯示 `root <你的 Gmail>`（Gmail 會把寄件地址改成登入的帳號）。
+
+### 10-2 LibreNMS 寄信設定
+
+```bash
+read -p "寄件 Gmail（跟 postfix 登入的同一個）：" FROM
+for kv in "email_backend sendmail" "email_from $FROM" "email_user LibreNMS"; do
+  pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms config:set $kv"
+done
+pct exec 102 -- su - librenms -s /bin/bash -c "php -r 'echo ini_get(\"sendmail_path\"), PHP_EOL;'"
+```
+
+| 設定 | 意思 |
+| --- | --- |
+| `email_backend sendmail` | 交給本機 sendmail（postfix） |
+| `email_from` | 寄件地址；Gmail 反正會改成登入帳號，直接填同一個 |
+| `email_user LibreNMS` | 寄件人顯示名稱 |
+
+**看到的結果**：三個設定都成功；PHP 的 `sendmail_path` 是 `/usr/sbin/sendmail -t -i`，所以不用另外設定路徑（`email_sendmail_path` 會回 `This is not a valid setting`，不是有效設定）。
+
+### 10-3 警報傳送（Transport）
+
+**警報 → 警報傳送 → Create alert transport**：
+
+| 欄位 | 設定 |
+| --- | --- |
+| Transport name | 自訂，例如 `ITBH -Infra GMail` |
+| Transport type | Mail |
+| Default Alert | ON |
+| Contact Type | Specified Email |
+| Email | 收件信箱（**手動輸入**） |
+| Include Graphs | ON |
+
+按 **Test**，收到測試信、寄件人顯示 **LibreNMS**。
+
+> 存檔時出現「email 必須是有效的電子郵件地址」：欄位裡帶了看不見的空白（複製貼上造成），清空後手動輸入即可。
+
+### 10-4 警報操作（Operation）與規則
+
+**警報 → 警報操作 → 新增**：
+
+| 欄位 | 設定 | 意思 |
+| --- | --- | --- |
+| 名稱 | `Gmail 立即通知` | |
+| 預設步驟持續時間 | 60 | |
+| 抑制通知 | OFF | |
+| 步驟從／**步驟到** | 1／**1** | **只寄一封**；「步驟到」留空是 ∞，會一直重複寄到問題解決 |
+| 起始（秒） | 0 | 立刻寄 |
+| 步驟持續時間（秒） | 60 | |
+| 傳輸方式／群組 | `Mail: ITBH -Infra GMail` | |
+
+**警報 → 警報規則 → Create rule from collection → `Devices up/down`**：條件 `macros.device_down = Yes`、Severity **Critical**、Recovery alerts **ON**、Acknowledgement alerts ON、Match devices 空白（全部設備），**Operation 選 `Gmail 立即通知`**。
+
+> 舊版的 Max alerts、Delay、Interval 已經不在規則裡（Advanced 分頁只剩 Override SQL），改由 Operation 決定。Transport 開 Default Alert **不會**讓規則自動寄信，一定要選 Operation。
+
+### 10-5 實測：CA 斷線與恢復
+
+在 CA 暫時停用 Domain 的 Ping 規則（同一個 PowerShell 視窗做到恢復）：
+
+```powershell
+$r = Get-NetFirewallRule -DisplayName "核心網路診斷 - ICMP 回應要求 (ICMPv4-In)" | Where-Object { $_.Profile -match 'Domain' }
+$r | Select-Object Name, DisplayName, Profile, Enabled
+$r | Disable-NetFirewallRule
+```
+
+```bash
+pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device:poll ca.<網域>" | tail -3
+sleep 120
+pct exec 102 -- mysql librenms -e "select (select count(*) from alerts where state=1) as 觸發中, (select count(*) from alert_log where time_logged > now() - interval 10 minute) as 近10分鐘紀錄;"
+pct exec 102 -- bash -c "journalctl --since '5 min ago' --no-pager | grep -E 'postfix/.*status=' | tail -3"
+```
+
+恢復：`$r | Enable-NetFirewallRule`（視窗關了就用 `Enable-NetFirewallRule -Name "CoreNet-Diag-ICMP4-EchoRequest-In-NoScope"`），再 `device:poll` 一次。
+
+**看到的結果**：
+
+| 時間 | 事件 |
+| --- | --- |
+| 14:56:29 | 停用規則；輪詢顯示 `Device was down (icmp), unable to poll.` |
+| 14:57:27 | 告警產生，觸發中 1、近 10 分鐘紀錄 1 |
+| 14:58:04 | postfix `status=sent`，收到「Alert for device ca.<網域> - Devices up/down」，Severity critical |
+| 約 14:59 | 啟用規則、輪詢 |
+| 15:00:10 | 恢復，`Time elapsed: 2m 43s`；15:01:14 寄出「Device ca.<網域> recovered from Devices up/down」，觸發中回到 0 |
+
+預設範本內容很少（`Faults:`、`Alert sent to:` 都是空的），列入待辦改成中文並加上 IP、斷線原因。
+
+## 11. 還原方式
 
 ```bash
 pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join users u on u.user_id=t.tokenable_id where u.username='grafana';"
@@ -290,9 +456,11 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 
 再到 LibreNMS 刪除 `grafana` 使用者，並在 Grafana 移除 LibreNMS 資料來源和兩個面板。LibreNMS 本身沒有其他變更。
 
-第 9 節的三台：`lnms device:remove <主機名稱>` 移除設備；CA 上 `Remove-NetFirewallRule -DisplayName "LibreNMS ICMPv4 Echo"`。
+第 9 節的三台：`lnms device:remove <主機名稱>` 移除設備（CA 的 Ping 現在由內建規則放行，作者刻意保留）。
 
-## 11. 待辦
+第 10 節：在網頁刪除規則 `Devices up/down`、警報操作 `Gmail 立即通知`、警報傳送；`lnms config:set email_backend mail`；CT 102 把 `main.cf.bak-日期` 複製回 `/etc/postfix/main.cf`、刪除 `/etc/postfix/sasl_passwd*`，再 `systemctl reload postfix`。
+
+## 12. 待辦
 
 | 項目 | 狀態 |
 | --- | --- |
@@ -301,17 +469,23 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 | 評估 jt-ipam 改用權限較小的 LibreNMS 使用者 | 待評估 |
 | 「目前告警」面板（`/api/v0/alerts?state=1`） | 可擴充 |
 | DC01、DC02、CA 加入 LibreNMS（只用 Ping） | ✅ 完成（2026-10-22，第 9 節） |
-| LibreNMS 告警：**沒有任何告警規則**（`alert_rules` 0 筆、近 7 天 `alert_log` 0 筆，9-4 的斷線也沒留下告警）；容器內 postfix 已安裝、只聽本機，但 `relayhost` 空白、`myhostname` 是 `librenms.localdomain` | ⏳ 待辦（2026-10-22 盤點）：先建「設備斷線」等少數規則，再比照 PVE／PBS 設定 Gmail 轉寄 |
+| LibreNMS 告警規則與寄信（原本 0 條規則、postfix 未設轉寄） | ✅ 完成（2026-10-30，第 10 節）：`Devices up/down`，斷線與恢復都會寄信 |
+| 告警範本改成中文，加上 IP、斷線原因、持續時間 | ⏳ 待辦 |
+| 評估再加其他規則（例如磁碟將滿、連接埠斷線），一次加一條、觀察信件量 | ⏳ 待評估 |
+| PVE 三台與 PBS31 的 `/etc/postfix/sasl_passwd.db` 權限：node10 是 **644**（任何帳號都讀得到 Gmail 應用程式密碼），應改成 600；其他三台未確認 | ⏳ 待辦 |
+| node10 的 `smtp_tls_CAfile` 指向 Entrust 根憑證，但 Gmail 不是 Entrust 簽發；`encrypt` 模式不驗證憑證所以沒影響，日後改成驗證憑證時要一併修正 | ⏳ 待評估 |
 | DC／CA 的 CPU、磁碟用量：先在非 DC 的測試機試用 SNMPv3 agent（snmp4windows），或等 jt-snmpd 支援 v3 | ⏳ 待評估 |
 | 設備清單改為「類型」＋「發行版」 | ✅ 完成（2026-10-15） |
 | 6 台補 `extend distro` | ✅ 完成（2026-10-15） |
 | 6 台 `rouser snmpuser` 加上 `priv` | ✅ 完成（2026-10-15） |
 
-## 12. 延伸閱讀
+## 13. 延伸閱讀
 
 - [LibreNMS：API Authentication](https://docs.librenms.org/API/)、[API Devices](https://docs.librenms.org/API/Devices/)
 - [Jt-snmpd: a read-only SNMP agent for Windows hosts（LibreNMS Community）](https://community.librenms.org/t/jt-snmpd-a-read-only-snmp-agent-for-windows-hosts/29432)
 - [Net-SNMP README.win32](https://net-snmp.sourceforge.io/docs/README.win32.html)
+- [LibreNMS：Alerting Operations](https://docs.librenms.org/Alerting/Operations/)、[Alerting](https://docs.librenms.org/Alerting/)
+- [Postfix：SASL（sasl_passwd 權限建議）](https://www.postfix.org/SASL_README.html)
 - [Laravel Sanctum：API Token Authentication](https://laravel.com/docs/sanctum#api-token-authentication)
 - [Grafana Infinity data source](https://grafana.com/docs/plugins/yesoreyeram-infinity-datasource/latest/)
 - [用 Grafana 建立戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)
