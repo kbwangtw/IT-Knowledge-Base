@@ -6,6 +6,7 @@ categories: [PVE, Grafana, LibreNMS]
 permalink: /docs/pve/grafana-war-room-librenms/
 last_modified_at: 2026-10-30
 ---
+{% raw %}
 
 # 用 Grafana 建立戰情中心（二）：接上 LibreNMS
 
@@ -16,7 +17,7 @@ last_modified_at: 2026-10-30
 | 適合誰看 | 想把監控系統的資料接到 Grafana 的人 |
 | 環境 | LibreNMS 26.9.1（LXC，CT 102，nginx）、Grafana 13.2.3（CT 114）、Infinity plugin |
 | 紀錄日期 | 2026-10-14（10/15 補充設備清單欄位與 SNMP 修正；10/22 補上 DC01、DC02、CA；10/30 告警寄信） |
-| 結果 | ✅ 斷線設備數字、設備清單（16 台，10/22 起 19 台）已上線；Token 屬唯讀使用者、寫入測試被拒（403）；✅ DC01、DC02、CA 以 Ping 監控，斷線實測會變紅；✅ 設備斷線告警：CA 實測斷線約 1.5 分鐘收到信、恢復也收到信 |
+| 結果 | ✅ 斷線設備數字、設備清單（16 台，10/22 起 19 台）已上線；Token 屬唯讀使用者、寫入測試被拒（403）；✅ DC01、DC02、CA 以 Ping 監控，斷線實測會變紅；✅ 設備斷線告警：CA 實測斷線約 1.5 分鐘收到信、恢復也收到信；✅ 中文範本含 IP、斷線原因、持續時間 |
 
 > 第一階段見 [戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)。文中 IP 都是文件示範位址。
 
@@ -413,7 +414,7 @@ pct exec 102 -- su - librenms -s /bin/bash -c "php -r 'echo ini_get(\"sendmail_p
 | 步驟持續時間（秒） | 60 | |
 | 傳輸方式／群組 | `Mail: ITBH -Infra GMail` | |
 
-**警報 → 警報規則 → Create rule from collection → `Devices up/down`**：條件 `macros.device_down = Yes`、Severity **Critical**、Recovery alerts **ON**、Acknowledgement alerts ON、Match devices 空白（全部設備），**Operation 選 `Gmail 立即通知`**。
+**警報 → 警報規則 → Create rule from collection → `Devices up/down`**：條件 `macros.device_down = Yes`、Severity **Critical**、Recovery alerts **ON**、Acknowledgement alerts ON、Match devices 空白（全部設備），**Operation 選 `Gmail 立即通知`**。存檔後作者把規則名稱改成 **`設備連/斷線`**；Operation、範本是用規則編號連結，改名不受影響。
 
 > 舊版的 Max alerts、Delay、Interval 已經不在規則裡（Advanced 分頁只剩 Override SQL），改由 Operation 決定。Transport 開 Default Alert **不會**讓規則自動寄信，一定要選 Operation。
 
@@ -446,7 +447,100 @@ pct exec 102 -- bash -c "journalctl --since '5 min ago' --no-pager | grep -E 'po
 | 約 14:59 | 啟用規則、輪詢 |
 | 15:00:10 | 恢復，`Time elapsed: 2m 43s`；15:01:14 寄出「Device ca.<網域> recovered from Devices up/down」，觸發中回到 0 |
 
-預設範本內容很少（`Faults:`、`Alert sent to:` 都是空的），列入待辦改成中文並加上 IP、斷線原因。
+預設範本內容很少（`Faults:`、`Alert sent to:` 都是空的），所以接著改成中文範本（10-6）。
+
+### 10-6 中文告警範本（加上 IP、斷線原因、持續時間）
+
+**做什麼**：**不改預設範本**，另外新增一個只套用在「設備連/斷線」的範本；改壞了移除即可。範本是 Laravel **Blade** 語法：`{{ … }}` 換成實際的值，`@if … @endif` 是條件。
+
+**警報 → 警報範本 → 新增**：
+
+| 欄位 | 設定 |
+| --- | --- |
+| Template name | `中文告警` |
+| Attach template to rules | `設備連/斷線` |
+| Alert title | `【LibreNMS 告警】{{ $alert->hostname }}：{{ $alert->name }}` |
+| Recovery title | `【LibreNMS 恢復】{{ $alert->hostname }}：{{ $alert->name }}` |
+
+Template：
+
+```blade
+@php($dev = \App\Models\Device::find($alert->device_id))
+@if ($alert->state == 0)
+【已恢復】{{ $alert->hostname }}
+@elseif ($alert->state == 2)
+【已確認】{{ $alert->hostname }}
+@else
+【告警】{{ $alert->hostname }}
+@endif
+
+規則：{{ $alert->name ?: $alert->rule }}
+嚴重程度：{{ ['critical' => '嚴重', 'warning' => '警告', 'ok' => '正常'][$alert->severity] ?? $alert->severity }}
+主機：{{ $alert->hostname }}
+@if ($dev && $dev->ip)
+IP：{{ $dev->ip }}
+@endif
+@if ($alert->state != 0 && $dev && $dev->status_reason)
+斷線原因：{{ ['icmp' => 'Ping 無回應（ICMP）', 'snmp' => 'SNMP 無回應'][$dev->status_reason] ?? $dev->status_reason }}
+@endif
+@if ($alert->state == 0)
+持續時間：{{ $alert->elapsed }}
+@endif
+時間：{{ $alert->timestamp }}
+編號：{{ $alert->uid }}
+@if ($alert->faults)
+@foreach ($alert->faults as $key => $value)
+@if (!empty($value['string']))
+細項 {{ $key }}：{{ $value['string'] }}
+@endif
+@endforeach
+@endif
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `@php($dev = \App\Models\Device::find($alert->device_id))` | 用設備編號從資料庫查出這台設備 |
+| `$alert->state` | 0 已恢復、1 告警中、2 已確認 |
+| `['critical' => '嚴重', …][…] ?? …` | 英文換中文；對照表沒有的值顯示原文 |
+| `$dev->ip`、`$dev->status_reason` | IP 和斷線原因改從設備資料讀 |
+| `@if (… && …)` | 有值才顯示這一行，沒有就整行略過 |
+| `$alert->elapsed` | 持續時間，只有恢復通知才有 |
+| `!empty($value['string'])` | 設備斷線的細項是空的，避免印出空白的 `#1:` |
+
+**為什麼要查資料庫**：第一版直接用 `$alert->ip`、`$alert->status_reason`，信裡**沒有這兩行**；查資料庫 `devices` 表卻有值：
+
+```bash
+pct exec 102 -- mysql librenms -e "select device_id, hostname, inet6_ntoa(ip) as ip, overwrite_ip, status, status_reason from devices where hostname like 'ca.%';"
+```
+
+結果是 `ip 192.0.2.23`、`status_reason icmp`。也就是告警資料沒有帶這兩個值（`status_reason` 本來就不在官方欄位清單裡），改用 `$alert->device_id` 查設備後就出現了。
+
+**實測**（停用 CA 的 Ping 規則兩次）：
+
+| 編號 | 時間 | 內容 |
+| --- | --- | --- |
+| 3 | 15:23:19 | 第一版範本：中文、主旨正確，**沒有 IP、斷線原因** |
+| 4 | 15:25:34 | 第一版恢復信：持續時間 `2m 15s` |
+| 5 | 15:27:25 | 第二版：`IP：192.0.2.23`、`斷線原因：Ping 無回應（ICMP）` ✅ |
+| 6 | 15:28:48 | 第二版恢復信：IP、`持續時間：1m 23s` ✅ |
+
+收到的信：
+
+```text
+主旨：【LibreNMS 告警】ca.<網域>：設備連/斷線
+
+【告警】ca.<網域>
+
+規則：設備連/斷線
+嚴重程度：嚴重
+主機：ca.<網域>
+IP：192.0.2.23
+斷線原因：Ping 無回應（ICMP）
+時間：2026-10-30 15:27:25
+編號：5
+```
+
+> Blade 範本可以執行任意 PHP（`@php`），官方文件提醒只能讓信任的管理員編輯範本。
 
 ## 11. 還原方式
 
@@ -458,7 +552,7 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 
 第 9 節的三台：`lnms device:remove <主機名稱>` 移除設備（CA 的 Ping 現在由內建規則放行，作者刻意保留）。
 
-第 10 節：在網頁刪除規則 `Devices up/down`、警報操作 `Gmail 立即通知`、警報傳送；`lnms config:set email_backend mail`；CT 102 把 `main.cf.bak-日期` 複製回 `/etc/postfix/main.cf`、刪除 `/etc/postfix/sasl_passwd*`，再 `systemctl reload postfix`。
+第 10 節：在網頁刪除範本 `中文告警`、規則 `設備連/斷線`、警報操作 `Gmail 立即通知`、警報傳送；`lnms config:set email_backend mail`；CT 102 把 `main.cf.bak-日期` 複製回 `/etc/postfix/main.cf`、刪除 `/etc/postfix/sasl_passwd*`，再 `systemctl reload postfix`。
 
 ## 12. 待辦
 
@@ -469,8 +563,8 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 | 評估 jt-ipam 改用權限較小的 LibreNMS 使用者 | 待評估 |
 | 「目前告警」面板（`/api/v0/alerts?state=1`） | 可擴充 |
 | DC01、DC02、CA 加入 LibreNMS（只用 Ping） | ✅ 完成（2026-10-22，第 9 節） |
-| LibreNMS 告警規則與寄信（原本 0 條規則、postfix 未設轉寄） | ✅ 完成（2026-10-30，第 10 節）：`Devices up/down`，斷線與恢復都會寄信 |
-| 告警範本改成中文，加上 IP、斷線原因、持續時間 | ⏳ 待辦 |
+| LibreNMS 告警規則與寄信（原本 0 條規則、postfix 未設轉寄） | ✅ 完成（2026-10-30，第 10 節）：「設備連/斷線」，斷線與恢復都會寄信 |
+| 告警範本改成中文，加上 IP、斷線原因、持續時間 | ✅ 完成（2026-10-30，10-6） |
 | 評估再加其他規則（例如磁碟將滿、連接埠斷線），一次加一條、觀察信件量 | ⏳ 待評估 |
 | PVE 三台與 PBS31 的 `/etc/postfix/sasl_passwd.db` 權限改成 600（node10、node12、pbs31 原本 644） | ✅ 完成（2026-10-30），見 [Graylog 告警與監控（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/) 9-3 |
 | node10 沒有 pbs31 的 SSH 主機金鑰紀錄（`Host key verification failed`） | ⏳ 需要時再於 PBS31 主控台確認指紋後加入 |
@@ -485,9 +579,11 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 - [LibreNMS：API Authentication](https://docs.librenms.org/API/)、[API Devices](https://docs.librenms.org/API/Devices/)
 - [Jt-snmpd: a read-only SNMP agent for Windows hosts（LibreNMS Community）](https://community.librenms.org/t/jt-snmpd-a-read-only-snmp-agent-for-windows-hosts/29432)
 - [Net-SNMP README.win32](https://net-snmp.sourceforge.io/docs/README.win32.html)
-- [LibreNMS：Alerting Operations](https://docs.librenms.org/Alerting/Operations/)、[Alerting](https://docs.librenms.org/Alerting/)
+- [LibreNMS：Alerting Operations](https://docs.librenms.org/Alerting/Operations/)、[Alerting](https://docs.librenms.org/Alerting/)、[Templates](https://docs.librenms.org/Alerting/Templates/)
 - [Postfix：SASL（sasl_passwd 權限建議）](https://www.postfix.org/SASL_README.html)
 - [Laravel Sanctum：API Token Authentication](https://laravel.com/docs/sanctum#api-token-authentication)
 - [Grafana Infinity data source](https://grafana.com/docs/plugins/yesoreyeram-infinity-datasource/latest/)
 - [用 Grafana 建立戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)
 - [用 Grafana 建立戰情中心（三）：接上 Prometheus（Ceph 與 PVE）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-prometheus/)
+
+{% endraw %}
