@@ -472,7 +472,8 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 | LibreNMS 告警規則與寄信（原本 0 條規則、postfix 未設轉寄） | ✅ 完成（2026-10-30，第 10 節）：`Devices up/down`，斷線與恢復都會寄信 |
 | 告警範本改成中文，加上 IP、斷線原因、持續時間 | ⏳ 待辦 |
 | 評估再加其他規則（例如磁碟將滿、連接埠斷線），一次加一條、觀察信件量 | ⏳ 待評估 |
-| PVE 三台與 PBS31 的 `/etc/postfix/sasl_passwd.db` 權限：node10 是 **644**（任何帳號都讀得到 Gmail 應用程式密碼），應改成 600；其他三台未確認 | ⏳ 待辦 |
+| PVE 三台與 PBS31 的 `/etc/postfix/sasl_passwd.db` 權限改成 600（node10、node12、pbs31 原本 644） | ✅ 完成（2026-10-30），見 [Graylog 告警與監控（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/) 9-3 |
+| node10 沒有 pbs31 的 SSH 主機金鑰紀錄（`Host key verification failed`） | ⏳ 需要時再於 PBS31 主控台確認指紋後加入 |
 | node10 的 `smtp_tls_CAfile` 指向 Entrust 根憑證，但 Gmail 不是 Entrust 簽發；`encrypt` 模式不驗證憑證所以沒影響，日後改成驗證憑證時要一併修正 | ⏳ 待評估 |
 | DC／CA 的 CPU、磁碟用量：先在非 DC 的測試機試用 SNMPv3 agent（snmp4windows），或等 jt-snmpd 支援 v3 | ⏳ 待評估 |
 | 設備清單改為「類型」＋「發行版」 | ✅ 完成（2026-10-15） |
