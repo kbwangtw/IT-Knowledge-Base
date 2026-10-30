@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+env:
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
+  # 建到 _site/IT-Knowledge-Base/，和正式網址 /IT-Knowledge-Base/... 的目錄結構一致，
+  # 這樣漏寫 baseurl 的連結（例如 /docs/...）會被 html-proofer 抓出來。
+  SITE_DIR: _site/IT-Knowledge-Base
+
 jobs:
   build-and-check:
     runs-on: ubuntu-latest
@@ -19,11 +26,15 @@ jobs:
         with:
           ruby-version: "3.3"
 
-      - name: Install Jekyll
-        run: gem install --no-document jekyll:4.4.1 minima:2.5.2 kramdown-parser-gfm:1.1.0
+      - name: Install Jekyll and html-proofer
+        run: gem install --no-document jekyll:4.4.1 minima:2.5.2 kramdown-parser-gfm:1.1.0 html-proofer:5.2.3
 
       - name: Build site
-        run: jekyll build --baseurl /IT-Knowledge-Base
+        run: jekyll build --baseurl /IT-Knowledge-Base -d "$SITE_DIR"
 
       - name: Check for unused stylesheets
-        run: ruby tools/check-unused-css/check.rb _site /IT-Knowledge-Base
+        run: ruby tools/check-unused-css/check.rb "$SITE_DIR" /IT-Knowledge-Base
+
+      # 只檢查站內連結、錨點（#）與圖片；外部網站不檢查（會因對方網站狀況誤報）。
+      - name: Check internal links
+        run: htmlproofer "$SITE_DIR" --root-dir _site --disable-external --no-enforce-https --checks Links,Images
