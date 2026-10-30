@@ -136,7 +136,7 @@ pct exec 103 -- systemctl --failed --no-legend | wc -l
 pct exec 113 -- sh -c 'cat /etc/apt/sources.list.d/nodesource.sources; npm ls -g --depth=0 2>/dev/null; ls /root/node_modules | head; ls /root/*.js'
 ```
 
-`URIs: https://deb.nodesource.com/node_20.x`；全域只有 `corepack`、`npm`；`/root/node_modules` 是 `pptxgenjs`、`jszip` 等純 JavaScript 套件，給 `/root/generate_pptx.js` 用。
+`URIs: https://deb.nodesource.com/node_20.x`；全域只有 `corepack`、`npm`；`/root/node_modules` 是 `pptxgenjs`、`jszip` 等純 JavaScript 套件，給 `/root/generate_pptx.js` 用（`generate_pptx.js` 已於 2026-10-30 刪除，`/root/node_modules` 是它的相依套件，尚未清理）。
 
 **換來源並升級**：
 
