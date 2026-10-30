@@ -495,5 +495,6 @@ smartctl -A $dev | grep -iE "temperature|warning|critical|percentage used|data u
 
 - [一次檢查並統一所有 LXC 的時區](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-lxc-timezone/)：這次是在修正 LibreNMS 舊事件紀錄時發現溫度事件的
 - [用 Grafana 建立戰情中心（二）：接上 LibreNMS](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/)
-- [LibreNMS 官方文件：Health Information（Sensors）](https://docs.librenms.org/Support/Health-Information/)
+- [LibreNMS 官方文件：Device Sensors（感測器門檻設定）](https://docs.librenms.org/Support/Device-Sensors/)
+- [LibreNMS 官方文件：Health Information（支援的感測器類別，開發者文件）](https://docs.librenms.org/Developing/os/Health-Information/)
 - [lm-sensors](https://github.com/lm-sensors/lm-sensors)

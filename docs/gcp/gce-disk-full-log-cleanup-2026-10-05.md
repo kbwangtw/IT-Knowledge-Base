@@ -4,7 +4,7 @@ title: "GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題"
 permalink: /docs/gcp/gce-disk-full-log-cleanup-2026-10-05/
 date: 2026-10-05
 categories: [GCP, Debian, Logging, Security, Cloudflare]
-last_modified_at: 2026-10-20
+last_modified_at: 2026-10-30
 ---
 
 # GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題
@@ -850,7 +850,7 @@ gcloud compute snapshots create <DISK>-before-bt-update-$(date +%Y%m%d) \
 
 ## 15. 延伸閱讀
 
-- [Ops Agent 疑難排解](https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent/troubleshoot-run-ingestion)
+- [Ops Agent 疑難排解：資料沒有送進 Logging／Monitoring](https://docs.cloud.google.com/monitoring/agent/ops-agent/troubleshoot-run-ingest)
 - [Compute Engine 存取範圍與 IAM](https://cloud.google.com/compute/docs/access/service-accounts#accesscopesiam)
 - [IAP TCP 轉送的防火牆設定](https://cloud.google.com/iap/docs/using-tcp-forwarding#create-firewall-rule)
 - [Cloudflare Origin CA 憑證](https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/)

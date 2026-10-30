@@ -34,17 +34,19 @@ jobs:
         run: jekyll build --baseurl /IT-Knowledge-Base -d "$SITE_DIR"
 
       # 403／429／999 多半是對方網站擋自動程式，不代表連結失效，所以略過。
+      # hpe.com 會擋自動程式（回 503 或中斷連線），一律略過；HPE 連結請人工點選確認。
       - name: Check external links
         id: proof
         run: |
           set +e
           htmlproofer "$SITE_DIR" --root-dir _site --no-enforce-https --checks Links \
             --ignore-status-codes "403,429,999" \
+            --ignore-urls '/hpe\.com\//' \
             --typhoeus '{"followlocation":true,"connecttimeout":15,"timeout":30}' \
             --hydra '{"max_concurrency":8}' > proofer.log 2>&1
           echo "exit=$?" >> "$GITHUB_OUTPUT"
           # 去掉 JSON 格式的除錯訊息與建置目錄前綴，只留給人看的結果
-          grep -v '^{' proofer.log | sed "s#$PWD/_site##g" > report.txt
+          grep -v '^{' proofer.log | sed "s#$SITE_DIR#/IT-Knowledge-Base#g" > report.txt
           cat report.txt
 
       - name: Open or update issue

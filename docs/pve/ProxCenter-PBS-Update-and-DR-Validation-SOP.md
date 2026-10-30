@@ -4,7 +4,7 @@ title: "PBS 更新後，怎麼確認備份還能用？"
 date: 2026-09-11
 categories: [PVE, PBS, ProxCenter, DR]
 permalink: /docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/
-last_modified_at: 2026-10-29
+last_modified_at: 2026-10-30
 ---
 
 # PBS 更新後，怎麼確認備份還能用？
@@ -514,6 +514,6 @@ apt autoremove -y >/dev/null 2>&1; dpkg -l 'proxmox-kernel-*' | awk '/^ii/{print
 - [備份監控：失敗通知與每日備份檢查](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)（Graylog 告警與監控（二）第 7 節）
 - [從 PBS 還原 ProxCenter：先複製一台，再確認能用](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-pbs-restore-dr-runbook/)
 - [Ubuntu VM 從 PBS 還原：6 分 38 秒代表什麼？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ubuntu-vm112-pbs-disaster-recovery/)
-- [PBS 套件來源](https://pbs.proxmox.com/docs/installation.html#package-repositories)
+- [PBS 套件來源](https://pbs.proxmox.com/docs/installation.html#sysadmin-package-repositories)
 - [PBS 使用者管理](https://pbs.proxmox.com/docs/user-management.html)
 - [PBS API](https://pbs.proxmox.com/docs/api-viewer/index.html)

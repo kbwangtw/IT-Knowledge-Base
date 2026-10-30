@@ -4,7 +4,7 @@ title: "Cisco ACL 插入或調整規則順序（摘要與原文連結）"
 date: 2023-08-22
 categories: [Network, Cisco, ACL, Blogger 舊文, 轉貼摘要]
 permalink: /docs/blogger/network/cisco-acl-sequence/
-last_modified_at: 2026-10-24
+last_modified_at: 2026-10-30
 ---
 
 # Cisco ACL 插入或調整規則順序（摘要與原文連結）
@@ -41,6 +41,6 @@ last_modified_at: 2026-10-24
 
 ## 3. 延伸閱讀
 
-- [原文（他人撰寫）](https://blog.90.vc/archives/158)
+- [原文（他人撰寫，原網址已失效，改連 Wayback Machine 2021-07-25 封存版）](https://web.archive.org/web/20210725183759/https://blog.90.vc/archives/158)
 - [Cisco 官方：IP Access List Entry Sequence Numbering](https://cisco.com/en/US/docs/ios-xml/ios/sec_data_acl/configuration/15-e/sec-acl-seq-num.html)
 - [Blogger 轉貼頁](https://kbwangtw.blogspot.com/2023/08/cisco-acl.html)
