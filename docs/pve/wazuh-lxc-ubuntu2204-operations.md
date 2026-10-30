@@ -4,7 +4,7 @@ title: "Wazuh 維運（二）：資料保留、告警調校、弱點修補與整
 date: 2026-10-02
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-operations/
-last_modified_at: 2026-10-22
+last_modified_at: 2026-10-30
 ---
 {% raw %}
 
@@ -49,7 +49,7 @@ last_modified_at: 2026-10-22
 
 | # | 步驟 | 狀態 | 實測紀錄 |
 | --- | --- | --- | --- |
-| 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天 |
+| 10 | 資料保留 | 已實測 | 2026-10-02：告警索引 ISM 保留 30 天（套用 3 個現有索引）；告警文字檔以 cron 保留 30 天；2026-10-30：9/30 的索引已被刪除，30 個索引都由 `wazuh-alerts-30d` 管理（10-6） |
 | 11 | 告警調校 | 第二輪完成 | 2026-10-02：第一輪修正 ai 容器根因並降級 Windows 電腦帳號、LibreNMS SNMP sudo、LXC rootcheck；第二輪降級 BITS 啟動類型、排除 VSS 登錄檔與 /etc/pve 狀態檔、清除 jt-ipam 過期設備並將 Graylog 加回 LibreNMS；10/16 以子規則 100141 處理 31301（11-13）；10/20 驗收登入失敗、人員 sudo、FIM 仍偵測得到（11-15）；10/20 Grafana 容器的 52002 歸零（11-2） |
 | 12 | 弱點偵測與修補 | 完成 | 2026-10-06：Critical 998 → 292、High 7,132 → 2,216（約減少七成）；剩 ubclient 使用中 kernel 誤判、ai 的 ffmpeg（已限制 Bot 存取）與上游未修補項目；10/14 ubclient 套件更新並修正 logrotate 重複設定（12-6） |
 | 13 | jt-ipam 整合 | 完成 | 2026-10-06：建立只能讀取 Agent 的 API 帳號；nftables 限制 55000 只允許本機與 jt-ipam；同步 17 台 Agent |
@@ -120,7 +120,7 @@ curl -sk -u admin 'https://127.0.0.1:9200/_plugins/_ism/explain/wazuh-alerts-*?p
 | 套用到現有索引 | `"updated_indices":3`、`"failures":false` |
 | explain | 9/30、10/01、10/02 三個告警索引的 `policy_id` 皆為 `wazuh-alerts-30d` |
 
-`min_index_age` 從索引建立時間起算，9/30 的索引預計在 10/30 左右被刪除；ISM 每隔一段時間才檢查一次，實際刪除時間會稍晚。
+`min_index_age` 從索引建立時間起算，9/30 的索引預計在 10/30 左右被刪除；ISM 每隔一段時間才檢查一次，實際刪除時間會稍晚（2026-10-30 實測已刪除，見 10-6）。
 
 ### 10-3 Manager：告警文字檔保留 30 天
 
@@ -169,6 +169,47 @@ ls -l /etc/cron.d/wazuh-alerts-cleanup; du -sh /var/ossec/logs/alerts
 | 告警文字檔 | 95 MB | 43 MB；清理排程權限 `-rw-r--r-- root` | 正常 |
 
 10/08 為 18,528 筆，是當天 PVE 逐台更新（套件異動、重開機）產生，屬預期。
+
+### 10-6 保留是否真的生效（2026-10-30 驗收）
+
+9/30 的索引依政策應在 10/30 左右刪除。在 CT 112 內執行（全部唯讀；Indexer 查詢用管理員憑證，不需輸入 admin 密碼）：
+
+```bash
+C=/etc/wazuh-indexer/certs
+curl -sk --cert $C/admin.pem --key $C/admin-key.pem "https://127.0.0.1:9200/_cat/indices/wazuh-alerts-*?v&s=index&h=index,docs.count,store.size" | head -5
+curl -sk --cert $C/admin.pem --key $C/admin-key.pem "https://127.0.0.1:9200/_plugins/_ism/explain/wazuh-alerts-*" | grep -o '"policy_id":"[^"]*"' | sort | uniq -c
+ls /var/ossec/logs/alerts/2026/Sep/ 2>/dev/null | head
+du -sh /var/ossec/logs/alerts
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| 第一個 `curl` | 列出最舊的幾個警報索引（名稱、文件數、大小）；`head -5` 含表頭，所以只顯示最舊的 4 個 |
+| 第二個 `curl` | 每個索引套用的 ISM 政策，`uniq -c` 算出各政策管幾個索引 |
+| `ls …/Sep/` | 9 月的告警文字檔是否還在 |
+| `du -sh` | 告警文字檔總大小 |
+
+**看到的結果**：
+
+| 項目 | 結果 |
+| --- | --- |
+| 最舊的索引 | `wazuh-alerts-4.x-2026.10.01`（107,176 筆、55.6 MB）；**9/30 的索引已消失** ✅ |
+| 其餘最舊的索引 | 10/02：48,315 筆、34.7 MB；10/03：12,817 筆、10 MB；10/04：3,244 筆、4.7 MB（調校後每天筆數明顯下降） |
+| ISM 政策 | `30 "policy_id":"wazuh-alerts-30d"`：30 個索引**全部**由這個政策管理（10/01～10/30 剛好 30 天）✅ |
+| 9 月的文字檔 | 只剩 9/30 這一天：`ossec-alerts-30.json.gz`、`.json.sum`、`.log.gz`、`.log.sum` 四個檔；9 月其他天已被清掉 |
+| 告警文字檔總大小 | 50 MB |
+
+**9/30 的文字檔還在是預期的**（推測）：10-3 的排程用 `find … -mtime +30 -delete`，會刪的是「最後修改時間距今滿 31 天」的檔案。9/30 的檔案在 10/01 凌晨才壓縮歸檔。10/30 11:21 實際查看（`ls -l --time-style=full-iso` 與 `date`）：
+
+| 項目 | 結果 |
+| --- | --- |
+| 排程檔 | `/etc/cron.d/wazuh-alerts-cleanup`，權限 `-rw-r--r-- root root`，內容為 `17 3 * * *` 與 `find … -mtime +30 -delete` |
+| `Sep/` 四個檔案的修改時間 | 2026-10-01 00:00:10～00:00:12（+0800） |
+| 現在時間 | 2026-10-30 11:21（CST），檔案年齡約 29 天 11 小時 |
+
+`-mtime +30` 是「年齡以 24 小時為單位無條件捨去後大於 30」，也就是**至少滿 31 天**。10/31 03:17 那次檔案年齡是 30 天又 3 小時，捨去後是 30，不會刪；**11/01 03:17 那次是 31 天又 3 小時，會刪**。刪掉後空的 `Sep` 目錄也會被清掉。依規則推算 **11/01 03:17 會清掉**，但**尚未用 11/01 之後的結果驗證**。
+
+> 索引日期以 UTC 切分，所以「9/30 的索引」是 UTC 日期；實際刪除時間會比 `min_index_age` 晚一點，因為 ISM 是定期檢查。
 
 ## 11. 告警調校
 
@@ -1550,6 +1591,7 @@ Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警�
 - [x] TLS 驗證（2026-10-20）：Grafana 改為驗證 Indexer 憑證（[戰情中心（一）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/) 7-1）；jt-ipam 評估後維持不驗證（13-3）
 - [x] node10 的 AppArmor DENIED（52002）告警調校：2026-10-20 來源是 Grafana（CT 114），停用容器內 rsyslogd 規則後歸零（11-2）
 - [ ] 定期檢查索引佔用與保留是否正常（10-5）
+- [ ] 11/01 03:17 之後確認 `/var/ossec/logs/alerts/2026/Sep/` 已被排程清掉（10-6）
 - [ ] DC01、DC02、CA 補上資源監控：目前 LibreNMS 只知道通不通，磁碟快滿、服務停止都不知道；Windows 內建 SNMP 已列為淘汰，評估改用既有 Wazuh Agent 或其他方式
 - [ ] LibreNMS「位置」欄統一：各 LXC 的 `sysLocation` 改成與節點無關的寫法（例如 `PVE-Cluster`），HA 搬移後才不會不準（11-14 補充）
 - [ ] 2027 年初規劃把容器升級到 Ubuntu 24.04（升級前先快照與 PBS 備份）

@@ -585,7 +585,7 @@ pct exec 113 -- bash -c '
 - [ ] repo 設定只允許 Squash merge（第 11 節）
 - [ ] 用幾天後，把常用唯讀指令（例如 `ceph -s`、`ha-manager status`）加進 allow
 - [x] 幾天後刪除 CT113 快照 `pre-node22`、`pre-hermes-removal`（2026-10-29 已刪；CT113 現在沒有快照，之後要動它之前先拍新的）
-- [ ] 決定 `/root/generate_pptx.js` 是否保留
+- [x] 決定 `/root/generate_pptx.js` 是否保留（2026-10-30 決定不留並已刪除；沒有排程或設定檔使用它）
 - [x] 清掉 CT113 `known_hosts` 裡那一行黏壞的記錄（2026-10-24；備份 `known_hosts.bak-20261024`，幾天後刪除）
 - [ ] CT113 `known_hosts` 補上 node10 的 ed25519 主機金鑰（目前只有 RSA）
 
