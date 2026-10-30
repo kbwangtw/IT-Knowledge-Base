@@ -17,7 +17,7 @@ last_modified_at: 2026-10-30
 | 適合誰看 | 想把監控系統的資料接到 Grafana 的人 |
 | 環境 | LibreNMS 26.9.1（LXC，CT 102，nginx）、Grafana 13.2.3（CT 114）、Infinity plugin |
 | 紀錄日期 | 2026-10-14（10/15 補充設備清單欄位與 SNMP 修正；10/22 補上 DC01、DC02、CA；10/30 告警寄信） |
-| 結果 | ✅ 斷線設備數字、設備清單（16 台，10/22 起 19 台）已上線；Token 屬唯讀使用者、寫入測試被拒（403）；✅ DC01、DC02、CA 以 Ping 監控，斷線實測會變紅；✅ 設備斷線告警：CA 實測斷線約 1.5 分鐘收到信、恢復也收到信；✅ 中文範本含 IP、斷線原因、持續時間 |
+| 結果 | ✅ 斷線設備數字、設備清單（16 台，10/22 起 19 台）已上線；Token 屬唯讀使用者、寫入測試被拒（403）；✅ DC01、DC02、CA 以 Ping 監控，斷線實測會變紅；✅ 設備斷線告警：CA 實測斷線約 1.5 分鐘收到信、恢復也收到信；✅ 中文範本含 IP、斷線原因、持續時間；✅ 第二條規則「磁碟使用率 ≥ 90%」 |
 
 > 第一階段見 [戰情中心（一）：接上 Wazuh](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/)。文中 IP 都是文件示範位址。
 
@@ -458,7 +458,7 @@ pct exec 102 -- bash -c "journalctl --since '5 min ago' --no-pager | grep -E 'po
 | 欄位 | 設定 |
 | --- | --- |
 | Template name | `中文告警` |
-| Attach template to rules | `設備連/斷線` |
+| Attach template to rules | `設備連/斷線`、`磁碟使用率 ≥ 90%`（10-7） |
 | Alert title | `【LibreNMS 告警】{{ $alert->hostname }}：{{ $alert->name }}` |
 | Recovery title | `【LibreNMS 恢復】{{ $alert->hostname }}：{{ $alert->name }}` |
 
@@ -490,7 +490,9 @@ IP：{{ $dev->ip }}
 編號：{{ $alert->uid }}
 @if ($alert->faults)
 @foreach ($alert->faults as $key => $value)
-@if (!empty($value['string']))
+@if (isset($value['storage_descr']))
+磁碟 {{ $key }}：{{ $value['storage_descr'] }}，使用率 {{ $value['storage_perc'] }}%
+@elseif (!empty($value['string']))
 細項 {{ $key }}：{{ $value['string'] }}
 @endif
 @endforeach
@@ -505,6 +507,7 @@ IP：{{ $dev->ip }}
 | `$dev->ip`、`$dev->status_reason` | IP 和斷線原因改從設備資料讀 |
 | `@if (… && …)` | 有值才顯示這一行，沒有就整行略過 |
 | `$alert->elapsed` | 持續時間，只有恢復通知才有 |
+| `isset($value['storage_descr'])` | 磁碟規則的細項：顯示磁碟名稱和使用率（10-7，未實測） |
 | `!empty($value['string'])` | 設備斷線的細項是空的，避免印出空白的 `#1:` |
 
 **為什麼要查資料庫**：第一版直接用 `$alert->ip`、`$alert->status_reason`，信裡**沒有這兩行**；查資料庫 `devices` 表卻有值：
@@ -542,6 +545,70 @@ IP：192.0.2.23
 
 > Blade 範本可以執行任意 PHP（`@php`），官方文件提醒只能讓信任的管理員編輯範本。
 
+### 10-7 第二條規則：磁碟使用率 ≥ 90%
+
+**做什麼**：一次只加一條規則、觀察信件量；第二條選「磁碟快滿」。
+
+**先盤點**：LibreNMS 的「儲存空間」不只有硬碟，有些項目本來就接近 100%，直接建規則可能一口氣寄出很多信。
+
+```bash
+pct exec 102 -- mysql librenms -e "
+select d.hostname, s.storage_type, s.storage_descr, s.storage_perc as '使用率%',
+       round(s.storage_size/1024/1024/1024,1) as '總GB'
+from storage s join devices d on d.device_id=s.device_id
+where s.storage_perc >= 70
+order by s.storage_perc desc;"
+pct exec 102 -- mysql librenms -e "select count(*) as 儲存項目總數, sum(storage_perc>=80) as '≥80%', sum(storage_perc>=90) as '≥90%' from storage;"
+```
+
+**看到的結果**：103 個儲存項目，≥80% **0** 個、≥90% **0** 個（≥70% 的清單是空的），所以規則建好不會馬上寄信，也先不用排除任何項目。
+
+**範本集（Create rule from collection，搜尋 `storage`）**只有四條：`Space on / is >= 90% …`、`>= 95%`（**只看根目錄 `/`**）和 `Windows Disk Usage …`（只看 Windows，DC／CA 只用 Ping 也沒有磁碟資料）。所以用第一條當底稿，改成所有磁碟：
+
+| 原本的條件 | 改成 |
+| --- | --- |
+| `storage.storage_descr = "/"` | 刪掉（所有磁碟） |
+| `storage.storage_perc >= 90` | 保留 |
+| `storage.storage_perc < 95` | 刪掉（先不分兩級） |
+| — | 新增 `macros.device_up = Yes`：設備在線上才判斷，斷線時磁碟資料是舊的（參考範本集的 Windows 規則） |
+
+| 欄位 | 設定 |
+| --- | --- |
+| Rule name | `磁碟使用率 ≥ 90%` |
+| 條件 | `storage.storage_perc >= 90 AND macros.device_up = 1` |
+| Severity | **Warning**（跟設備斷線的 Critical 區分） |
+| Recovery alerts | ON |
+| Notify per matching entity | OFF（同一台的多個磁碟合併成一封） |
+| Operation | `Gmail 立即通知` |
+| Match devices | 空白（All Devices） |
+
+範本 `中文告警` 再綁定這條規則，並在最後一段加上磁碟名稱與使用率（10-6 的範本已是新版）。
+
+> 欄位搜尋打 `macros.device_up ` 多了結尾空格會顯示 `No results found`，只打 `device_up` 即可。
+
+**原本想先「門檻 1%、只套用 grafana」實測，後來放棄**：
+
+- 規則編輯視窗的 **Match devices** 選了設備會顯示成 `null`，再選一次還是 `null`。資料庫 `alert_device_map` 其實有正確綁定（rule 2 → device 23），只是畫面顯示錯誤；但帶著 `null` 存檔可能把綁定弄壞。所以改成直接存正式設定（Match devices 留空＝全部設備），存完用資料庫確認：
+
+```bash
+pct exec 102 -- mysql librenms -e "select count(*) as 規則2設備綁定 from alert_device_map where rule_id=2; select id, name, builder, extra from alert_rules where id=2\G"
+```
+
+- 測試期間（門檻 1%、靜音）grafana 觸發過一筆告警，因為靜音沒有寄信；門檻改回 90% 後網頁出現「Some devices matching … are currently alerting」，`device:poll grafana.<網域>` 一次後解除（告警中 0），**也沒有寄恢復信**。也就是：靜音時觸發的告警，解除時不會補寄。
+- 範本清單的「Alert Rules」欄曾經把這條規則顯示在 Default Alert Template，但 `alert_template_map` 查到兩條規則都綁在 `中文告警`；以資料庫為準。
+
+```bash
+pct exec 102 -- mysql librenms -e "select m.id, t.name as 範本, r.name as 規則 from alert_template_map m join alert_templates t on t.id=m.alert_templates_id join alert_rules r on r.id=m.alert_rule_id;"
+```
+
+**預覽範本**：`scripts/test-template.php`（`-t` 範本編號、`-h` 設備、`-r` 規則、`-s` 狀態，沒有寄出的選項）只能預覽**正在告警中**的告警，目前沒有磁碟達 90%，會回 `No alert found, make sure to select an active alert.`。
+
+```bash
+pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && php scripts/test-template.php -t 5 -h 23 -r 2 -s 1"
+```
+
+> **未實測**：範本裡「磁碟 N：名稱，使用率 N%」這一行（`$value['storage_descr']`、`$value['storage_perc']`）還沒看過真正的信。作者決定不為了測試而把門檻降到 1%（會套用到全部設備），等實際有磁碟達 90% 時再確認；有 `isset` 保護，最壞只是信裡少了磁碟名稱。
+
 ## 11. 還原方式
 
 ```bash
@@ -552,7 +619,7 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 
 第 9 節的三台：`lnms device:remove <主機名稱>` 移除設備（CA 的 Ping 現在由內建規則放行，作者刻意保留）。
 
-第 10 節：在網頁刪除範本 `中文告警`、規則 `設備連/斷線`、警報操作 `Gmail 立即通知`、警報傳送；`lnms config:set email_backend mail`；CT 102 把 `main.cf.bak-日期` 複製回 `/etc/postfix/main.cf`、刪除 `/etc/postfix/sasl_passwd*`，再 `systemctl reload postfix`。
+第 10 節：在網頁刪除範本 `中文告警`、規則 `設備連/斷線` 與 `磁碟使用率 ≥ 90%`、警報操作 `Gmail 立即通知`、警報傳送；`lnms config:set email_backend mail`；CT 102 把 `main.cf.bak-日期` 複製回 `/etc/postfix/main.cf`、刪除 `/etc/postfix/sasl_passwd*`，再 `systemctl reload postfix`。
 
 ## 12. 待辦
 
@@ -565,7 +632,11 @@ pct exec 102 -- mysql librenms -e "delete t from personal_access_tokens t join u
 | DC01、DC02、CA 加入 LibreNMS（只用 Ping） | ✅ 完成（2026-10-22，第 9 節） |
 | LibreNMS 告警規則與寄信（原本 0 條規則、postfix 未設轉寄） | ✅ 完成（2026-10-30，第 10 節）：「設備連/斷線」，斷線與恢復都會寄信 |
 | 告警範本改成中文，加上 IP、斷線原因、持續時間 | ✅ 完成（2026-10-30，10-6） |
-| 評估再加其他規則（例如磁碟將滿、連接埠斷線），一次加一條、觀察信件量 | ⏳ 待評估 |
+| 第二條規則：磁碟使用率 ≥ 90%（Warning） | ✅ 完成（2026-10-30，10-7） |
+| 範本的磁碟名稱、使用率那一行 | ⏳ 未實測：等實際有磁碟達 90% 時確認信件內容 |
+| 視需要加 ≥95% 的第二級（Critical），或排除特定掛載點 | ⏳ 觀察一段時間後評估 |
+| 規則編輯視窗 Match devices 選設備會顯示 `null`（資料庫綁定正確） | ⏳ LibreNMS 更新後再確認；要限定設備時先用資料庫確認綁定 |
+| 再加其他規則（例如連接埠斷線），一次加一條、觀察信件量 | ⏳ 待評估 |
 | PVE 三台與 PBS31 的 `/etc/postfix/sasl_passwd.db` 權限改成 600（node10、node12、pbs31 原本 644） | ✅ 完成（2026-10-30），見 [Graylog 告警與監控（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/) 9-3 |
 | node10 沒有 pbs31 的 SSH 主機金鑰紀錄（`Host key verification failed`） | ⏳ 需要時再於 PBS31 主控台確認指紋後加入 |
 | node10 的 `smtp_tls_CAfile` 指向 Entrust 根憑證，但 Gmail 不是 Entrust 簽發；`encrypt` 模式不驗證憑證所以沒影響，日後改成驗證憑證時要一併修正 | ⏳ 待評估 |
