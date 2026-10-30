@@ -4,7 +4,7 @@ title: "Graylog 告警與監控（二）：告警清單與監控腳本"
 date: 2026-10-19
 categories: [PVE, Graylog, Monitoring]
 permalink: /docs/pve/graylog-alerts-monitoring/
-last_modified_at: 2026-10-20
+last_modified_at: 2026-10-30
 ---
 
 # Graylog 告警與監控（二）：告警清單與監控腳本
@@ -966,7 +966,7 @@ done
 | 改主旨 | 第 7 節 |
 | 讓摘要寫出「哪台、什麼事」 | 第 8～10 節 |
 
-## 9. postfix 加密參數與 IPv4 優先（2026-10-19～20）
+## 9. postfix 加密參數、IPv4 優先與帳密檔權限（2026-10-19～30）
 
 **做什麼**：三台 PVE 和 PBS31 的 postfix 把舊參數 `smtp_use_tls` 換成 `smtp_tls_security_level = encrypt`。postfix 是所有告警信的出口（PVE 備份通知、PBS 通知、第 5～7 節的監控腳本），所以一次只改一台，改完立刻寄測試信。
 
@@ -1105,6 +1105,37 @@ node11、node12 從 node10 用 9-1 同樣的 `for h in node11 node12; do ssh …
 原本就只是偶爾發生，一封測試信沒出現不代表修好；真正的驗證是隔天搜同一個查詢：10/20 13:48～10/21 08:53 為 **0 筆** ✅。
 
 還原：`cp -a /etc/postfix/main.cf.bak-<日期>-ipv4 /etc/postfix/main.cf && systemctl reload postfix`，或 `postconf -X smtp_address_preference`。
+
+### 9-3 `sasl_passwd.db` 權限改成 600（2026-10-30）
+
+**為什麼**：替 LibreNMS 設定寄信時（[戰情中心（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/)第 10 節）發現，node10 的 `sasl_passwd` 是 600，但 `postmap` 產生的 **`sasl_passwd.db` 是 644**。`.db` 只是換了檔案格式，**裡面一樣是 Gmail 應用程式密碼**，任何帳號都讀得到。postfix 在降低權限前就以 root 開啟這個檔案，所以設成 600 不影響寄信（postfix 官方 SASL 文件也是這樣建議）。
+
+**盤點**：
+
+```bash
+for h in node10 node11 node12; do echo "== $h"; ssh root@$h 'ls -l /etc/postfix/sasl_passwd*'; done
+```
+
+| 主機 | `sasl_passwd.db` |
+| --- | --- |
+| node10 | 644 ❌ |
+| node11 | 600 ✅（本來就是；`.db` 時間比帳密檔晚 7 分鐘，推測當初有另外補 chmod） |
+| node12 | 644 ❌ |
+| pbs31 | 644 ❌ |
+
+**怎麼做**：一台改完、寄測試信確認，再改下一台。節點從任一台執行（`$TO` 是收件信箱，用 `read -p` 輸入）：
+
+```bash
+ssh root@node10 "chmod 600 /etc/postfix/sasl_passwd.db && ls -l /etc/postfix/sasl_passwd* && printf 'Subject: [TEST] node10 postfix after chmod 600\n\n測試信\n' | /usr/sbin/sendmail $TO; sleep 5; journalctl --since '2 min ago' --no-pager | grep -E 'postfix/.*status=' | tail -2"
+```
+
+node12 同樣做法；PBS31 用網頁 **Administration → Shell** 執行 `chmod 600 /etc/postfix/sasl_passwd.db` 再寄測試信。
+
+**看到的結果**：四台都是 `-rw-------`；node10 15:06:31、node12 15:07:28、pbs31 15:09:27 都是 `status=sent`，信都收到。改回：`chmod 644 /etc/postfix/sasl_passwd.db`。
+
+> 測試信主旨寫死主機名稱時，要確認提示字元是哪一台：這次第一封「node10」測試信其實是在 node11 執行的（紀錄是 `node11 postfix/smtp`）。
+>
+> 從 node10 `ssh root@pbs31` 出現 `Host key verification failed`：node10 沒有 pbs31 的主機金鑰紀錄。不要用 `StrictHostKeyChecking=no` 跳過，改用 PBS 網頁 Shell；日後要從節點連 PBS31，先在 PBS31 主控台確認金鑰指紋再加入。
 
 ## 10. 常見問題
 
