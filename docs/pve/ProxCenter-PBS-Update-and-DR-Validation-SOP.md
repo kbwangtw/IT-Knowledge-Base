@@ -15,8 +15,8 @@ last_modified_at: 2026-10-29
 | --- | --- |
 | 適合誰看 | 第一次更新 PBS、不確定更新完要查什麼的人 |
 | 環境 | ProxCenter 1.4.9；PBS31（PBS 4.2.5 → 4.2.8）；PVE 三節點 |
-| 日期 | 2026-09-11 首次；2026-10-13 kernel 更新；2026-10-14 清理舊 kernel；2026-10-24 kernel -23 → -25 |
-| 結論 | ✅ 更新與重開後服務正常、PVE 讀得到 141 份備份；✅ CT110 還原成 CT210 可開機；✅ 四台 kernel 一致為 -23、舊 kernel 清理完成；✅ 10/24 再更新到 -25，並清掉 -22 和 PVE 的 6.17（第 11 節）；⏳ 業務功能與完整 RTO／RPO 未驗證 |
+| 日期 | 2026-09-11 首次；2026-10-13 kernel 更新；2026-10-14 清理舊 kernel；2026-10-24 kernel -23 → -25；2026-10-29 kernel -25 → -26；2026-10-30 清理 -23 |
+| 結論 | ✅ 更新與重開後服務正常、PVE 讀得到 141 份備份；✅ CT110 還原成 CT210 可開機；✅ 四台 kernel 一致為 -23、舊 kernel 清理完成；✅ 10/24 再更新到 -25，並清掉 -22 和 PVE 的 6.17（第 11 節）；✅ 10/29 更新到 -26（第 12 節），10/30 清掉 -23，四台剩 -25、-26（12-2）；⏳ 業務功能與完整 RTO／RPO 未驗證 |
 
 > 文中 IP 都是文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24）；照做前請換成自己的位址。
 
@@ -458,7 +458,25 @@ pvesm status
 
 **看到的結果**：node10、node11、node12 的 `PBS31` 都是 `active`、31.56%，總量約 2.61 TiB、已用約 843 GiB，和 PBS 網頁（905.49 GB）換算後一致。`active` 只代表 PVE 查得到容量，**不代表備份一定成功**；當晚三封備份通知信才是最後驗證。
 
-**舊 kernel -25 先留著**，穩定幾天後再依第 10-4 節的原則清理。
+**舊 kernel 的處理**：保留使用中的 -26 和上一版 -25（新 kernel 有問題時可以從開機選單選回），**清理對象是更舊的 -23**，穩定幾天後再依第 10-4 節的原則做。
+
+### 12-2 2026-10-30：清理舊 kernel -23
+
+四台（PBS31、node10、node11、node12）都在 -26 開機正常、穩定一天後清理。**容器（LXC）沒有自己的 kernel，不用也不要在容器裡做**（容器裡 `uname -r` 顯示的是主機的 kernel，`apt autoremove -s` 會顯示 `nothing to remove`，沒有意義）。
+
+先在四台各自**模擬**：
+
+```bash
+echo "== $(hostname)  running: $(uname -r)"; apt autoremove -s 2>/dev/null | grep -E '^Remv' || echo 'nothing to remove'
+```
+
+**看到的結果**：四台都是 `running: 7.0.14-26-pve`，`Remv` **只有** `proxmox-kernel-7.0.14-23-pve-signed`，執行中的 -26 與上一版 -25 都不在清單。確認後在四台各自移除：
+
+```bash
+apt autoremove -y >/dev/null 2>&1; dpkg -l 'proxmox-kernel-*' | awk '/^ii/{print $2}'; grep -oE 'vmlinuz-[0-9.]+-[0-9]+-pve' /boot/grub/grub.cfg | sort -u
+```
+
+**看到的結果**：四台都只剩 `proxmox-kernel-7.0`、`proxmox-kernel-7.0.14-25-pve-signed`、`proxmox-kernel-7.0.14-26-pve-signed`（以及 `proxmox-kernel-helper`），開機選單只有 `vmlinuz-7.0.14-25-pve`、`vmlinuz-7.0.14-26-pve`，沒有 -23。不需要重開機，也沒有重啟服務。
 
 ### 12-1 儀表板上的兩個提示，不是這次造成的
 
