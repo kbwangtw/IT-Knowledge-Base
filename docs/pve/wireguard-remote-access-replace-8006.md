@@ -4,7 +4,7 @@ title: "不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家"
 permalink: /docs/pve/wireguard-remote-access-replace-8006/
 date: 2026-10-12
 categories: [PVE, WireGuard, VPN, Security, Network]
-last_modified_at: 2026-10-17
+last_modified_at: 2026-10-31
 ---
 
 # 不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家
@@ -234,7 +234,8 @@ journalctl -u pvedaemon --since "2026-10-12 15:00" --no-pager | grep "authentica
 只測第一個，可能其實是整條網路不通；只測第二個，不能證明 8006 已關閉。
 
 - 從現在開始，在外面管理 PVE **一定要先連 VPN**。
-- 規則只是停用沒有刪除，日後整理數據機設定時要留意不要誤啟用。
+- 10/13 當時規則只是停用、沒有刪除。**10/31 已在數據機把 TCP 8006 → node10、TCP 3000 → ProxCenter 兩條規則刪除**（使用者口述，**刪除後尚未重新從外部測試**），數據機現在只剩 UDP 51820 → ct:109 一條轉送。刪除後建議用上表兩個方向再從外部測一次。
+- 用 VPN 連回來時，PVE 看到的來源是 ct:109 `eth0` 的內網 IP（VPN 用戶的來源已被 NAT 換掉）；日後若要在 PVE 端限制 8006 的來源，這個 IP 一定要放進白名單，見 [內網橫向感染評估](https://kbwangtw.github.io/IT-Knowledge-Base/docs/network/internal-network-lateral-movement-assessment/)。
 
 10/14 用三台的 pvedaemon 紀錄做最後確認：**10/13 12:00 停用後到 10/14，三台都沒有任何外部 IP 的登入失敗**，Ceph 也是 HEALTH_OK，此項結案。日後想再查：
 
