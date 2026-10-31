@@ -4,7 +4,7 @@ title: "Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程�
 permalink: /docs/pve/ceph-bluestore-slow-op-backup-schedule/
 date: 2026-10-14
 categories: [PVE, Ceph, PBS, Backup, Troubleshooting]
-last_modified_at: 2026-10-21
+last_modified_at: 2026-10-31
 ---
 
 # Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？
@@ -15,8 +15,8 @@ last_modified_at: 2026-10-21
 | --- | --- |
 | 適合誰看 | 看到 `BLUESTORE_SLOW_OP_ALERT`、想知道要不要換硬碟的人；要排 PVE／PBS 備份時間的人 |
 | 環境 | 三台 Win element M600（Ryzen 9 8945HS、64 GB，硬體見 8-1）；PVE 9.2.21、kernel 7.0.14-23-pve、Ceph 20.2.4-pve5；PBS31 為 PBS 4.2.8，datastore Tokyo16 在 CIFS 掛載上 |
-| 日期 | 2026-10-13～14；10/16 補 slow ops 歷史 |
-| 結論 | ✅ 硬碟與核心正常；✅ 三台備份錯開；✅ PBS GC 77 → 7 分鐘；✅ 告警消失；✅ 10/21 一週追蹤：retries 沒有上升（142 → 117），期間沒有再出現告警 |
+| 日期 | 2026-10-13～14；10/16 補 slow ops 歷史；10/31 復發（第 11 節） |
+| 結論 | ✅ 硬碟與核心正常；✅ 三台備份錯開；✅ PBS GC 77 → 7 分鐘；✅ 告警消失；✅ 10/21 一週追蹤：retries 沒有上升（142 → 117），期間沒有再出現告警；⚠️ 10/31 復發，這次是 osd.1：retries 41（一週平均約 39）、無 `slow ops`、SMART 無故障徵兆，判斷同為備份時段排隊（第 11 節）；⏳ 觀察項目：node10 的 osd.0 碟 Unsafe Shutdowns 15 → 35，開機紀錄解釋不了 |
 
 ## 1. 先認識幾個名詞
 
@@ -226,7 +226,7 @@ done
 - 硬碟、核心 AIO 上限都正常；`aio_submit retries` 每晚發生在備份時段，三顆 OSD 都有，重試後完成，目前沒有資料錯誤。
 - 錯開三台備份：沒有減少 retries，但避免三台同時讀取、備份時間沒有變長，**維持此設定**。
 - PBS：刪除沒規則的 Prune Job；Verify 改到 02:00 後，GC 從 77 分鐘降到 7 分鐘。
-- 觀察：`ceph health` 是否再出現 `BLUESTORE_SLOW_OP_ALERT`；osd.0 SMART 的 Unsafe Shutdowns 是否增加。
+- 觀察：`ceph health` 是否再出現 `BLUESTORE_SLOW_OP_ALERT`；osd.0 SMART 的 Unsafe Shutdowns 是否增加。**10/31 兩項都有變化**：告警復發（osd.1）、Unsafe Shutdowns 由 15 增加到 35，見第 11 節。
 - 如果告警反覆出現，再評估降低單一備份的並行讀取（例如 vzdump 的頻寬限制，或 `performance` 的 max-workers），本次沒有調整。
 
 ### 8-1 三台硬體與 OSD 碟款（2026-10-21）
@@ -373,7 +373,95 @@ done
 - 5/4、7/21、9/24 當天的事件（停電、網路、維護）目前沒有紀錄可對照。**日後若有停電或重開，記下日期**，方便和 log 比對。
 - 要追 7/21，可在 node10 查 `journalctl --list-boots --no-pager | head` 和 `last -x reboot shutdown | head -20`，看當時有沒有重開或異常關機。
 
-## 11. 常見問題
+## 11. 10/31 復發：這次警告的是 osd.1
+
+### 11-1 發生什麼事
+
+| 項目 | 內容 |
+| --- | --- |
+| 時間 | 2026-10-31 21:38:44（Graylog 21:42 寄出「Ceph 健康警告」） |
+| 告警 | `BLUESTORE_SLOW_OP_ALERT`，警告的是 **osd.1（node11）**；10/14 是 osd.0 |
+| 狀態 | 22:35 查仍在；97 個 PG 全部 `active+clean`、OSD 3 up / 3 in，沒有資料風險 |
+| 備份排程 | `/etc/pve/jobs.cfg` 三個工作都備份到 PBS31（全部 guest、snapshot）：node10 21:00、node11 21:30、node12 22:00，`keep-daily=7,keep-last=3`；和第 5 節相同 |
+
+告警發生在 node11 備份開始後 8 分鐘。但 Ceph 讀取的是各 PG 的**主 OSD**，不一定是 node11 本機的 osd.1，所以這**只是時間吻合，不是因果**。
+
+官方文件（[Ceph Health Checks](https://docs.ceph.com/en/latest/rados/operations/health-checks/)）：在 `bluestore_slow_ops_warn_lifetime` 秒內，單一 BlueStore OSD 的慢操作次數達到 `bluestore_slow_ops_warn_threshold` 才會告警；文件說單次慢操作可能是誤報；條件消失後告警自動清除。這兩個選項的預設值文件沒有寫，本篇不憑記憶引用。
+
+### 11-2 做什麼、怎麼做
+
+**做什麼**：確認告警的是哪一顆 OSD、它所在的硬碟有沒有故障徵兆、是不是備份時段排隊。**全部是唯讀指令**，由 Lab Ops 透過 `rx` 逐條執行。
+
+```bash
+ceph health detail
+ceph -s
+ceph osd perf
+cat /etc/pve/jobs.cfg
+ceph osd metadata 1 | grep -E '"(hostname|devices|bluestore_bdev_devices|bluestore_bdev_dev_node)"'
+journalctl -u ceph-osd@1 --since "today" --no-pager | grep -E "slow operation|log_latency" | tail -20
+journalctl -u ceph-osd@1 --since "20:30" --until "23:00" --no-pager | grep -c "aio_submit retries"
+journalctl -u ceph-osd@1 --since "today" --no-pager | grep -c "slow ops"
+smartctl -a /dev/nvme0n1 | grep -E "Model Number|Critical Warning|Percentage Used|Media and Data Integrity|Unsafe Shutdowns|Temperature:"
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `ceph health detail` | 告警明細，會寫出是哪一顆 OSD |
+| `ceph osd perf` | 各 OSD 此刻的延遲（只是快照） |
+| `ceph osd metadata 1 \| grep …` | osd.1 在哪台主機、用哪顆 NVMe；**裝置編號每台不同，不能沿用 osd.0 的 `nvme1n1`** |
+| `grep -E "slow operation\|log_latency"` | 官方文件說要找的 BlueStore 慢操作日誌 |
+| `grep -c "aio_submit retries"` | 備份時段的 aio 重試次數 |
+| `grep -c "slow ops"` | 單一操作超過 30 秒的次數 |
+| `smartctl -a /dev/nvme0n1 \| grep …` | 硬碟健康；裝置名稱取自上面 `metadata` 的結果 |
+
+> `grep -c` 沒有符合的行時，回傳碼是 1 但輸出是 `0`，那是**結果**不是失敗；請 Lab Ops 照實回報，不要因此停下來。
+
+### 11-3 看到的結果
+
+| 檢查 | osd.1（node11，Lexar THOR PRO 2TB，`nvme0n1`） | osd.0（node10，對照） |
+| --- | --- | --- |
+| `aio_submit retries`（20:30～23:00） | **41** | 18 |
+| 一週平均每晚（8-1） | 約 39 | 約 23 |
+| `slow ops`（> 30 秒） | **0** | 0 |
+| `slow operation`／`log_latency` 日誌 | 無輸出 | 無輸出 |
+| `ceph osd perf`（此刻） | 0／0 ms | 7／7 ms（osd.2：1／1 ms） |
+| Critical Warning | `0x00` | `0x00` |
+| Media and Data Integrity Errors | 0 | 0 |
+| 溫度（22:35） | 54°C | 35°C |
+| Percentage Used | 19% | 7% |
+| Unsafe Shutdowns | 24 | 35 |
+
+**判讀**：osd.1 的 retries 41 接近一週平均 39、沒有 `slow ops`、SMART 沒有故障徵兆，**和 10/14 同類：備份時段排隊，這次剛好由 osd.1 超過門檻**。因此不調整備份排程、不調整告警門檻（調高門檻會降低靈敏度，可能蓋掉真正的硬碟前兆）。
+
+`slow operation`／`log_latency` 查不到字串，與 10/14 查 osd.0 的結果一致（第 3 節）；這類訊息是否寫在 `/var/log/ceph/` 底下的日誌檔，**未驗證**。
+
+### 11-4 兩個觀察項目（先記錄，不處理）
+
+**① node10 的 osd.0 碟：Unsafe Shutdowns 15 → 35**
+
+| 項目 | 內容 |
+| --- | --- |
+| 10/13（第 3 節） | 15 |
+| 10/31 | 35，增加 20 |
+| 10/13 之後 node10 的開機紀錄（`journalctl --list-boots`） | 4 次開機結束：10/23 09:49（隨即開機）、10/23 11:04（14:30 才開機，是全機關機）、10/24 12:20（隨即開機）、10/29 13:30（隨即開機） |
+
+4 次重開解釋不了增加 20。這個計數**怎麼累計**（每次重開都算，還是控制器重置也算）我**不確定**，所以不下結論；Media Errors 為 0、Critical Warning 為 `0x00`，不是現行故障。
+
+**② osd.1 的碟溫度與耗損**
+
+- 54°C 是在 22:35（備份時段剛結束）量的，要和**閒置時**比較才有意義；這顆碟的溫度規格**沒有查**，不判斷是否降速。
+- osd.0 的 Percentage Used 從 10/13 的 4% 到 10/31 的 7%，18 天約增加 3 點（SMART 數值是整數，實際約 2～4 點，**只是粗估**）。osd.0 是 BIWIN NV7200、osd.1 是 Lexar THOR PRO，兩顆不同碟款，19% 與 7% 不能直接比較。
+- 先把 10/31 的數字當基準，一個月後再比較。
+
+### 11-5 待辦
+
+- [ ] 隔天確認告警是否已自動消失（`ceph health`），記下消失時間
+- [ ] 閒置時段做第二輪唯讀檢查：三顆 OSD 碟的 `Power On Hours`、`Data Units Written`、`Comp. Temperature Time`（Warning／Critical）、`Thermal Temp`；node11、node12 的 `journalctl --list-boots`；三台的 `dmesg -T | grep -iE "nvme.*(reset|timeout|error)|i/o error"`
+- [ ] 11/30 前後比較 osd.0／osd.1 的 Percentage Used 與 Unsafe Shutdowns 增長
+- [ ] 確認 `slow operation`／`log_latency` 字串是否寫在 `/var/log/ceph/ceph-osd.N.log`（未驗證）
+- [ ] 若三顆 OSD 反覆輪流告警，才依第 8 節評估降低單一備份的並行讀取（vzdump 頻寬限制或 `max-workers`）
+
+## 12. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
@@ -383,10 +471,14 @@ done
 | PBS Prune 每天 `WARNINGS: 1`、log 寫 `remove` | 沒設保留規則時什麼都不會刪；確認清理由 PVE 端負責 |
 | GC 跑很久 | 檢查是否和 Verify 同時跑，錯開時間 |
 | 多個備份排程怎麼選 VM | Selection 選 All 再指定 Node，HA 搬移後仍涵蓋全部 |
+| 這次告警的 OSD 和上次不同 | 正常，三顆都有 retries，哪一顆先超過門檻就告警哪一顆；先用 `ceph health detail` 確認，不要假設還是 osd.0 |
+| 查 osd.1 的 SMART 找不到 `nvme1n1` | 裝置編號每台不同；先用 `ceph osd metadata <OSD 編號>` 查 `bluestore_bdev_devices` |
+| Lab Ops 在 `grep -c` 輸出 0 時停下來 | 沒有符合行時回傳碼是 1，輸出的 0 就是結果，告訴它繼續 |
 
-## 12. 延伸閱讀
+## 13. 延伸閱讀
 
 - [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/)（9/20 `aio_submit retries` 原列為觀察項目）
 - [PBS 更新後，怎麼確認備份還能用？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)
 - [Proxmox VE Backup and Restore](https://pve.proxmox.com/pve-docs/chapter-vzdump.html)
 - [Proxmox Backup Server：Maintenance Tasks](https://pbs.proxmox.com/docs/maintenance.html)
+- [Ceph Health Checks（BLUESTORE_SLOW_OP_ALERT）](https://docs.ceph.com/en/latest/rados/operations/health-checks/)
