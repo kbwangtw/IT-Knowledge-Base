@@ -121,6 +121,7 @@ last_modified_at: 2026-10-22
 | 文章 | 適合什麼時候看 |
 | --- | --- |
 | [jt-ipam 導入紀錄：從 IP 掃描到 PVE、LibreNMS 與機櫃管理](docs/network/jt-ipam-adoption-itbh/) | 想用工具管理 IP 位址，不再用 Excel |
+| [內網橫向感染評估：先看清楚網路長怎樣，再決定要不要裝防火牆](docs/network/internal-network-lateral-movement-assessment/) | 想在叢集上建軟體防火牆防橫向感染，但交換器沒有網管；PVE 管理介面與其他設備同網段（盤點中，2026-10-31 暫停） |
 | [有用中華電信資安艦隊：DNS 為什麼不能設 8.8.8.8？](docs/network/cht-security-fleet-dns-filtering/) | ping 得到外網，網址卻打不開 |
 | [圖書館 Nebula 網路改造：VLAN 隔離讀者、CIP 過濾、兩條 FTTB 分流](docs/network/zyxel-nebula-library-vlan-dual-wan-plan/) | 第一次用 Nebula 切 VLAN；館員、讀者共用網路，想分開、過濾讀者上網並讓兩條線分工（已完成並現場驗收） |
 | [圖書館 Nebula 網路改造（附錄）：設定清單與實作紀錄](docs/network/zyxel-nebula-library-vlan-implementation-record/) | 要照抄同樣架構，或接手維護這個環境 |

@@ -4,7 +4,7 @@ title: "PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？"
 permalink: /docs/pve/pve-cluster-fail2ban-hardening/
 date: 2026-09-14
 categories: [PVE, Security, Fail2Ban, Network]
-last_modified_at: 2026-10-24
+last_modified_at: 2026-10-31
 ---
 
 # PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？
@@ -174,6 +174,7 @@ ss -lntp | grep ':8006'
 - 10/12 完成 VPN 設定與外部連線測試。
 - 10/13 在數據機停用 8006 轉送，關掉 Wi-Fi 從外部確認 8006 已連不上。（10/12 曾誤記為已刪除，當天 16:19 和 20:36 仍有外部 IP 登入失敗。）
 - 停用後 10/13 12:00～10/14 三台都沒有外部登入嘗試。
+- 10/31 數據機上 TCP 8006、TCP 3000 兩條轉送規則已**刪除**（原本只是停用），現在只剩 UDP 51820 → WireGuard（使用者口述，尚未重新從外部測試）。
 
 過程見 [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)。
 
@@ -189,6 +190,7 @@ ss -lntp | grep ':8006'
 | `root@pam` 啟用 TOTP | **10/15 已完成**（第 10 節） | VPN 是 split tunnel，VPN 用戶端可直達 8006；用戶端被入侵時多一道驗證 |
 
 - 日後要啟用 PVE Firewall，先保留主控台與管理連線，盤點 Corosync、Ceph、備份和管理需要的流量，再逐台測試。
+- **10/31 重新評估**：盤點後結論仍是**不啟用完整 PVE Firewall**。具體風險是 Ceph 的 `public_network` 在服務網（啟用後不在文件列出的自動放行清單內）、5 個 VM／CT 的網卡防火牆旗標已開（總開關啟用時立刻生效）。改評估只限制 8006 的 `pveproxy` 的 `ALLOW_FROM`，白名單盤點中（暫停）。完整過程見 [內網橫向感染評估](https://kbwangtw.github.io/IT-Knowledge-Base/docs/network/internal-network-lateral-movement-assessment/)。
 - `ignoreip` 只放必要且確認可信的管理來源。遇到誤封，先核對來源與日誌再解除那一筆；**不要**為了方便把整個大網段放行。
 
 ## 10. 10/15：`root@pam` 啟用 TOTP 與 token 清理
