@@ -2,7 +2,7 @@
 layout: default
 title: "PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰"
 date: 2026-09-22
-last_modified_at: 2026-10-17
+last_modified_at: 2026-11-01
 categories: [PVE, Ceph, Troubleshooting]
 permalink: /docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/
 ---
@@ -15,8 +15,8 @@ permalink: /docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/
 | --- | --- |
 | 適合誰看 | Ceph OSD 每次重開就認證失敗的人；要輪換 OSD 金鑰的人 |
 | 環境 | PVE 9.2.x 三節點（node10／11／12 對應 osd.0／1／2）；Ceph 20.2.4-pve4 |
-| 日期 | 2026-09-21～22（UTC+8）；10/12、10/14 補記 |
-| 結論 | ✅ 三顆 MON = LOCAL = BLUESTORE、HEALTH_OK；✅ 10/12 修復後第一次整機重開正常；✅ 10/14 已曝光的 osd.1 金鑰完成輪換；⏳ 輪換後的重開驗證 |
+| 日期 | 2026-09-21～22（UTC+8）；10/12、10/14、11/01 補記 |
+| 結論 | ✅ 三顆 MON = LOCAL = BLUESTORE、HEALTH_OK；✅ 10/12 修復後第一次整機重開正常；✅ 10/14 已曝光的 osd.1 金鑰完成輪換；✅ 11/01 輪換後經兩次整叢集重開，osd.1 三處仍一致（9-5） |
 
 > 不公開 CephX secret、完整 label 或原始截圖。操作範例依當時成功流程整理，並加入「失敗就停止」的檢查；不是文件發布時重新操作正式叢集的紀錄。
 
@@ -362,6 +362,44 @@ CephX key **不會自己過期**。osd.1 的權限是 `mon`／`mgr` = `allow pro
 - 排障時，含 key 的輸出（`ceph auth get`、keyring、`show-label`）只回報 hash 或 OK／錯誤字樣，避免又要事後輪換。
 - **不要**把 secret、含 key 的截圖或完整認證匯出放進 GitHub、Pages、issue 或 Graylog。
 
+### 9-5 2026-11-01 補記：輪換後的重開驗證
+
+**做什麼**：10/14 輪換後，叢集在 10/23、11/01 兩次整叢集關機再開機（見[叢集關機與開機](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-full-shutdown/)第 7、9 節），osd.1 都是從 BlueStore label 重建 keyring 後啟動的。11/01 下午在 node11 確認 osd.1 正常，並重跑三處比對。
+
+**怎麼做①：確認 osd.1 狀態**（node11，唯讀）：
+
+```bash
+hostname
+ceph -s | grep -E 'health|osd:|pgs:'
+ceph pg stat
+ceph osd tree | grep -E 'host node11|osd\.1 '
+systemctl is-active ceph-osd@1
+journalctl -u ceph-osd@1 -b --no-pager | grep -ciE 'auth|cephx|bad key|Malformed'
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `hostname` | 確認在 node11；`ceph-osd@1` 和 osd.1 的硬碟只在這台，在別台跑會看到 `inactive`、`0`，不代表有問題 |
+| `ceph pg stat` | 一行列出全部 PG 的狀態；`ceph -s` 配 `grep` 只會抓到第一行 |
+| `journalctl -u ceph-osd@1 -b` | 這次開機以來 osd.1 的日誌 |
+| `grep -ciE …` | 只計算提到認證錯誤的行數，不印出內容 |
+
+**看到的結果**：
+
+| 檢查 | 結果 |
+| --- | --- |
+| 叢集 | `HEALTH_OK`，3 up／3 in |
+| PG | 97 個：96 `active+clean`、1 `active+clean+scrubbing+deep`（定期檢查，不是故障） |
+| osd.1 | `up`，`ceph-osd@1` 是 `active` |
+| 認證錯誤 | 這次開機以來 0 筆 |
+
+**怎麼做②：三處比對**：用 5-2 的腳本，`id=1`，三行 `sha256sum` 後面加 `| cut -c1-12`，只印摘要前 12 碼，方便記錄又不露出金鑰。
+
+**看到的結果**：MON、LOCAL、BLUESTORE 三行的前 12 碼相同，最後印出 `THREE_WAY_MATCH`。
+
+- 10/14 的舊 key 備份已經 `shred` 刪除，這次無法再比對 `KEY=NEW`；但三處一致、osd.1 能登入叢集而且沒有認證錯誤，代表重開後用的就是輪換後的 key。
+- 結論：**輪換時三處一起換（含 label）是有效的**，重開不會退回舊 key。
+
 ## 10. 常見問題
 
 | 現象 | 怎麼辦 |
@@ -399,7 +437,7 @@ CephX key **不會自己過期**。osd.1 的權限是 `mon`／`mgr` = `allow pro
 - [ ] 新備份看最終 TASK OK，再依計畫做還原驗證；不得沿用舊日期的結果。
 - [x] 修復後整機重開驗證：10/12 完成，三顆正常加入、HEALTH_OK（未重跑三處 hash）。
 - [x] 已曝光 key 的輪換：10/14 完成，三處一致、HEALTH_OK。
-- [ ] 輪換後的重開驗證：下次整機重開（例如 ProxCenter 滾動更新）後，確認 osd.1 up，並重跑三處比對。
+- [x] 輪換後的重開驗證：2026-11-01 完成（10/23、11/01 兩次整叢集重開後），osd.1 up、無認證錯誤、`THREE_WAY_MATCH`（9-5）。
 
 ## 12. 延伸閱讀
 
