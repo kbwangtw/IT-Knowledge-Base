@@ -4,7 +4,7 @@ title: "用 Grafana 建立戰情中心（三）：接上 Prometheus（Ceph 與 P
 date: 2026-10-22
 categories: [PVE, Grafana, Prometheus, Ceph]
 permalink: /docs/pve/grafana-war-room-prometheus/
-last_modified_at: 2026-10-22
+last_modified_at: 2026-11-01
 ---
 {% raw %}
 
@@ -565,8 +565,10 @@ ha-manager status | grep -c started
 ```bash
 ceph osd tree                                   # CLASS 都是 ssd；osd.1 WEIGHT 1.86299，其他 1.81940
 for i in 0 1 2; do ceph osd metadata $i | grep -E '"(hostname|rotational|devices)"'; done
-for n in node10 node11 node12; do ssh root@$n 'smartctl -i /dev/nvme1n1 | grep -E "Model Number|Firmware"'; done
+smartctl -i /dev/<上一步查到的裝置> | grep -E "Model Number|Firmware"       # 在各自的節點上執行，三顆各查一次
 ```
+
+> **裝置編號每台不同**：node10、node11 的 OSD 碟是 `nvme0n1`，node12 是 `nvme1n1`（2026-11-01 用 `ceph osd metadata` 確認）。原本這裡寫的是三台都查 `/dev/nvme1n1`，那樣在 node10、node11 讀到的會是另一顆碟，已改成先用 `ceph osd metadata` 查裝置再查型號。上表的型號與 2026-11-01 的 SMART 型號一致。
 
 - osd.0 一直比較慢，不是新問題：10/14〈[BlueStore 慢操作](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/)〉的 `ceph osd perf` 也是 osd.0 6 ms、另外兩顆 1 ms，當時 SMART 正常。
 - Ceph 寫入要等三個副本都完成，**最慢的 osd.0 決定整體寫入速度**。

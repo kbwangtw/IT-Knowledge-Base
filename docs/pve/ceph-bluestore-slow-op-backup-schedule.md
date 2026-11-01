@@ -16,7 +16,7 @@ last_modified_at: 2026-10-31
 | 適合誰看 | 看到 `BLUESTORE_SLOW_OP_ALERT`、想知道要不要換硬碟的人；要排 PVE／PBS 備份時間的人 |
 | 環境 | 三台 Win element M600（Ryzen 9 8945HS、64 GB，硬體見 8-1）；PVE 9.2.21、kernel 7.0.14-23-pve、Ceph 20.2.4-pve5；PBS31 為 PBS 4.2.8，datastore Tokyo16 在 CIFS 掛載上 |
 | 日期 | 2026-10-13～14；10/16 補 slow ops 歷史；10/31 復發（第 11 節） |
-| 結論 | ✅ 硬碟與核心正常；✅ 三台備份錯開；✅ PBS GC 77 → 7 分鐘；✅ 告警消失；✅ 10/21 一週追蹤：retries 沒有上升（142 → 117），期間沒有再出現告警；⚠️ 10/31 復發，這次是 osd.1：retries 41（一週平均約 39）、無 `slow ops`、SMART 無故障徵兆，判斷同為備份時段排隊（第 11 節）；⏳ 觀察項目：node10 的 osd.0 碟 Unsafe Shutdowns 15 → 35，開機紀錄解釋不了 |
+| 結論 | ✅ 硬碟與核心正常；✅ 三台備份錯開；✅ PBS GC 77 → 7 分鐘；✅ 告警消失；✅ 10/21 一週追蹤：retries 沒有上升（142 → 117），期間沒有再出現告警；⚠️ 10/31 復發，這次是 osd.1：retries 41（一週平均約 39）、無 `slow ops`、SMART 無故障徵兆，判斷同為備份時段排隊（第 11 節）；✅ 11/01 第二輪：三顆 OSD 碟 Media Errors 皆 0、核心沒有 NVMe 重置或逾時，osd.0 碟 Unsafe Shutdowns 仍是 15（10/31 曾誤把 node10 的另一顆碟當成 osd.0，已更正）；⏳ 觀察：osd.1 碟 54°C、壽命已用 19% |
 
 ## 1. 先認識幾個名詞
 
@@ -226,7 +226,7 @@ done
 - 硬碟、核心 AIO 上限都正常；`aio_submit retries` 每晚發生在備份時段，三顆 OSD 都有，重試後完成，目前沒有資料錯誤。
 - 錯開三台備份：沒有減少 retries，但避免三台同時讀取、備份時間沒有變長，**維持此設定**。
 - PBS：刪除沒規則的 Prune Job；Verify 改到 02:00 後，GC 從 77 分鐘降到 7 分鐘。
-- 觀察：`ceph health` 是否再出現 `BLUESTORE_SLOW_OP_ALERT`；osd.0 SMART 的 Unsafe Shutdowns 是否增加。**10/31 兩項都有變化**：告警復發（osd.1）、Unsafe Shutdowns 由 15 增加到 35，見第 11 節。
+- 觀察：`ceph health` 是否再出現 `BLUESTORE_SLOW_OP_ALERT`；osd.0 SMART 的 Unsafe Shutdowns 是否增加。**10/31 告警復發（osd.1）**；osd.0 碟的 Unsafe Shutdowns 11/01 重查仍是 15，沒有增加，見第 11 節。
 - 如果告警反覆出現，再評估降低單一備份的並行讀取（例如 vzdump 的頻寬限制，或 `performance` 的 max-workers），本次沒有調整。
 
 ### 8-1 三台硬體與 OSD 碟款（2026-10-21）
@@ -425,39 +425,77 @@ smartctl -a /dev/nvme0n1 | grep -E "Model Number|Critical Warning|Percentage Use
 | `slow ops`（> 30 秒） | **0** | 0 |
 | `slow operation`／`log_latency` 日誌 | 無輸出 | 無輸出 |
 | `ceph osd perf`（此刻） | 0／0 ms | 7／7 ms（osd.2：1／1 ms） |
-| Critical Warning | `0x00` | `0x00` |
+| Critical Warning | `0x00` | 11/01 第二輪表格未列，未重查 |
 | Media and Data Integrity Errors | 0 | 0 |
-| 溫度（22:35） | 54°C | 35°C |
-| Percentage Used | 19% | 7% |
-| Unsafe Shutdowns | 24 | 35 |
+| 溫度 | 54°C（10/31 22:35 與 11/01 09:58 相同） | 40°C（11/01 09:58） |
+| Percentage Used | 19% | 5% |
+| Unsafe Shutdowns | 24 | 15 |
+
+> osd.0 欄的 SMART 數字已在 11/01 更正，原因見 11-5 最後的「更正」。
 
 **判讀**：osd.1 的 retries 41 接近一週平均 39、沒有 `slow ops`、SMART 沒有故障徵兆，**和 10/14 同類：備份時段排隊，這次剛好由 osd.1 超過門檻**。因此不調整備份排程、不調整告警門檻（調高門檻會降低靈敏度，可能蓋掉真正的硬碟前兆）。
 
 `slow operation`／`log_latency` 查不到字串，與 10/14 查 osd.0 的結果一致（第 3 節）；這類訊息是否寫在 `/var/log/ceph/` 底下的日誌檔，**未驗證**。
 
-### 11-4 兩個觀察項目（先記錄，不處理）
+### 11-4 11/01 第二輪：三顆 OSD 碟、開機次數、核心訊息（閒置時段，唯讀）
 
-**① node10 的 osd.0 碟：Unsafe Shutdowns 15 → 35**
+**做什麼**：補三顆碟的寫入量、耗損、溫度，核對開機次數，並確認核心有沒有看到 NVMe 重置或逾時。全部是唯讀指令，由 Lab Ops 透過 `rx` 執行（2026-11-01 09:58）。
+
+```bash
+ceph osd metadata 0 | grep -E '"(hostname|bluestore_bdev_devices)"'      # osd.1、osd.2 各查一次
+smartctl -a /dev/<上一步查到的裝置> | grep -E "Model Number|Power On Hours|Data Units Written|Percentage Used|Unsafe Shutdowns|Media and Data Integrity|Critical Warning|Comp. Temperature Time|Thermal Temp|Temperature:"
+journalctl --list-boots --no-pager | tail -15                                                    # node11、node12
+dmesg -T | grep -iE "nvme.*(reset|timeout|error)|i/o error" | tail -10                           # 三台
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `ceph osd metadata <編號> \| grep …` | 先查這顆 OSD 實際用哪個 NVMe；**不能沿用別台的裝置名稱** |
+| `smartctl -a /dev/<裝置>` | 該硬碟的 SMART；`Data Units Written` 是累計寫入量，`Power On Hours` 是通電時數 |
+| `journalctl --list-boots` | 列出每次開機的起訖時間，用來數重開次數 |
+| `dmesg -T \| grep …` | 核心訊息裡有沒有 NVMe 重置、逾時、I/O 錯誤（只涵蓋本次開機，即 10/29 之後） |
+
+**看到的結果**（11/01 09:58）：
+
+| 節點 | OSD | 裝置 | 型號 | Power On Hours | Data Units Written | Percentage Used | Unsafe Shutdowns | Media Errors | 溫度 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| node10 | osd.0 | `nvme0n1` | BIWIN NV7200 2TB | 8,623 | 21.9 TB | 5% | 15 | 0 | 40°C |
+| node11 | osd.1 | `nvme0n1` | Lexar THOR PRO 2TB | 10,580 | 21.5 TB | 19% | 24 | 0 | 54°C |
+| node12 | osd.2 | **`nvme1n1`** | KINGSTON SNV3S2000G | 1,177 | 18.6 TB | 4% | 12 | 0 | 49°C |
+
+- node12 的 OSD 碟是 `nvme1n1`，node10、node11 是 `nvme0n1`；裝置編號每台不同。
+- 三台 `dmesg` 都**沒有**符合的輸出：本次開機（10/29 起）核心沒有看到 NVMe 重置、逾時或 I/O 錯誤。
+- Critical Warning、`Comp. Temperature Time`、`Thermal Temp` 這次整理的表格沒有列出，**未重查**（也未確認這幾顆 smartctl 有沒有這幾行）。
+
+### 11-5 判讀
+
+**① Unsafe Shutdowns：osd.0 的碟沒有增加**
 
 | 項目 | 內容 |
 | --- | --- |
-| 10/13（第 3 節） | 15 |
-| 10/31 | 35，增加 20 |
-| 10/13 之後 node10 的開機紀錄（`journalctl --list-boots`） | 4 次開機結束：10/23 09:49（隨即開機）、10/23 11:04（14:30 才開機，是全機關機）、10/24 12:20（隨即開機）、10/29 13:30（隨即開機） |
+| osd.0 碟（`nvme0n1`）10/13 | 15（第 3 節） |
+| osd.0 碟 11/01 | **15，沒有增加** |
+| 這段期間 node10 的開機紀錄 | 4 次開機結束：10/23 09:49、10/23 11:04（14:30 才開機，全機關機）、10/24 12:20、10/29 13:30 |
+| node11、node12 的開機紀錄（`list-boots`，依指令順序與 10/29 滾動更新順序推測前者是 node11） | 各 3 次：10/23 09:49、10/24 12:xx、10/29 09:xx |
 
-4 次重開解釋不了增加 20。這個計數**怎麼累計**（每次重開都算，還是控制器重置也算）我**不確定**，所以不下結論；Media Errors 為 0、Critical Warning 為 `0x00`，不是現行故障。
+10/13 之後重開與全機關機共 4 次，這顆碟的計數仍是 15，所以**這段期間的重開沒有被計入**；包含 10/23 那次，為什麼沒有計入我不確定（未確認）。node11、node12 的碟沒有 10/13 的基準，只能先記下 24 與 12，之後再比較。
 
-**② osd.1 的碟溫度與耗損**
+**② osd.1 的碟：耗損比例高、溫度偏高，但沒有故障徵兆**
 
-- 54°C 是在 22:35（備份時段剛結束）量的，要和**閒置時**比較才有意義；這顆碟的溫度規格**沒有查**，不判斷是否降速。
-- osd.0 的 Percentage Used 從 10/13 的 4% 到 10/31 的 7%，18 天約增加 3 點（SMART 數值是整數，實際約 2～4 點，**只是粗估**）。osd.0 是 BIWIN NV7200、osd.1 是 Lexar THOR PRO，兩顆不同碟款，19% 與 7% 不能直接比較。
-- 先把 10/31 的數字當基準，一個月後再比較。
+- 三顆碟的累計寫入量相近（21.9／21.5／18.6 TB），但 Percentage Used 是 5%／**19%**／4%；osd.1 的耗損比例約為另外兩顆的 4 倍。**推測**是 Lexar 這顆的廠商耐久估計值較低，或計算方式不同；規格**沒有查**，未確認。
+- osd.1 的 54°C 在 10/31 22:35 與 11/01 09:58 兩個時間點都一樣，**不是備份尖峰造成的**；osd.0 是 40°C、osd.2 是 49°C，差異可能和機身內位置有關（推測，未確認）。這顆碟的溫度規格也沒有查，不判斷是否降速。
+- osd.2 的碟 Power On Hours 只有 1,177（約 49 天），累計寫入卻已 18.6 TB，和用了一年以上的另兩顆差不多。原因不確定（KB 沒有換碟紀錄可對照）。
+- 三顆碟 Media Errors 都是 0、核心沒有 NVMe 錯誤，**沒有看到硬碟故障的證據**。
 
-### 11-5 待辦
+> ⚠️ **更正（11/01）**：10/31 這節原本的 osd.0 SMART 數字（35°C、已用 7%、Unsafe Shutdowns 35）讀的是 `/dev/nvme1n1`，但 node10 的 osd.0 在 **`nvme0n1`**（BIWIN）。`nvme1n1` 依第 8-1 節的硬體表**推測**是 node10 的 512 GB 系統碟（Samsung，未用 `smartctl -i` 當場確認型號）。裝置路徑沒有先用 `ceph osd metadata` 確認就沿用，是 10/31 的錯誤；因此當時寫的「osd.0 碟 Unsafe Shutdowns 15 → 35」**不成立**，上方 11-3 與本節已改成 11/01 用 metadata 查到的裝置重查的結果。
 
-- [ ] 隔天確認告警是否已自動消失（`ceph health`），記下消失時間
-- [ ] 閒置時段做第二輪唯讀檢查：三顆 OSD 碟的 `Power On Hours`、`Data Units Written`、`Comp. Temperature Time`（Warning／Critical）、`Thermal Temp`；node11、node12 的 `journalctl --list-boots`；三台的 `dmesg -T | grep -iE "nvme.*(reset|timeout|error)|i/o error"`
-- [ ] 11/30 前後比較 osd.0／osd.1 的 Percentage Used 與 Unsafe Shutdowns 增長
+### 11-6 待辦
+
+- [ ] 確認告警何時自動消失（`ceph health`，11/01 尚未回報）
+- [x] 閒置時段第二輪唯讀檢查（2026-11-01 完成，見 11-4）
+- [ ] 補查三顆碟的 Critical Warning、`Comp. Temperature Time`（Warning／Critical）、`Thermal Temp`
+- [ ] 11/30 前後重查三顆碟的 Percentage Used、Unsafe Shutdowns、溫度（以 11/01 的數字為基準）
+- [ ] 查 Lexar THOR PRO 2TB 的耐久（TBW）與溫度規格（目前沒有查）
 - [ ] 確認 `slow operation`／`log_latency` 字串是否寫在 `/var/log/ceph/ceph-osd.N.log`（未驗證）
 - [ ] 若三顆 OSD 反覆輪流告警，才依第 8 節評估降低單一備份的並行讀取（vzdump 頻寬限制或 `max-workers`）
 
