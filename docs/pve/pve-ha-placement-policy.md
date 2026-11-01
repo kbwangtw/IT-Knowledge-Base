@@ -709,7 +709,7 @@ ssh root@node12 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | 四個容器 | 都是 `running`，`--failed` 0 個 |
 | WireGuard | `interface: wg0`、`listening port: 51820`；沒有 `latest handshake`（搬完後還沒有裝置連上） |
 | 手機關 Wi-Fi、用 4G 連 VPN | ✅ 連得上（16:30 左右，使用者回報） |
-| LibreNMS 有新資料、IPAM 網頁 | ⏳ 待確認 |
+| LibreNMS 有新資料、IPAM 網頁 | ✅ 都正常（使用者回報） |
 | 告警信 | 【VPN 告警】1 封：事件 16:22:18、信件 16:23，內容 `wg0=up dashboard=activating`（容器剛開機、WGDashboard 還在啟動），屬預期（[Graylog 告警（二）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/graylog-alerts-monitoring/)第 10 節）。其他三個服務搬移沒有告警信 |
 
 **搬完的分布（4／5／4）**：
@@ -753,7 +753,7 @@ ssh root@node12 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | ProxCenter DRS 以 Manual 模式重新開啟，Guest types 加回 LXC | ⏳ 2026-10-29 開啟，觀察 3～5 天後決定留或關（第 12-5 節） |
 | 2026-10-29 Wazuh 搬到 node10 後的驗收（服務、agent 數、dashboard） | ✅ 三個服務 active、dashboard 正常、Active 16／Disconnected 2（第 13 節） |
 | HA 資源集中在 node10，是否再分散 | ✅ 2026-10-19 由 8／1／4 分散為 4／5／4（第 13 節） |
-| 11/01 整叢集重開後分布跑掉（兩套監控與 WireGuard 同在 node10） | ✅ 2026-11-01 16:18～16:22 搬 4 個服務，回到三套監控各在一台；VPN 從 4G 連得上；⏳ LibreNMS、IPAM 人工確認（第 13-1 節） |
+| 11/01 整叢集重開後分布跑掉（兩套監控與 WireGuard 同在 node10） | ✅ 2026-11-01 16:18～16:22 搬 4 個服務，回到三套監控各在一台；VPN 從 4G 連得上、LibreNMS 與 IPAM 正常（第 13-1 節） |
 
 **單節點故障的預期行為**（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，而且在節點回來前沒有再壞一顆硬碟的餘裕。
 
