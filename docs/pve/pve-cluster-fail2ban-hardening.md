@@ -4,7 +4,7 @@ title: "PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？"
 permalink: /docs/pve/pve-cluster-fail2ban-hardening/
 date: 2026-09-14
 categories: [PVE, Security, Fail2Ban, Network]
-last_modified_at: 2026-10-31
+last_modified_at: 2026-11-01
 ---
 
 # PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？
@@ -174,7 +174,7 @@ ss -lntp | grep ':8006'
 - 10/12 完成 VPN 設定與外部連線測試。
 - 10/13 在數據機停用 8006 轉送，關掉 Wi-Fi 從外部確認 8006 已連不上。（10/12 曾誤記為已刪除，當天 16:19 和 20:36 仍有外部 IP 登入失敗。）
 - 停用後 10/13 12:00～10/14 三台都沒有外部登入嘗試。
-- 10/31 數據機上 TCP 8006、TCP 3000 兩條轉送規則已**刪除**（原本只是停用），現在只剩 UDP 51820 → WireGuard（使用者口述，尚未重新從外部測試）。
+- 10/31 數據機上 TCP 8006、TCP 3000 兩條轉送規則已**刪除**（原本只是停用），現在只剩 UDP 51820 → WireGuard（使用者口述）。11/01 已從外部重新測試：手機熱點上的筆電連 `<對外 IP>` 的 `:8006`、`:3000` 都逾時，iPhone 用 4G 開 WireGuard 後內網的 8006 開得到。
 
 過程見 [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)。
 
