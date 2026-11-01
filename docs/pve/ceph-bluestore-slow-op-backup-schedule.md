@@ -16,7 +16,7 @@ last_modified_at: 2026-10-31
 | 適合誰看 | 看到 `BLUESTORE_SLOW_OP_ALERT`、想知道要不要換硬碟的人；要排 PVE／PBS 備份時間的人 |
 | 環境 | 三台 Win element M600（Ryzen 9 8945HS、64 GB，硬體見 8-1）；PVE 9.2.21、kernel 7.0.14-23-pve、Ceph 20.2.4-pve5；PBS31 為 PBS 4.2.8，datastore Tokyo16 在 CIFS 掛載上 |
 | 日期 | 2026-10-13～14；10/16 補 slow ops 歷史；10/31 復發（第 11 節） |
-| 結論 | ✅ 硬碟與核心正常；✅ 三台備份錯開；✅ PBS GC 77 → 7 分鐘；✅ 告警消失；✅ 10/21 一週追蹤：retries 沒有上升（142 → 117），期間沒有再出現告警；⚠️ 10/31 復發，這次是 osd.1：retries 41（一週平均約 39）、無 `slow ops`、SMART 無故障徵兆，判斷同為備份時段排隊（第 11 節）；✅ 11/01 第二輪：三顆 OSD 碟 Media Errors 皆 0、核心沒有 NVMe 重置或逾時，osd.0 碟 Unsafe Shutdowns 仍是 15（10/31 曾誤把 node10 的另一顆碟當成 osd.0，已更正）；⏳ 觀察：osd.1 碟 54°C、壽命已用 19% |
+| 結論 | ✅ 硬碟與核心正常；✅ 三台備份錯開；✅ PBS GC 77 → 7 分鐘；✅ 告警消失；✅ 10/21 一週追蹤：retries 沒有上升（142 → 117），期間沒有再出現告警；⚠️ 10/31 復發，這次是 osd.1：retries 41（一週平均約 39）、無 `slow ops`、SMART 無故障徵兆，判斷同為備份時段排隊（第 11 節）；✅ 11/01 第二輪：三顆 OSD 碟 Media Errors 皆 0、核心沒有 NVMe 重置或逾時，osd.0 碟 Unsafe Shutdowns 仍是 15（10/31 曾誤把 node10 的另一顆碟當成 osd.0，已更正）；⏳ 觀察：osd.1 碟 54°C、壽命已用 19%；⏳ 告警 11/01 上午仍在（`lifetime` 86400、`threshold` 1，推算最快 11/01 21:38 後消失，第 11-6 節） |
 
 ## 1. 先認識幾個名詞
 
@@ -489,9 +489,48 @@ dmesg -T | grep -iE "nvme.*(reset|timeout|error)|i/o error" | tail -10          
 
 > ⚠️ **更正（11/01）**：10/31 這節原本的 osd.0 SMART 數字（35°C、已用 7%、Unsafe Shutdowns 35）讀的是 `/dev/nvme1n1`，但 node10 的 osd.0 在 **`nvme0n1`**（BIWIN）。`nvme1n1` 依第 8-1 節的硬體表**推測**是 node10 的 512 GB 系統碟（Samsung，未用 `smartctl -i` 當場確認型號）。裝置路徑沒有先用 `ceph osd metadata` 確認就沿用，是 10/31 的錯誤；因此當時寫的「osd.0 碟 Unsafe Shutdowns 15 → 35」**不成立**，上方 11-3 與本節已改成 11/01 用 metadata 查到的裝置重查的結果。
 
-### 11-6 待辦
+### 11-6 告警為什麼還在：`lifetime` 86400、`threshold` 1（2026-11-01 上午）
 
-- [ ] 確認告警何時自動消失（`ceph health`，11/01 尚未回報）
+**做什麼**：10/31 21:38 的告警隔天上午還在，要確認是不是仍是 osd.1，以及告警會保留多久。**全部是唯讀指令**。
+
+```bash
+ceph health detail
+ceph config get osd.1 bluestore_slow_ops_warn_lifetime
+ceph config get osd.1 bluestore_slow_ops_warn_threshold
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `ceph health detail` | 告警明細，會寫出是哪一顆 OSD；單用 `ceph health` 看不出來 |
+| `ceph config get osd.1 bluestore_slow_ops_warn_lifetime` | 慢操作的計算時間窗（秒） |
+| `ceph config get osd.1 bluestore_slow_ops_warn_threshold` | 時間窗內累計幾次才告警 |
+
+**看到的結果**（11/01 上午）：
+
+| 項目 | 結果 |
+| --- | --- |
+| 告警 | `HEALTH_WARN`，`BLUESTORE_SLOW_OP_ALERT`，仍是 **osd.1** |
+| `bluestore_slow_ops_warn_lifetime` | **86400** 秒（24 小時） |
+| `bluestore_slow_ops_warn_threshold` | **1** |
+
+**判讀**：
+
+- 門檻是 1、時間窗是 24 小時，也就是**過去 24 小時內只要出現過一次慢操作，就會一直顯示 `HEALTH_WARN`**。所以告警還在，不代表現在還在變慢。
+- 官方文件寫告警在條件消失後自動清除。最後一次慢操作不晚於 10/31 21:38（Graylog 收到告警的時間，OSD 實際發生的時間可能更早，不知道）；若 24 小時內沒有新的，**最快約 11/01 21:38 消失**。今晚 node11 的備份從 21:30 開始，若又產生一次慢操作，時間窗重新計 24 小時。
+- 這與第 7 節 10/14 的經過相容（10/12 晚上有重試紀錄，10/14 清晨已是 `HEALTH_OK`），但**是推測，不是驗證**。
+- **未確認**：86400 與 1 是否為預設值（印象中是，但沒有查證）；官方文件範例用 300 秒與 5 次，那只是範例，不是預設。可用 `ceph config dump | grep slow_ops`（沒有輸出代表沒有透過 Ceph 設定資料庫改過）與 `grep slow_ops /etc/pve/ceph.conf` 確認，**尚未執行**。
+- 門檻 1 很敏感，備份每晚都會讓 OSD 排隊，所以告警容易重複出現；它實際上是「過去 24 小時內有過慢操作」，不是「硬碟有問題」。
+
+| 選項 | 內容 | 評估 |
+| --- | --- | --- |
+| A. 維持現狀、繼續觀察 | 11/02 上午再看 | **目前採用**；Media Errors 為 0、核心沒有 NVMe 錯誤 |
+| B. 降低備份造成的讀取壓力 | vzdump 頻寬限制或 `max-workers` | 等「反覆出現」再做 |
+| C. 調高 `bluestore_slow_ops_warn_threshold` | 官方文件說單次慢操作可能是誤報，用時間窗內累計次數過濾 | 會降低靈敏度，可能蓋掉真正的硬碟前兆；確認反覆復發且硬碟沒問題後再考慮 |
+
+### 11-7 待辦
+
+- [ ] 確認告警何時自動消失：11/01 上午仍在（osd.1）；預期最快 11/01 21:38 之後，今晚 node11 備份（21:30 起）可能重新計時；11/02 上午再看 `ceph health detail`
+- [ ] 確認 `lifetime`、`threshold` 是否為預設（`ceph config dump | grep slow_ops`、`grep slow_ops /etc/pve/ceph.conf`）
 - [x] 閒置時段第二輪唯讀檢查（2026-11-01 完成，見 11-4）
 - [ ] 補查三顆碟的 Critical Warning、`Comp. Temperature Time`（Warning／Critical）、`Thermal Temp`
 - [ ] 11/30 前後重查三顆碟的 Percentage Used、Unsafe Shutdowns、溫度（以 11/01 的數字為基準）
@@ -511,6 +550,7 @@ dmesg -T | grep -iE "nvme.*(reset|timeout|error)|i/o error" | tail -10          
 | 多個備份排程怎麼選 VM | Selection 選 All 再指定 Node，HA 搬移後仍涵蓋全部 |
 | 這次告警的 OSD 和上次不同 | 正常，三顆都有 retries，哪一顆先超過門檻就告警哪一顆；先用 `ceph health detail` 確認，不要假設還是 osd.0 |
 | 查 osd.1 的 SMART 找不到 `nvme1n1` | 裝置編號每台不同；先用 `ceph osd metadata <OSD 編號>` 查 `bluestore_bdev_devices` |
+| 告警還在，但現在不慢 | 門檻 1、時間窗 24 小時：過去 24 小時內有過任何一次慢操作就會顯示；用 `ceph health detail` 確認是哪一顆，等最後一次慢操作之後滿 24 小時，期間不要重啟 OSD（第 11-6 節） |
 | Lab Ops 在 `grep -c` 輸出 0 時停下來 | 沒有符合行時回傳碼是 1，輸出的 0 就是結果，告訴它繼續 |
 
 ## 13. 延伸閱讀
