@@ -208,7 +208,7 @@ POLICY="deny"
 - [ ] 確認 192.0.2.54 是誰（是不是管理員電腦的舊 DHCP 位址）
 - [ ] 在數據機為管理員電腦做 DHCP 保留（或電腦手動固定 IP）
 - [ ] 三台節點各自的 `access.log` 來源排行、SSH 來源（修正版指令）、`/etc/default/pveproxy` 現況
-- [ ] node10 的 `grep -E 'auth_(cluster|service|client)_required' /etc/pve/ceph.conf`：確認 Ceph 是否強制 `cephx`
+- [x] node10 的 `grep -E 'auth_(cluster|service|client)_required' /etc/pve/ceph.conf`：確認 Ceph 是否強制 `cephx`（2026-11-01 確認 `auth_client_required`、`auth_cluster_required`、`auth_service_required` 三項都是 `cephx`，所以 Ceph MON 在服務網連得到，並不等於不用認證就能存取）
 - [ ] 決定是否採用選項 B；採用時先在一台節點測試「允許的來源連得到、不在名單的來源被拒絕」，並備妥還原方式（⏳ 2026-10-31 暫停）
 - [x] 數據機刪除 8006、3000 轉送規則後，從外部再測一次（2026-11-01 完成，見 4-3）
 - [ ] 評估 Corosync 增加第二條 link（可用性，不是資安；目前單一 link 在 SX1008）

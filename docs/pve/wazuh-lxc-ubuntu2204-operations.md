@@ -4,7 +4,7 @@ title: "Wazuh 維運（二）：資料保留、告警調校、弱點修補與整
 date: 2026-10-02
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-operations/
-last_modified_at: 2026-10-30
+last_modified_at: 2026-11-01
 ---
 {% raw %}
 
@@ -207,7 +207,16 @@ du -sh /var/ossec/logs/alerts
 | `Sep/` 四個檔案的修改時間 | 2026-10-01 00:00:10～00:00:12（+0800） |
 | 現在時間 | 2026-10-30 11:21（CST），檔案年齡約 29 天 11 小時 |
 
-`-mtime +30` 是「年齡以 24 小時為單位無條件捨去後大於 30」，也就是**至少滿 31 天**。10/31 03:17 那次檔案年齡是 30 天又 3 小時，捨去後是 30，不會刪；**11/01 03:17 那次是 31 天又 3 小時，會刪**。刪掉後空的 `Sep` 目錄也會被清掉。依規則推算 **11/01 03:17 會清掉**，但**尚未用 11/01 之後的結果驗證**。
+`-mtime +30` 是「年齡以 24 小時為單位無條件捨去後大於 30」，也就是**至少滿 31 天**。10/31 03:17 那次檔案年齡是 30 天又 3 小時，捨去後是 30，不會刪；**11/01 03:17 那次是 31 天又 3 小時，會刪**。刪掉後空的 `Sep` 目錄也會被清掉。依規則推算 **11/01 03:17 會清掉**（2026-11-01 已驗證，見下）。
+
+**11/01 驗收**（2026-11-01 11:32，CT112 時間）：
+
+| 指令 | 結果 |
+| --- | --- |
+| `ls /var/ossec/logs/alerts/2026/Sep/` | `No such file or directory`（`Sep` 目錄已不存在） |
+| `ls /var/ossec/logs/alerts/2026/` | 只剩 `Nov`、`Oct` |
+
+9 月的告警文字檔已被排程清掉，與推算相符。
 
 > 索引日期以 UTC 切分，所以「9/30 的索引」是 UTC 日期；實際刪除時間會比 `min_index_age` 晚一點，因為 ISM 是定期檢查。
 
@@ -1591,7 +1600,7 @@ Manager 另外新增一個 `syslog_output`，只把 `wireguard` 群組的告警�
 - [x] TLS 驗證（2026-10-20）：Grafana 改為驗證 Indexer 憑證（[戰情中心（一）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-wazuh/) 7-1）；jt-ipam 評估後維持不驗證（13-3）
 - [x] node10 的 AppArmor DENIED（52002）告警調校：2026-10-20 來源是 Grafana（CT 114），停用容器內 rsyslogd 規則後歸零（11-2）
 - [ ] 定期檢查索引佔用與保留是否正常（10-5）
-- [ ] 11/01 03:17 之後確認 `/var/ossec/logs/alerts/2026/Sep/` 已被排程清掉（10-6）
+- [x] 11/01 03:17 之後確認 `/var/ossec/logs/alerts/2026/Sep/` 已被排程清掉（2026-11-01 11:32 確認 `Sep` 目錄已不存在，只剩 `Nov`、`Oct`；10-6）
 - [ ] DC01、DC02、CA 補上資源監控：目前 LibreNMS 只知道通不通，磁碟快滿、服務停止都不知道；Windows 內建 SNMP 已列為淘汰，評估改用既有 Wazuh Agent 或其他方式
 - [ ] LibreNMS「位置」欄統一：各 LXC 的 `sysLocation` 改成與節點無關的寫法（例如 `PVE-Cluster`），HA 搬移後才不會不準（11-14 補充）
 - [ ] 2027 年初規劃把容器升級到 Ubuntu 24.04（升級前先快照與 PBS 備份）

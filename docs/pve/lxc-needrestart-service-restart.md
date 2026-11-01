@@ -4,7 +4,7 @@ title: "LXC 自動更新後，怎麼檢查「待重啟的服務」：逐一重�
 date: 2026-10-25
 categories: [PVE, LXC]
 permalink: /docs/pve/lxc-needrestart-service-restart/
-last_modified_at: 2026-10-29
+last_modified_at: 2026-11-01
 ---
 
 # LXC 自動更新後，怎麼檢查「待重啟的服務」：逐一重啟 dbus 的坑與整個容器重開
@@ -254,7 +254,7 @@ CT113（ai）沒有被我們逐一重啟過 `dbus`／`logind`，10-28 的檢查�
 ## 11. 待辦
 
 - [x] 確認幾天都正常後，刪除 `pre-restart-20261025`（CT100、101、103、105、109、110、112、114）和 `pre-restart-20261029`（CT112、CT114）快照（2026-10-30 已全部刪除，三個節點用迴圈確認每個 CT 都沒有快照；之後動 CT 之前先拍新的）
-- [ ] CT113 找時間整個容器重開，一併清掉待重啟的服務。**10/29 node10 做維護時 CT113 被 HA 重啟過**，待重啟的服務很可能已經清掉（推測），用 `needrestart -b` 確認，沒有 `NEEDRESTART-SVC` 就可以結案
+- [x] CT113 找時間整個容器重開，一併清掉待重啟的服務。**10/29 node10 做維護時 CT113 被 HA 重啟過**，待重啟的服務很可能已經清掉（推測），用 `needrestart -b` 確認，沒有 `NEEDRESTART-SVC` 就可以結案（2026-11-01 結案：當天為了接 UPS 整個叢集關機再開機，CT113 因此整個重開；執行 `needrestart -b -r l`（`-r l` 是只列出、不重啟），輸出只有 `NEEDRESTART-VER: 3.6`，沒有 `NEEDRESTART-SVC`）
 - [ ] 驗證 `needrestart` 排除服務的設定語法（在測試容器上）
 - [ ] 查 Wazuh 未分配 shard 多出的 3 個是哪些，並評估是否把 replica 設成 0
 - [ ] 重新用 `infra_syslog_*` 確認 Graylog 在 `mongod` 重啟後有沒有漏 log
