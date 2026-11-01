@@ -4,7 +4,7 @@ title: "ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12 怎麼做、哪�
 date: 2026-10-29
 categories: [PVE, ProxCenter]
 permalink: /docs/pve/proxcenter-enterprise-update/
-last_modified_at: 2026-10-29
+last_modified_at: 2026-11-01
 ---
 
 # ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12 怎麼做、哪裡會踩雷
@@ -198,7 +198,7 @@ Swap 已用的 221 MB 是原本 1 GB 記憶體吃緊時被換出去的，擴容�
 ## 8. 待辦
 
 - [ ] 追蹤 ProxCenter 下一版，**前端 Node.js 要 ≥ v26.12.1**；有新版時先看 Releases 有沒有提到 Node 升級，更新後用 `docker exec proxcenter-frontend node -v` 確認（已排 11/05 提醒）
-- [ ] 穩定 3～5 天後清舊 docker 映像檔：先 `docker system df` 看可回收量，再 `docker image prune`（只清沒標籤的）；不要用 `docker system prune`
+- [x] 穩定 3～5 天後清舊 docker 映像檔（2026-11-01 完成）：先 `docker system df` 看可回收量，再 `docker image prune`（只清沒標籤的）；不要用 `docker system prune`。實測：映像 26 個（使用中 4 個）共 14.82 GB，可回收 11.87 GB（80%）；`docker image prune -f` 實際回收 12.43 GB，剩 4 個映像（2.392 GB），4 個容器仍是 `healthy`。清掉的 22 個沒標籤映像，建立時間從 3 週前到 4 個月前；之後若要回到舊版，靠 PBS 備份還原 CT110，或更新前先拍的快照
 - [x] 確認右下角 `1 error` 是不是 10/24 取消的那一筆（2026-10-29 確認就是那一筆）
 - [ ] 決定要不要把 metrics 保留天數調到 14 天以上（目前維持預設）
 

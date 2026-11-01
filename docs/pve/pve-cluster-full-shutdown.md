@@ -4,19 +4,19 @@ title: "整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）
 date: 2026-10-23
 categories: [PVE, Ceph, HA]
 permalink: /docs/pve/pve-cluster-full-shutdown/
-last_modified_at: 2026-10-25
+last_modified_at: 2026-11-01
 ---
 
 # 整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）
 
-> **一句話**：為了調整機器擺放位置（順便替 tokyo16 加裝 10G 網卡），要把三台 PVE、PBS31 和兩台 NAS 全部關機。三台不能直接一起關：HA 會把服務搬來搬去，Ceph 會以為硬碟壞了開始搬資料。這篇把正確順序寫成兩支腳本（關機、開機），實際用了一次；最後一台被 HA 的 watchdog 強制重開，已修正腳本（修正版待下次關機驗證）。
+> **一句話**：為了調整機器擺放位置（順便替 tokyo16 加裝 10G 網卡），要把三台 PVE、PBS31 和兩台 NAS 全部關機。三台不能直接一起關：HA 會把服務搬來搬去，Ceph 會以為硬碟壞了開始搬資料。這篇把正確順序寫成兩支腳本（關機、開機），實際用了一次；最後一台被 HA 的 watchdog 強制重開，已修正腳本（修正版待下次關機驗證）。2026-11-01 為了接 UPS 又關了一次，這次手動操作、最後一台正常關機（第 9 節）。
 
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 要搬機房、停電維護，需要把整個叢集關掉再開回來的人 |
 | 環境 | PVE 9.2.21 三節點 node10～12（Ceph、CephFS、13 個 HA 資源）；PBS31 是 NAS 上的 VM；NAS tokyo16、melayu17 |
 | 日期 | 2026-10-23 |
-| 結論 | ✅ 關機腳本跑完 HA 停止、其他 VM 關機、Ceph 旗標、兩台關機 ✅ 開機腳本 1 分半恢復 13 個服務、Ceph `HEALTH_OK` ⚠️ 最後一台（node10）被 watchdog 重開、卡在開機，長按電源關機 ⏳ 已加「停 HA 監看＋延遲卸載 CephFS」，待下次關機驗證 ✅ tokyo16 加裝 10G 網卡：備份、GC、Verify 時間都沒有明顯變化（第 8 節） |
+| 結論 | ✅ 關機腳本跑完 HA 停止、其他 VM 關機、Ceph 旗標、兩台關機 ✅ 開機腳本 1 分半恢復 13 個服務、Ceph `HEALTH_OK` ⚠️ 最後一台（node10）被 watchdog 重開、卡在開機，長按電源關機 ⏳ 已加「停 HA 監看＋延遲卸載 CephFS」，待下次關機驗證 ✅ tokyo16 加裝 10G 網卡：備份、GC、Verify 時間都沒有明顯變化（第 8 節） ✅ 2026-11-01 為了裝 UPS 又關了一次（手動流程，node10 正常關機，第 9 節） |
 
 ## 1. 先認識幾個名詞
 
@@ -285,7 +285,111 @@ Verify 要讀整個資料集，若 10G 有幫助，這裡最看得出來，結�
 | NAS 的 CPU 或磁碟 | Verify 進行時，看 DSM → 資源監控的網路、CPU、磁碟使用 |
 | 節點網卡 | 從節點對 PBS31 測速 |
 
-## 9. 常見問題
+## 9. 第二次關機：安裝 UPS（2026-11-01，手動操作）
+
+> **一句話**：為了接上 UPS，把整個叢集關機再開機；這次**沒有用 10/23 的腳本**，而是照同樣的順序手動做。結果一切正常，但開機後 Lab Ops 卡在「連線失敗」、HA 服務又換了節點，這兩件事要記得。
+
+| 項目 | 內容 |
+| --- | --- |
+| 日期 | 2026-11-01（下午；備份排程 21:00 之前做完） |
+| 做法 | 手動：HA 資源逐一設 `stopped` → Ceph 旗標 → 關節點；沒用腳本是因為當天忘了腳本放在哪裡（位置見 9-1 的提示） |
+| 結果 | ✅ quorum 正常、Ceph `HEALTH_OK`、97 個 PG 全部 `active+clean`、13 個 HA 服務 `started`、21 項服務唯讀檢查全過 ✅ WireGuard 從手機 4G 連入正常 |
+| 沒驗證到的 | 10/23 的待辦「修正版腳本讓 node10 正常關機」**這次沒有驗證**，因為沒跑腳本 |
+
+### 9-1 和 10/23 的差別
+
+| 項目 | 10/23（腳本） | 11/01（手動） |
+| --- | --- | --- |
+| Ceph 旗標 | `pause`、`nodown`、`noout`、`nobackfill`、`norebalance`、`norecover` | 只設 `noout`、`norebalance`、`nobackfill`、`norecover` 四個 |
+| 非 HA 的 VM（104、108） | 腳本關機、開機時再啟動 | 關機前它們**本來就是停止的**，不用處理 |
+| 停 `pve-ha-lrm`／`pve-ha-crm` | 腳本自動做 | 最後一台 node10 **正常關機**，沒有被 watchdog 重開；這次有沒有手動停過 `pve-ha-lrm`／`pve-ha-crm`：未確認 |
+| 開機後起服務 | 腳本只起「關機前是 started」的 | 手動逐一 `ha-manager set … --state started` |
+
+> **腳本在哪裡**：repo 的 `tools/pve-cluster-power/`；依第 3 節，三台的 `/usr/local/sbin/cluster-shutdown.sh`、`cluster-startup.sh` 都已安裝（用 `ls -la /usr/local/sbin/cluster-*.sh` 確認；11/01 在 node10 確認過兩個檔都在，權限 700，關機腳本修改於 10/23 15:10、開機腳本 10/23 09:44，node11、node12 沒有確認）。
+>
+> 下次建議直接用 10/23 的腳本：它會記錄關機前的狀態、自動處理非 HA 的 VM、只還原原本就在跑的服務，不會忘記「改回 started」。手動做的風險就是這一步被漏掉。
+
+### 9-2 關機前先看一遍（唯讀）
+
+| 檢查 | 指令 | 看到的結果（2026-11-01 14:24） |
+| --- | --- | --- |
+| quorum | `pvecm status` | `Quorate: Yes`、3 個節點、票數 3 |
+| Ceph | `ceph -s` | `HEALTH_WARN`：1 個 OSD 的 BlueStore 慢操作（osd.1）；3 up／3 in；97 個 PG 全部 `active+clean` |
+| HA | `ha-manager status` | quorum OK、13 個資源全是 `started`、沒有 error |
+| 備份 | `ps aux \| grep -c '[v]zdump'`（三台各跑） | 三台都是 `0`（備份排程 21:00 起，現在沒有在跑） |
+| Guest | `qm list`、`pct list`（三台各跑） | VM 104、108 在 node11，本來就是 `stopped`、不在 HA |
+
+### 9-3 步驟
+
+**① HA 資源分批設成 `stopped`**（先葉端、再 DNS／AD、最後留 Graylog、WireGuard 和 Lab Ops 主機）：
+
+```bash
+ha-manager set ct:114 --state stopped
+```
+
+| 批次 | 資源 | 原因 |
+| --- | --- | --- |
+| 1 | ct:114、110、102、103、112 | 監控與葉端服務，沒有人依賴它們 |
+| 2 | ct:100、101、vm:111 | DNS 與 CA |
+| 3 | vm:107、vm:106 | DC02、DC01 |
+| 4 | ct:105、109、113 | 最後才停 Graylog（留下關機過程的 log）、WireGuard（保留遠端進入）和 Lab Ops 主機 |
+
+每批做完用 `ha-manager status` 確認都變 `stopped` 再做下一批。**應該看到**：13 個資源全是 `stopped`，三台的 `qm list`／`pct list` 全是 `stopped`。
+
+**② 設 Ceph 旗標並驗證**：
+
+```bash
+ceph osd set noout
+ceph osd set norebalance
+ceph osd set nobackfill
+ceph osd set norecover
+ceph osd dump | grep '^flags'
+```
+
+**應該看到**：`flags` 那行出現這四個旗標（另有 Ceph 預設的 `sortbitwise,recovery_deletes,purged_snapdirs,pglog_hardlimit`）。
+
+**③ 關機**：PBS31 → node12 → node11 → node10（你操作的最後關）→ NAS → 網路設備。當天沒有留下關機與開機的時間紀錄（這也是用腳本的好處：腳本會自動留記錄檔）。
+
+### 9-4 開機後的恢復
+
+| 順序 | 做什麼 | 應該看到 |
+| --- | --- | --- |
+| 1 | NAS → PBS31 → 三台節點 | 三台都起來 |
+| 2 | `pvecm status`、`ceph -s`、`ceph osd tree` | `Quorate: Yes`；`3 osds: 3 up, 3 in`；97 個 PG `active+clean`；**`HEALTH_OK`** |
+| 3 | 解除四個旗標：`ceph osd unset …`，再 `ceph osd dump \| grep '^flags'` | 只剩 Ceph 預設的四個旗標 |
+| 4 | HA 資源改回 `started`，**DC01、DC02 先**，等它們起來再設其他（第 1 批 vm:106、107；第 2 批 ct:100、101、vm:111、ct:109、113；第 3 批其餘） | `ha-manager status` 13 個全是 `started`、沒有 error |
+
+**實測**：
+
+- osd.1 的 BlueStore 慢操作警告，在 OSD 重新啟動之後**消失**，`ceph -s` 回到 `HEALTH_OK`（推測：警告的計時在 OSD 重啟時被重置）。
+- **13 個服務又換了節點**：`ha-rebalance-on-start=1` 讓 HA 在啟動時依當下負載重新挑節點。8 個換了位置，數量變成 node10 五個、node11 四個、node12 四個：
+
+| 服務 | 關機前 | 開機後 |
+| --- | --- | --- |
+| ct:100 AdGuard | node10 | node11 |
+| ct:102 LibreNMS | node11 | node10 |
+| ct:103 JT-IPAM | node10 | node12 |
+| ct:105 Graylog | node12 | node10 |
+| ct:109 WireGuard | node11 | node10 |
+| ct:110 ProxCenter | node12 | node11 |
+| ct:112 Wazuh | node10 | node11 |
+| vm:107 DC02 | node11 | node12 |
+
+其餘 5 個（ct:101、113、114、vm:106、vm:111）位置不變。**之後 `pct exec` 要到 CT 目前所在的節點執行**，用 `pvesh get /cluster/resources --type vm` 可以一次看到所有 Guest 在哪台、是否在跑。
+
+### 9-5 開機後驗證（唯讀）
+
+| 檢查 | 結果 |
+| --- | --- |
+| 各 CT 的 `systemctl is-system-running` | 全部 `running` |
+| AdGuardHome、pihole-FTL、graylog-server、wazuh-manager、grafana-server | 全部 `active` |
+| ProxCenter（CT110） | 4 個容器全是 `Up … (healthy)` |
+| WireGuard | `wg show interfaces` 看到 `wg0`；手機 4G 開 WireGuard 後內網連得上 |
+| PBS31 儲存 | `pvesm status` 顯示 `active`（今晚備份的前提） |
+| DNS（AdGuard、Pi-hole） | 從 CT113 `ping` 兩台都通 |
+| DC01、DC02 的 AD | 在 Windows 端確認，正常（PVE 只看得到 VM 在跑，看不到 AD 本身） |
+
+## 10. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
@@ -296,16 +400,24 @@ Verify 要讀整個資料集，若 10G 有幫助，這裡最看得出來，結�
 | 開機腳本說找不到 `/etc/pve/priv/ha-before-shutdown.txt` | 關機腳本沒跑到第 1 步，或已經用過一次（用過會改名為 `/root/ha-before-shutdown-used-…`） |
 | WinClient 開機出現 `no efidisk configured`、`failed to reset PCI device` | 這台 VM 原本的設定（沒有 EFI 磁碟、有 PCI 直通），`Task finished with 2 warning(s)` 仍正常啟動 |
 | 關機前 PBS31 網頁登不進去，重開後正常 | 原因未確認（和 SSH 金鑰設定無關，網頁用 PAM）；再發生時用 SSH 執行 `journalctl -u proxmox-backup-proxy --since "1 hour ago" \| grep -iE "auth\|login\|fail"` 抓原因 |
+| 開機後 HA 資源都沒起來 | 手動關機時資源被設成 `stopped`，HA 不會自己起來；逐一 `ha-manager set <資源> --state started`，DC 先。腳本版會自動處理 |
+| 整個叢集重啟後，Lab Ops（`claude --remote-control`）顯示 `Session creation failed`，程序卻還活著 | CT113 開機時 DNS（AdGuard、Pi-hole）還沒起來，啟動當下連線失敗，之後不會自己重連。確認 DNS 通了之後，**只對 `claude` 那個程序** `kill <PID>`，外層的 `while true` 迴圈 10 秒後會自動重啟它。**不要用 `pkill -f`**：外層迴圈與 tmux 的命令列也含同樣的字串，會連迴圈一起殺掉 |
+| `pct exec` 說容器不存在 | 開機後 HA 換了節點；先用 `pvesh get /cluster/resources --type vm` 找出它現在在哪台 |
+| 重啟後 Ceph 的慢操作警告不見了 | 正常：計時在 OSD 重啟時重置。若又出現，代表問題還在，看 BlueStore 慢操作那篇 |
 
-## 10. 待辦
+## 11. 待辦
 
 - [ ] 下次整個叢集關機時，驗證修正版（node10 正常關機、不被重開）
 - [x] 比較備份時間確認 10G 網卡的效果（2026-10-25，8-1）：沒有明顯變化
 - [ ] （可選）找出備份真正的瓶頸：Verify 時看 DSM 資源監控，或在 PBS31 執行 `proxmox-backup-client benchmark`
 - [x] 三台的 `/usr/local/sbin/cluster-shutdown.sh` 已換成 5-2 的修正版（10/23，`bash -n` 通過，scp 到 node11、node12）
 - [ ] 修正版驗證後，刪除 node10 的 `/usr/local/sbin/cluster-shutdown.sh.bak-20261023`
+- [x] 這次 node10（最後一台）正常關機，沒有被 watchdog 重開（手動流程；與 10/23 腳本版不同的原因未確認）
+- [ ] 下次整個叢集關機改用 10/23 的腳本，並驗證修正版
+- [ ] Lab Ops 啟動迴圈先等 DNS 可用再啟動 `claude`（選項：A 改啟動指令加等待；B 調整 HA 啟動順序；C 不處理、整叢集重啟後手動 `kill`；目前採 C）
+- [ ] UPS 是 APC SmartUPS 1500：確認這一台有 USB 或網路管理卡（依型號後綴與是否裝了網卡而定，未確認），再評估 NUT（斷電時自動依序關機）；接了哪些設備、預估續航時間尚未記錄
 
-## 11. 延伸閱讀
+## 12. 延伸閱讀
 
 - [PVE HA 放置策略](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)：CRS、`ha-rebalance-on-start`、互斥規則
 - [PVE 更新重開後 HA 服務卡在 error](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)：shutdown_policy 改為 migrate 的原因

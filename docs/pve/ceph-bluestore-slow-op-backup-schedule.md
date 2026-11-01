@@ -4,7 +4,7 @@ title: "Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程�
 permalink: /docs/pve/ceph-bluestore-slow-op-backup-schedule/
 date: 2026-10-14
 categories: [PVE, Ceph, PBS, Backup, Troubleshooting]
-last_modified_at: 2026-10-31
+last_modified_at: 2026-11-01
 ---
 
 # Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？
@@ -529,7 +529,8 @@ ceph config get osd.1 bluestore_slow_ops_warn_threshold
 
 ### 11-7 待辦
 
-- [ ] 確認告警何時自動消失：11/01 上午仍在（osd.1）；預期最快 11/01 21:38 之後，今晚 node11 備份（21:30 起）可能重新計時；11/02 上午再看 `ceph health detail`
+- [x] 確認告警何時自動消失：11/01 上午與 14:24 仍在（osd.1）；11/01 下午為了接 UPS 整個叢集關機再開機（OSD 重新啟動）之後，`ceph -s` 回到 `HEALTH_OK`，告警消失。所以這次不是自然過期，而是 OSD 重啟後計時被重置（推測）
+- [ ] 11/02 上午再看 `ceph health detail`，確認 11/01 晚上的備份（21:00～22:00）之後告警沒有復發
 - [ ] 確認 `lifetime`、`threshold` 是否為預設（`ceph config dump | grep slow_ops`、`grep slow_ops /etc/pve/ceph.conf`）
 - [x] 閒置時段第二輪唯讀檢查（2026-11-01 完成，見 11-4）
 - [ ] 補查三顆碟的 Critical Warning、`Comp. Temperature Time`（Warning／Critical）、`Thermal Temp`

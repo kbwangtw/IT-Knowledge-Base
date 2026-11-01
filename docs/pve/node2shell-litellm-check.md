@@ -4,7 +4,7 @@ title: "Node2Shell（CVE-2026-111497）與 LiteLLM 供應鏈攻擊：檢查環�
 date: 2026-10-24
 categories: [Security, Node.js, PVE]
 permalink: /docs/pve/node2shell-litellm-check/
-last_modified_at: 2026-10-29
+last_modified_at: 2026-11-01
 ---
 {% raw %}
 
@@ -136,7 +136,7 @@ pct exec 103 -- systemctl --failed --no-legend | wc -l
 pct exec 113 -- sh -c 'cat /etc/apt/sources.list.d/nodesource.sources; npm ls -g --depth=0 2>/dev/null; ls /root/node_modules | head; ls /root/*.js'
 ```
 
-`URIs: https://deb.nodesource.com/node_20.x`；全域只有 `corepack`、`npm`；`/root/node_modules` 是 `pptxgenjs`、`jszip` 等純 JavaScript 套件，給 `/root/generate_pptx.js` 用（`generate_pptx.js` 已於 2026-10-30 刪除，`/root/node_modules` 是它的相依套件，尚未清理）。
+`URIs: https://deb.nodesource.com/node_20.x`；全域只有 `corepack`、`npm`；`/root/node_modules` 是 `pptxgenjs`、`jszip` 等純 JavaScript 套件，給 `/root/generate_pptx.js` 用（`generate_pptx.js` 已於 2026-10-30 刪除，`/root/node_modules` 是它的相依套件；2026-11-01 已清理：先用 `grep -rl pptxgenjs /root` 確認沒有 JavaScript 檔引用它，再 `rm -r /root/node_modules`，`package.json` 與 `package-lock.json` 保留，要還原時 `npm ci`）。
 
 **換來源並升級**：
 
@@ -260,6 +260,7 @@ Wazuh Dashboard 建立在 OpenSearch Dashboards 上，Node.js 版本由 OpenSear
 ## 10. 待辦
 
 - [x] 觀察幾天正常後刪除快照：`pct delsnapshot 103 pre-node22234`、`pct delsnapshot 113 pre-node22`（2026-10-29 已刪）
+- [x] 清掉 CT113 的 `/root/node_modules`（2026-11-01，7.9 MB，只含 `pptxgenjs` 與它的相依套件；`package.json`、`package-lock.json` 保留）
 - [ ] 刪除 CT113 的 `/root/node-dl`、`/root/nodesource.sources.bak`（`~/.hermes` 已隨 Hermes 移除）
 - [x] ~~每次 `hermes update` 後確認自帶的 Node~~：同日 Hermes 已移除，見 [用 Claude Code 取代 Hermes](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/claude-code-redact-gateway/)
 - [ ] 追蹤 ProxCenter 新版（frontend 的 Node ≥ 26.12.1）後更新；10/29 的 v1.4.12 仍是 26.12.0，已排 11/05 檢查有沒有新版
