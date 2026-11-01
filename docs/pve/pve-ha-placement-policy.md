@@ -4,7 +4,7 @@ title: "PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？"
 date: 2026-10-02
 categories: [PVE, HA, ProxCenter]
 permalink: /docs/pve/pve-ha-placement-policy/
-last_modified_at: 2026-10-29
+last_modified_at: 2026-11-01
 ---
 
 # PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？
@@ -15,8 +15,8 @@ last_modified_at: 2026-10-29
 | --- | --- |
 | 適合誰看 | 同時用 PVE 和 ProxCenter，不確定規則該設在哪邊的人 |
 | 環境 | Proxmox VE 9.2.20 → 9.2.21，三節點（node10、node11、node12，皆為 Win element M600：Ryzen 9 8945HS、64 GB），Ceph 共用儲存 |
-| 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案；10/19 再次分散；10/29 DRS 以 Manual 模式重新開啟 |
-| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；✅ 10/19 HA 資源分散為 4／5／4；⏳ 10/29 DRS 以 Manual 模式重新開啟、VM＋LXC 都評估，觀察中（第 12-5 節）；⏳ 單節點故障演練 |
+| 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案；10/19 再次分散；10/29 DRS 以 Manual 模式重新開啟；11/01 整叢集重開後再分散 |
+| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；✅ 10/19 HA 資源分散為 4／5／4；✅ 11/01 整叢集重開後分布跑掉，再分散回三套監控各在一台（第 13-1 節）；⏳ 10/29 DRS 以 Manual 模式重新開啟、VM＋LXC 都評估，觀察中（第 12-5 節）；⏳ 單節點故障演練 |
 
 ## 1. 先認識幾個名詞
 
@@ -595,6 +595,134 @@ ha-manager migrate ct:112 node10
 
 **UBClient 與 WinClient**：10/29 起都**暫時關機、要用才開**。關機期間仍然每晚備份與 Verify；要開 WinClient 只能在 node11（有 VGA 直通）；做 ProxCenter 滾動更新前，如果開著要先關機（第 11 節）。
 
+### 13-1 2026-11-01：裝 UPS 整叢集重開後，再分散一次
+
+**為什麼**：11/01 下午為了接 UPS 整個叢集關機再開機（見[叢集關機與開機](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-full-shutdown/)第 9 節），`ha-rebalance-on-start=1` 讓 13 個服務依當下負載重新挑節點，8 個換了位置。數量是 5／4／4，但**違反本節的兩條原則**：
+
+| 節點 | 開機後的 HA 資源 | 問題 |
+| --- | --- | --- |
+| node10 | LibreNMS、Graylog、WireGuard、ai、DC01（5） | 兩套監控（LibreNMS、Graylog）擠在一起；WireGuard 和服務最多的節點放一起 |
+| node11 | AdGuard、ProxCenter、Wazuh、CA（4） | — |
+| node12 | Pi-hole、IPAM、Grafana、DC02（4） | — |
+
+node10 一台故障，會同時失去兩套監控和 VPN。這也是單節點故障演練前要先處理的事。
+
+**目標**：只搬 4 個，ai（Lab Ops 主機）不動，避免它重開後又卡在「連線失敗」。
+
+| 原則 | 搬移後 |
+| --- | --- |
+| 三套監控各在一台 | Graylog node10、Wazuh node11、LibreNMS node12 |
+| Grafana 放第三台 | 它讀 LibreNMS（node12）和 Wazuh（node11），所以放 node10 |
+| WireGuard 不跟服務最多的節點放一起 | 放 node12（4 個），不放 node11（5 個） |
+| DNS、DC 分開 | AdGuard／Pi-hole、DC01／DC02 都沒動，兩條規則照樣有效 |
+
+**① 搬移前檢查**（node10，在 tmux 裡，只讀取）：
+
+```bash
+tmux new -s rebalance
+date
+ha-manager status | grep -E '^(quorum|master|service)'
+ha-manager rules config
+ceph -s | grep -E 'health|osd:|pgs:'
+for n in node10 node11 node12; do
+  echo -n "$n 備份程序數："; ssh root@$n 'ps aux | grep -c "[v]zdump"' < /dev/null
+  pvesh get /nodes/$n/status --output-format json | python3 -c "
+import json,sys; m=json.load(sys.stdin)['memory']
+print('  $n 記憶體 %.1f / %.1f GiB（%.0f%%）' % (m['used']/2**30, m['total']/2**30, 100*m['used']/m['total']))"
+done
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `tmux new -s rebalance` | 斷線也不會中斷；用 `tmux attach -t rebalance` 接回 |
+| `grep -c "[v]zdump"` | 有沒有備份正在跑；`[v]` 讓 grep 不會算到自己 |
+| `ssh … < /dev/null` | 避免 ssh 吃掉迴圈的輸入 |
+
+**看到的結果**（16:16）：`quorum OK`、13 個 `started`、分布同上表；兩條規則 `enabled`、`in use`；`HEALTH_OK`、3 up／3 in、97 active+clean；三台備份程序數都是 0；記憶體 node10 22%、node11 18%、node12 16%。
+
+**② 搬移函式**：第 13 節的 `mig` 改成可以指定目標節點，並印出開始與完成時間：
+
+```bash
+mig() {
+  id=$1; target=$2; t0=$(date +%s)
+  echo "$(date '+%F %T') 開始：ct:$id → $target"
+  ha-manager migrate ct:$id $target || { echo "⚠️ migrate 指令失敗"; return 1; }
+  for i in $(seq 1 100); do
+    sleep 3
+    if ha-manager status | grep -q "ct:$id ($target, started)"; then
+      echo "✅ $(date '+%F %T') ct:$id 已在 $target 啟動，耗時 $(( $(date +%s) - t0 )) 秒"; return 0
+    fi
+  done
+  echo "⚠️ ct:$id 5 分鐘內沒有完成，目前狀態："; ha-manager status | grep "ct:$id"; return 1
+}
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `mig 114 node10` | 把 ct:114 搬到 node10 |
+| `\|\| { …; return 1; }` | migrate 被拒絕時馬上停，不空等 5 分鐘 |
+| `grep "ct:$id ($target, started)"` | 每 3 秒檢查，直到在目標節點啟動 |
+
+**③ 一次搬一個**（看到 ✅ 才搬下一個，WireGuard 最後、在內網操作）：
+
+```bash
+mig 114 node10     # Grafana
+mig 103 node11     # IPAM
+mig 102 node12     # LibreNMS
+mig 109 node12     # WireGuard
+```
+
+| 服務 | 搬到 | 完成時間 | 耗時 |
+| --- | --- | --- | --- |
+| Grafana（ct:114） | node10 | 16:18:44 | 41 秒 |
+| IPAM（ct:103） | node11 | 16:19:55 | 48 秒 |
+| LibreNMS（ct:102） | node12 | 16:20:55 | 38 秒 |
+| WireGuard（ct:109） | node12 | 16:22:24 | 41 秒 |
+
+耗時是「下指令到在目標節點 `started`」，不是使用者感受到的中斷時間（服務在容器開機後還要幾秒才可用）。
+
+**④ 搬完檢查**：
+
+```bash
+ha-manager status | grep -E '^service' | sort -t'(' -k2
+ssh root@node10 "pct exec 114 -- curl -s http://localhost:3000/api/health" < /dev/null; echo
+for id in 103:node11 102:node12 109:node12 114:node10; do
+  ct=${id%%:*}; n=${id##*:}
+  echo "== ct:$ct（$n）"
+  ssh root@$n "pct exec $ct -- systemctl is-system-running; pct exec $ct -- systemctl --failed --no-pager --plain | head -5" < /dev/null
+done
+ssh root@node12 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|latest handshake'" < /dev/null
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `sort -t'(' -k2` | 依所在節點排序，方便對照 |
+| `${id%%:*}`／`${id##*:}` | 把「CT 編號:節點」拆成兩個變數 |
+| `systemctl is-system-running` | 容器內 systemd 的整體狀態，`running` 代表沒有失敗的服務 |
+
+**看到的結果**：
+
+| 檢查 | 結果 |
+| --- | --- |
+| HA | 13 個都是 `started`，分布如下表 |
+| Grafana | `"database": "ok"`（13.2.3） |
+| 四個容器 | 都是 `running`，`--failed` 0 個 |
+| WireGuard | `interface: wg0`、`listening port: 51820`；沒有 `latest handshake`（搬完後還沒有裝置連上） |
+| 手機 4G 連 VPN、LibreNMS 有新資料、IPAM 網頁 | ⏳ 待確認 |
+| 【VPN 告警】是否寄出 | ⏳ 待確認 |
+
+**搬完的分布（4／5／4）**：
+
+| 節點 | HA 資源 |
+| --- | --- |
+| node10 | Graylog(105)、ai(113)、Grafana(114)、DC01(vm:106) |
+| node11 | AdGuard(100)、IPAM(103)、ProxCenter(110)、Wazuh(112)、CA(vm:111)（＋非 HA：VM 104、108，都關機） |
+| node12 | Pi-hole(101)、LibreNMS(102)、WireGuard(109)、DC02(vm:107) |
+
+**退回**：哪一個有問題就只搬回那一個，例如 `mig 109 node10`。
+
+> ⚠️ **整叢集重開後分布一定會跑掉**：10/23、11/01 兩次都是 `ha-rebalance-on-start=1` 依當下負載重新挑節點。每次整叢集開機後，都要用 `ha-manager status` 對照上表，必要時照本節再分散一次。
+
 ## 14. 常見問題
 
 | 現象 | 怎麼辦 |
@@ -603,7 +731,8 @@ ha-manager migrate ct:112 node10
 | `ha-manager rules config` 看不出是分開還是放一起 | 打開規則或看 `/etc/pve/ha/rules.cfg` 的 `affinity negative` |
 | 搬 HA 資源用 `pct migrate` 沒反應或被拒 | HA 資源要用 `ha-manager migrate` |
 | VM 在客體內關機後又自己開起來 | HA 資源要用 `ha-manager set … --state stopped` |
-| 維護後服務沒回到原節點 | 正常；對照第 13 節的分布表，手動 `ha-manager migrate` |
+| 維護後服務沒回到原節點 | 正常；對照第 13-1 節的分布表，手動 `ha-manager migrate` |
+| 整叢集關機再開機後，服務換了一堆節點 | `ha-rebalance-on-start=1` 依開機當下的負載重新挑節點；照第 13-1 節再分散 |
 | Rolling Update 中途中斷 | 可能是 ProxCenter 自己被搬走；先更新沒有 ProxCenter 的節點 |
 | 叢集使用率很平均，但某台服務特別多 | DRS 只看使用率；可用性風險要人工分散 |
 | DRS 顯示分數 80「To optimize」，Recommendations 卻是 balanced | 分數反映目前的不平衡度，建議要超過觸發門檻才會出現；10/29 實測不平衡度 18% 仍沒有建議（第 12-5 節） |
@@ -622,6 +751,7 @@ ha-manager migrate ct:112 node10
 | ProxCenter DRS 以 Manual 模式重新開啟，Guest types 加回 LXC | ⏳ 2026-10-29 開啟，觀察 3～5 天後決定留或關（第 12-5 節） |
 | 2026-10-29 Wazuh 搬到 node10 後的驗收（服務、agent 數、dashboard） | ✅ 三個服務 active、dashboard 正常、Active 16／Disconnected 2（第 13 節） |
 | HA 資源集中在 node10，是否再分散 | ✅ 2026-10-19 由 8／1／4 分散為 4／5／4（第 13 節） |
+| 11/01 整叢集重開後分布跑掉（兩套監控與 WireGuard 同在 node10） | ✅ 2026-11-01 16:18～16:22 搬 4 個服務，回到三套監控各在一台；⏳ VPN、LibreNMS、IPAM 人工確認與告警信（第 13-1 節） |
 
 **單節點故障的預期行為**（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，而且在節點回來前沒有再壞一顆硬碟的餘裕。
 
