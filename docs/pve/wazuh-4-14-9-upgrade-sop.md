@@ -16,13 +16,33 @@ last_modified_at: 2026-11-02
 | 適合誰看 | 自己用 LXC 架設 Wazuh All-in-one、想升級 patch 版本的人 |
 | 環境 | PVE 叢集上的 LXC（Ubuntu 22.04），Wazuh All-in-one 4.14.8，Cluster 為 Disabled（單節點） |
 | 日期 | 2026-11-02 整理 |
-| 目標版本 | 4.14.9（Dashboard 顯示 Last available patch） |
+| 目標版本 | 4.14.9（2026-10-14 發布，Dashboard 顯示 Last available patch） |
 | 風險 | 中：升級期間 Indexer、Manager、Dashboard 會中斷；有快照與 PBS 備份即可還原 |
 | 結論 | ✅ 已整理步驟；⏳ 實測與驗收尚未進行（見待辦） |
 
-> **未確認事項**：我沒有查到 4.14.9 的 release notes 內容，不知道它修了什麼、有沒有 breaking change。**升級前務必先讀官方 [4.14 Release notes](https://documentation.wazuh.com/4.14/release-notes/index.html)**。指令是依官方 All-in-one 升級流程整理，若與官方當下版本不同，以官方為準。
+> **關於指令**：指令是依官方 All-in-one 升級流程整理，**尚未實測**；若與官方當下版本不同，以官方為準。4.14.9 的內容見下方第 1 節（來源：官方 [4.14.9 Release notes](https://documentation.wazuh.com/4.14/release-notes/release-4-14-9.html)，2026-10-14 發布）。
 
-## 1. 先認識幾個名詞
+## 1. 4.14.9 改了什麼（跟本環境有關的重點）
+
+此版為累積更新，內容以 bug 修復與安全強化為主。官方頁面**沒有列出 CVE 編號、breaking changes、升級注意事項與 Filebeat 變更**；與 Indexer 相關的只有 #39041。
+
+| 項目 | 變更 | 對本環境的意義 |
+| --- | --- | --- |
+| #39041（Manager） | 修正 indexer connector 與 `wazuh-states-*` 索引不同步；記錄 `_bulk`、`_delete_by_query` 的失敗，DELETED 文件不再誤刪 ID 前綴相同的文件 | 與 Indexer 資料有關，升級後留意 Manager 日誌與 Dashboard 的 Inventory 資料是否正常 |
+| #39051（Manager） | 修正漏洞掃描器在 CTI feed 處理積壓時停滯 | 弱點偵測（Vulnerability Detection）資料更新更穩定 |
+| #38474（Manager） | 修正 Debian backports 套件造成的漏洞誤報 | 弱點數量**可能下降**（推測，未實測），升級後比對前後數字時要把這點算進去 |
+| #39471（Manager） | API access log 預設不再寫入 `run_as` 原文；`run_as` 上限由 8 KB 提高到 64 KB，新增 `auth_context_max_payload_size` | 一般用不到；若看 API 日誌的格式有變，是預期內 |
+| #38449、#39539（Manager） | cluster 握手期限與連線上限；`wazuh-authd` 關閉 30 秒內未完成的閒置註冊連線 | 本環境 Cluster 為 Disabled，影響小 |
+| #38894（Manager） | API 純文字 access log 會跳脫路徑中的控制字元 | 防止偽造日誌，無需動作 |
+| #38679、#39047、#39166、#39474（Ruleset） | 修正多個 SCA 檢查（靜默失敗、誤判通過、拼字） | SCA（Configuration Assessment）結果**可能改變**，通過率不同不代表主機變差（推測） |
+| #39124（Agent） | 修正預設 nodiff 清單未保護 `/etc/shadow` 與真正金鑰路徑 | 升級 Agent 後 FIM 對敏感檔案不再顯示內容差異 |
+| #38277、#40084（Agent，Windows） | 修正 MSI 待重新開機時升級損壞、`netsh` 與 `route-null` active response 自 4.14.7 起失敗 | 若有 Windows Agent，升級後優先驗證 |
+| #39148 | 嵌入式 Python 升到 3.10.21 | 無需動作 |
+| Dashboard #9141、#9313 | 修正 Server API 授權標頭被覆寫、模組啟用狀態顯示 | 升級後 Dashboard 顯示可能與之前略有不同 |
+
+完整清單（含 macOS、FIM eBPF、各 wodle 的修復）請看官方原頁。
+
+## 2. 先認識幾個名詞
 
 | 名詞 | 白話解釋 |
 | --- | --- |
@@ -36,7 +56,7 @@ last_modified_at: 2026-11-02
 | **shard allocation** | Indexer 把資料分片分配給節點的機制；升級前先暫停，避免重啟時亂搬資料 |
 | **快照（snapshot）** | PVE 對 LXC 的瞬間還原點；本篇用來當「後悔藥」 |
 
-## 2. 全貌
+## 3. 全貌
 
 ```text
 讀 release notes
@@ -58,9 +78,9 @@ last_modified_at: 2026-11-02
 - **升級期間會中斷**：Agent 會先把事件暫存在本機，Manager 回來後再補送（推測，依 Agent 預設行為，未實測）。
 - **不要同時升級 Grafana**：兩邊同時變動，出問題時分不清原因。
 
-## 3. 升級前準備
+## 4. 升級前準備
 
-### 3.1 讀 release notes、確認目前狀態
+### 4.1 讀 release notes、確認目前狀態
 
 做什麼：確認升級的內容與目前版本。
 
@@ -71,7 +91,7 @@ systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard
 
 應該看到：四個套件都是 `4.14.8`（filebeat 版本號不同屬正常），四個服務都是 `active`。
 
-### 3.2 備份
+### 4.2 備份
 
 | 備份 | 指令／位置 | 為什麼 |
 | --- | --- | --- |
@@ -90,7 +110,7 @@ cp -a /usr/share/wazuh-dashboard/data/wazuh/config /root/wazuh-pre-4.14.9/dashbo
 
 > 本環境另有自己加的設定：`api.yaml` 的 `host`、55000 的 nftables 規則、`indexer-proxy` 服務（9201）、Grafana 專用帳號。這些在升級後都要再確認，詳見 [Wazuh 維運（二）](../wazuh-lxc-ubuntu2204-operations/)。
 
-### 3.3 記下升級前的基準值
+### 4.3 記下升級前的基準值
 
 ```bash
 /var/ossec/bin/agent_control -ls | head -30
@@ -103,11 +123,11 @@ curl -sk -u "<帳號>" https://127.0.0.1:9200/_cluster/health?pretty
 | `-u "<帳號>"` | 只給帳號，密碼讓 curl 提示輸入，不要寫進指令與歷史紀錄 |
 | `_cluster/health` | Indexer 健康度，預期 `green` 或單節點的 `yellow` |
 
-## 4. 升級步驟
+## 5. 升級步驟
 
 > 以下指令都在 Wazuh 的 LXC 內，用 root 執行。
 
-### 4.1 ① 升級 Indexer
+### 5.1 ① 升級 Indexer
 
 做什麼：先停掉會寫入 Indexer 的服務，暫停 shard allocation，再升級套件。
 
@@ -143,7 +163,7 @@ curl -sk -u "<帳號>" https://127.0.0.1:9200/_cluster/health?pretty
 
 應該看到：`status` 為 `green`（單節點可能是 `yellow`，與升級前一致即可）。
 
-### 4.2 ② 升級 Manager 與 Filebeat
+### 5.2 ② 升級 Manager 與 Filebeat
 
 ```bash
 apt-get install wazuh-manager=4.14.9-1
@@ -172,7 +192,7 @@ filebeat test output
 
 > 套件更新時若問你要不要覆蓋設定檔，選**保留目前的版本**（`N`），之後再比對 `/root/wazuh-pre-4.14.9` 的備份。
 
-### 4.3 ③ 升級 Dashboard
+### 5.3 ③ 升級 Dashboard
 
 ```bash
 apt-get install wazuh-dashboard=4.14.9-1
@@ -182,14 +202,14 @@ systemctl enable --now wazuh-dashboard
 
 等約 1～2 分鐘，網頁才會起來。
 
-## 5. 驗收
+## 6. 驗收
 
 | 檢查 | 指令／位置 | 預期 |
 | --- | --- | --- |
 | 版本 | `dpkg -l \| grep -E "wazuh\|filebeat"` | wazuh 三個套件為 4.14.9 |
 | 服務 | `systemctl is-active wazuh-indexer wazuh-manager filebeat wazuh-dashboard` | 四個都是 `active` |
 | Dashboard | 網頁 → Server management → API connections（`default`） | Version `v4.14.9`、Status `Online`、Updates status 的橘點消失 |
-| Agent | `/var/ossec/bin/agent_control -ls` | 數量與 3.3 的基準一致（16 台 Active、2 台 Disconnected） |
+| Agent | `/var/ossec/bin/agent_control -ls` | 數量與 4.3 的基準一致（16 台 Active、2 台 Disconnected） |
 | 告警 | Dashboard 的 Threat Hunting 看最近 15 分鐘 | 有新告警進來 |
 | Indexer | `_cluster/health` | 與升級前一致 |
 | 自訂規則 | `/var/ossec/bin/wazuh-logtest -t` | 無錯誤 |
@@ -204,7 +224,7 @@ systemctl enable --now wazuh-dashboard
 | Grafana | 戰情中心 Wazuh 面板 | 有資料；`grafana` 帳號能登入 |
 | jt-ipam | 同步一次 | 能連上 55000 |
 
-## 6. ④ 升級各台 Agent
+## 7. ④ 升級各台 Agent
 
 先處理那 2 台 Disconnected：確認是已下線的主機（可移除）還是異常（先修再升級）。
 
@@ -222,7 +242,7 @@ systemctl restart wazuh-agent
 | 先小量試 | 先升 1～2 台確認回報正常，再依序升其他台 |
 | 其他系統（Windows、NAS 等） | 依各平台安裝方式，不在本篇範圍 |
 
-## 7. 還原
+## 8. 還原
 
 | 狀況 | 怎麼辦 |
 | --- | --- |
@@ -245,7 +265,8 @@ systemctl restart wazuh-agent
 
 ## 待辦
 
-- [ ] 讀 4.14.9 release notes，確認有無 breaking change 與 CVE
+- [x] 讀 4.14.9 release notes：無 breaking change、無 CVE 編號（官方頁面未列出）
+- [ ] 升級後比對弱點數量與 SCA 通過率的前後差異（#38474、SCA 修正可能造成變動）
 - [ ] 建立快照與 PBS 備份
 - [ ] 實測升級並記錄各步驟的實際輸出與耗時（中斷多久）
 - [ ] 驗收「本環境另外要驗證」的 5 項
