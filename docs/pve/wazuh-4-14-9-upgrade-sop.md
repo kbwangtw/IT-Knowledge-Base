@@ -9,7 +9,7 @@ last_modified_at: 2026-11-02
 
 # Wazuh 4.14.8 升級到 4.14.9 SOP（All-in-one，LXC）
 
-> **一句話**：Wazuh Dashboard 提示有新 patch 4.14.9；這篇是 2026-11-02 實際升級 All-in-one 的完整紀錄：備份、依序升級 Indexer、Manager、Filebeat、Dashboard，再逐項驗收。中央元件已升級並驗收完成，各台 Agent 的升級另行進行。
+> **一句話**：Wazuh Dashboard 提示有新 patch 4.14.9；這篇是 2026-11-02 實際升級 All-in-one 的完整紀錄：備份、依序升級 Indexer、Manager、Filebeat、Dashboard，再逐項驗收。中央元件已升級並驗收完成；Agent 已先升級 2 台用戶端（ubclient、WinClient），其餘另行進行。
 
 | 項目 | 內容 |
 | --- | --- |
@@ -19,7 +19,7 @@ last_modified_at: 2026-11-02
 | 版本 | 4.14.8 → 4.14.9（2026-10-14 發布） |
 | 風險 | 中：升級期間 Indexer、Manager、Dashboard 會中斷；有快照與 PBS 備份即可還原 |
 | 實測中斷時間 | Filebeat 與 Dashboard 停止約 10～17 分鐘（含逐步確認時間；Indexer 停機時間未精確記錄） |
-| 結論 | ✅ 中央元件（Indexer、Manager、Filebeat、Dashboard）升級完成並驗收；⏳ 各台 Agent 尚未升級（見待辦） |
+| 結論 | ✅ 中央元件（Indexer、Manager、Filebeat、Dashboard）升級完成並驗收；✅ 兩台用戶端 Agent（ubclient、WinClient）已升級並驗證「升級不需重新註冊」；⏳ 其餘 16 台 Agent 尚未升級（見待辦） |
 
 > **關於指令**：指令依官方 [All-in-one 升級指南](https://documentation.wazuh.com/current/upgrade-guide/upgrading-central-components.html)整理，並已在本環境實測；若與官方當下版本不同，以官方為準。4.14.9 的內容見下方第 1 節（來源：官方 [4.14.9 Release notes](https://documentation.wazuh.com/4.14/release-notes/release-4-14-9.html)，2026-10-14 發布）。
 
@@ -383,9 +383,9 @@ apt-get update 2>&1 | tail -n 3
 
 > jt-ipam 同步的日誌很長，`tail -20` 只會看到最後的 LibreNMS 與 AdGuard，要用 `grep -iE "wazuh|ERROR"` 才看得到 Wazuh 那一段。
 
-## 8. ⑤ 升級各台 Agent（計畫，尚未進行）
+## 8. ⑤ 升級各台 Agent（已完成 2 台，其餘進行中）
 
-> 本節是升級計畫，**尚未實測**；實際執行後會補上結果。Agent 版本不能高於 Manager，所以要在 Manager 升完之後才做（本次已完成）。
+> 本節的流程已在 ubclient（Linux 用戶端）與 WinClient（Windows 11 用戶端）各實測一次，見 8.6；其餘 16 台尚未升級，指令依同樣流程類推，**容器版（`pct push`、`pct exec`）尚未實測**。Agent 版本不能高於 Manager，所以要在 Manager 升完之後才做（本次已完成）。
 
 ### 8.1 原則
 
@@ -393,7 +393,7 @@ apt-get update 2>&1 | tail -n 3
 | --- | --- |
 | 一次一台、先小量試 | 先升 1 台低影響的主機，確認回報正常，再依序升其他台 |
 | 不加 Wazuh 套件庫 | 沿用 [第一篇](../wazuh-lxc-ubuntu2204-sop/) 的做法：下載 .deb 用 `dpkg -i` 安裝，日後 `apt upgrade` 不會連帶升級 Agent |
-| 升級不需要重新註冊 | 升級會保留原本的設定與金鑰（`client.keys`）；**升級時不要再帶 `WAZUH_MANAGER` 等變數**，避免被當成全新安裝（推測，未實測，先在第一台確認） |
+| 升級不需要重新註冊 | 升級會保留原本的設定與金鑰（`client.keys`）；**升級時不要再帶 `WAZUH_MANAGER` 等變數**，避免被當成全新安裝。已在 ubclient 與 WinClient 實測：升級後 Manager 端仍是原本的 Agent ID，沒有出現第二筆 |
 | 避開重要時段 | PVE 節點避開備份時段；DNS 兩台、網域控制站兩台各自分開時間 |
 | 每台升完立即驗證 | 版本、服務、在 Manager 端的狀態，三項都對才做下一台 |
 
@@ -470,6 +470,84 @@ systemctl is-active wazuh-agent
 - 觀察弱點數量與 SCA 通過率的變化（見待辦）。
 - 把實測結果補進本文，並移除「尚未實測」標註。
 
+### 8.6 實測紀錄：ubclient 與 WinClient（2026-11-02）
+
+兩台原本是 Disconnected（沒開機），開機後 Agent 自動重連，版本都是 4.14.8，並在開機後等 5 分鐘再動手。
+
+**ubclient（Ubuntu 26.04.1 LTS，x86_64，用 .deb 安裝、沒有 Wazuh 套件庫）**
+
+事前檢查（唯讀）：
+
+```bash
+cat /etc/os-release | head -2
+uname -m
+dpkg -l wazuh-agent | awk 'END{print $2, $3}'
+systemctl is-active wazuh-agent
+ls /etc/apt/sources.list.d/ | grep -i wazuh
+sudo grep -A2 '<server>' /var/ossec/etc/ossec.conf
+```
+
+`/var/ossec` 只有 root 能讀，所以最後一行要加 `sudo`。備份與下載後升級：
+
+```bash
+sudo cp -a /var/ossec/etc ~/ossec-etc-pre-4.14.9
+cd /tmp && wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.9-1_amd64.deb
+sudo dpkg -i /tmp/wazuh-agent_4.14.9-1_amd64.deb
+sudo systemctl daemon-reload
+sudo systemctl restart wazuh-agent
+sleep 5
+systemctl is-active wazuh-agent
+dpkg -l wazuh-agent | awk 'END{print $2, $3}'
+```
+
+看到的結果：`Unpacking wazuh-agent (4.14.9-1) over (4.14.8-1)`，沒有設定檔提問；`active`；`wazuh-agent 4.14.9-1`。
+
+**踩到的雷**：第一次 `dpkg -i` 出現 `dpkg frontend lock was locked by /usr/bin/python3.14 process with pid 4376`，沒有安裝成功（但後面的 `restart` 仍會執行，Agent 只是重啟、版本沒變）。用 `ps -fp 4376` 看到是 `aptd`（Ubuntu 開機後的套件管理背景程式），同時登入畫面顯示「系統需要重新啟動」。**不要刪除 lock 檔案，也不要強制結束程式**；等它釋放後重試 `dpkg -i`，本次直接成功。
+
+**WinClient（Windows 11 Pro）**
+
+事前檢查（系統管理員的 PowerShell）：
+
+```powershell
+Get-Service WazuhSvc | Select-Object Name, Status
+(Get-Item "C:\Program Files (x86)\ossec-agent\wazuh-agent.exe").VersionInfo.FileVersion
+Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations
+```
+
+**踩到的雷**：兩個 `Test-Path` 都是 `False`，但 `PendingFileRenameOperations` 有 8 筆，包含 OneDrive 與 Edge 的更新殘留，以及 `C:\Config.Msi\*.rbf`（MSI 的回復檔）。這是「待重新開機」的跡象，與 4.14.9 修的 #38277（待重開機時 MSI 升級會損壞）同類，所以**先重新開機**，開機後最後一項沒有輸出才升級。判斷待重開機要看三項，不能只看兩個 `Test-Path`。
+
+備份、下載、升級：
+
+```powershell
+New-Item -ItemType Directory -Force C:\Temp | Out-Null
+Copy-Item "C:\Program Files (x86)\ossec-agent" C:\Temp\ossec-agent-pre-4.14.9 -Recurse
+Test-Path C:\Temp\ossec-agent-pre-4.14.9\client.keys
+Invoke-WebRequest -Uri "https://packages.wazuh.com/4.x/windows/wazuh-agent-4.14.9-1.msi" -OutFile "C:\Temp\wazuh-agent-4.14.9-1.msi"
+Get-Item C:\Temp\wazuh-agent-4.14.9-1.msi | Select-Object Name, Length
+$p = Start-Process msiexec.exe -ArgumentList '/i','C:\Temp\wazuh-agent-4.14.9-1.msi','/q','/l*v','C:\Temp\wazuh-agent-upgrade.log' -Wait -PassThru
+"ExitCode: " + $p.ExitCode
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `Copy-Item ... ossec-agent` | 備份整個 Agent 目錄（含 `client.keys`、`ossec.conf`） |
+| `Get-Item ... Length` | MSI 約 6 MB（6,045,696 bytes），只有幾 KB 代表下載到錯誤頁 |
+| `msiexec /i ... /q` | 靜默升級，**不帶 `WAZUH_MANAGER`** |
+| `/l*v ...log`、`ExitCode` | 留下詳細記錄與退出碼；`0` 成功、`3010` 成功但要重開機，其他代表失敗 |
+
+看到的結果：`WazuhSvc` 為 `Running`、版本 `v4.14.9`、`client.keys` 仍在。
+
+**兩台在 Manager 端的驗證**：
+
+```bash
+/var/ossec/bin/agent_control -i <Agent ID> | grep -iE "version|status"
+/var/ossec/bin/agent_control -ls | grep -ic <Agent 名稱>
+```
+
+兩台都是 `Wazuh v4.14.9`、`Active`，第二行回傳 `1`（沒有重新註冊）。
+
 ## 9. 還原
 
 | 狀況 | 怎麼辦 |
@@ -488,6 +566,8 @@ systemctl is-active wazuh-agent
 | `apt-cache madison` 查不到任何 Wazuh 套件 | Wazuh 的 apt 來源被註解了，見 4.3 暫時啟用；升級完再註解回去 |
 | `curl` 回 `Unauthorized` | 先檢查指令裡的 `<管理帳號>` 是否換成實際帳號（連 `<` `>` 一起換掉）；再檢查密碼。要改 `_cluster/settings` 必須是管理帳號，唯讀帳號（例如給 Grafana 用的）不行 |
 | 忘了 Indexer 管理帳號密碼 | 網頁登入的管理員通常就是同一組；也可從 `/root/wazuh-install-files.tar` 的 `wazuh-passwords.txt` 找（若曾用 `wazuh-passwords-tool` 重設過，裡面是舊密碼）。重設密碼會牽動 Filebeat 與 Manager 的 keystore，也可能讓 Grafana 帳號消失，**不要在升級當下做** |
+| Linux Agent 升級時 `dpkg frontend lock was locked by ... process` | 另一個程式（常見是開機後的 `aptd` 或自動更新）占用套件管理員，**這次沒有安裝成功**。不要刪 lock 檔案、不要強制結束程式；用 `ps -fp <PID>` 看是誰，等它釋放後重試 `dpkg -i`（見 8.6） |
+| Windows Agent 升級前，`Test-Path` 都是 `False`，但 `PendingFileRenameOperations` 有內容（尤其含 `Config.Msi\*.rbf`） | 這仍是「待重開機」，先重開機，開機後該項沒有輸出再用 MSI 升級（見 8.6） |
 | 把上一段輸出也貼進終端機，出現一堆 `command not found` | 無害，那些文字被當成指令執行但沒有效果；以後只複製指令那幾行 |
 | `_flush` 回報 total 與 successful 差 1，failed 為 0 | 停 Indexer 前用 `_cat/shards` 確認沒有主分片未啟動，只有副本 `UNASSIGNED` 就可繼續 |
 | jt-ipam 日誌只看到 LibreNMS、AdGuard | `tail -20` 太短，改用 `grep -iE "wazuh\|ERROR"` |
@@ -504,8 +584,10 @@ systemctl is-active wazuh-agent
 - [x] 建立快照與 PBS 備份
 - [x] 升級 Indexer、Manager、Filebeat、Dashboard 並驗收（2026-11-02）
 - [x] 驗收本環境特有項目：`api.yaml` host、55000 與 9201 規則、`indexer-proxy`、Grafana、jt-ipam
-- [ ] 升級各台 Agent（第 8 節）：先處理 2 台 Disconnected，Windows 主機最後、一次一台
-- [ ] 第一台 Linux Agent 升級後，確認「升級不需重新註冊」的假設（推測）
+- [x] 升級 2 台 Disconnected 的用戶端（ubclient、WinClient）並驗證「升級不需重新註冊」（8.6）
+- [ ] 升級其餘 16 台 Agent（第 8 節）：低影響容器先、DNS 兩台分開、PVE 節點一次一台，Windows 主機（DC01、DC02 等）最後、一次一台
+- [ ] 實測容器版升級（`pct push`、`pct exec`），確認後移除第 8 節開頭的「尚未實測」標註
+- [ ] 確認 `ca`（Agent 016）的作業系統再決定升級方式（尚未確認）
 - [ ] 觀察弱點數量與 SCA 通過率的前後差異（#38474、SCA 修正可能造成變動）
 - [ ] 視需要清理 `/var/ossec/etc/ossec.conf.new`
 - [ ] Wazuh 穩定後，再排 Grafana 13.3 升級（見 [Grafana 13.3 新版整理](../grafana-13-3-release-notes/)）
