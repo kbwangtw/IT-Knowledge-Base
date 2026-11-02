@@ -68,7 +68,7 @@ last_modified_at: 2026-10-22
 | [PVE 出現問號、儲存變成 0：這次怎麼救回來？](docs/pve/ceph-osd-cephfs-keyring-recovery/) | 主機都在線，但 Ceph 儲存顯示 0、CephFS 掛不上 |
 | [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/) | 修好後一重開又壞；要輪換 OSD 金鑰 |
 | [Ceph 換金鑰：為什麼 HEALTH_OK 還不夠？](docs/pve/ceph-20-2-4-cephx-aes256k-migration/) | 換 Ceph 金鑰時，有哪些地方容易漏掉 |
-| [Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？](docs/pve/ceph-bluestore-slow-op-backup-schedule/) | 看到慢操作警告；要排 PVE／PBS 備份時間（含 10/31 復發 osd.1 的紀錄） |
+| [Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？](docs/pve/ceph-bluestore-slow-op-backup-schedule/) | 看到慢操作警告；要排 PVE／PBS 備份時間（含 10/31 復發 osd.1、11/02 碟溫與寫入量的紀錄） |
 
 ### 4-2 更新主機與日常管理
 

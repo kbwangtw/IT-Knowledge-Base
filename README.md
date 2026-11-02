@@ -45,7 +45,7 @@
 - [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22.md)
 - [PVE 出現問號、儲存變成 0：這次怎麼救回來？](docs/pve/ceph-osd-cephfs-keyring-recovery.md)
 - [Ceph 換金鑰：為什麼 HEALTH_OK 還不夠？](docs/pve/ceph-20-2-4-cephx-aes256k-migration.md)
-- [Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？](docs/pve/ceph-bluestore-slow-op-backup-schedule.md)：硬碟正常、備份錯開、slow ops 歷史、10/31 復發（osd.1）與三顆 OSD 碟的 SMART 比較
+- [Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？](docs/pve/ceph-bluestore-slow-op-backup-schedule.md)：硬碟正常、備份錯開、slow ops 歷史、10/31 復發（osd.1）與三顆 OSD 碟的 SMART、碟溫、型號規格、寫入量比較
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy.md)
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](docs/pve/pve-ha-service-error-after-reboot.md)
 - [整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）](docs/pve/pve-cluster-full-shutdown.md)：腳本在 `tools/pve-cluster-power/`
