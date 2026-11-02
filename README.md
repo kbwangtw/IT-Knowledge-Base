@@ -33,6 +33,7 @@
 - [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh.md)
 - [用 Grafana 建立戰情中心（二）：接上 LibreNMS](docs/pve/grafana-war-room-librenms.md)
 - [用 Grafana 建立戰情中心（三）：接上 Prometheus（Ceph 與 PVE）](docs/pve/grafana-war-room-prometheus.md)
+- [Grafana 13.3 新版整理：這次更新了什麼、要不要升級](docs/pve/grafana-13-3-release-notes.md)：跨儀表板變數、Notebooks、UI 改版（皆為預覽）
 - [LibreNMS 溫度告警誤報：LXC 重複感測器與門檻整理](docs/pve/librenms-temperature-sensor-cleanup.md)：停用 LXC 的 sensors 模組、依硬體規格重設節點門檻
 - [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](docs/pve/pve-cluster-fail2ban-hardening.md)
 - [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](docs/pve/wireguard-remote-access-replace-8006.md)：VPN 異常會寄 Gmail
