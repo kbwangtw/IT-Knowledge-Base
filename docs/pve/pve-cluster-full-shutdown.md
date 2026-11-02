@@ -4,7 +4,7 @@ title: "整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）
 date: 2026-10-23
 categories: [PVE, Ceph, HA]
 permalink: /docs/pve/pve-cluster-full-shutdown/
-last_modified_at: 2026-11-01
+last_modified_at: 2026-11-02
 ---
 
 # 整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）
@@ -65,6 +65,21 @@ for h in node11 node12; do scp -p /usr/local/sbin/cluster-{shutdown,startup}.sh 
 | `chmod 700` | 只有 root 能讀、能執行 |
 | `bash -n` | 只檢查語法，不執行 |
 | `scp` 到另外兩台 | 開機時 node10 萬一起不來，別台也能執行開機腳本 |
+
+**確認三台安裝的是同一版**（唯讀；2026-11-02 三台都確認過）：
+
+```bash
+sha256sum /usr/local/sbin/cluster-shutdown.sh /usr/local/sbin/cluster-startup.sh
+```
+
+| 檔案 | 三台目前的 sha256 |
+| --- | --- |
+| `cluster-shutdown.sh` | `3c250ed36c95171b64978808f956a53c810c66ec156b78923018e06490bc6ab2` |
+| `cluster-startup.sh` | `f6fbc0ec57bccf6b266ae2b7157dcfd0aa4f9a19c0da235eb271c715136c3ef5` |
+
+開機腳本和 repo 完全相同。關機腳本含修正版的所有指令（停 HA 監看、`umount -l`），和 repo 版**只差第 2 行標頭註解**：repo 版多了「停 HA 監看、」四個字（repo 版 2026-11-02 的 sha256 是 `e6e207776ab68ea2a7d9945626f4fa0ab136a5afad91688b570074ad2cddd073`）。之後把 repo 版放到三台，三台的雜湊會一起變成 repo 版的值。
+
+> Lab Ops 用的 `rx` 會擋含 `shutdown`、`poweroff`、`halt` 的指令，連檔名 `cluster-shutdown.sh` 也算，所以這條要自己在各節點的 shell 執行（見第 10 節常見問題）。
 
 腳本的安全設計：
 
@@ -305,7 +320,7 @@ Verify 要讀整個資料集，若 10G 有幫助，這裡最看得出來，結�
 | 停 `pve-ha-lrm`／`pve-ha-crm` | 腳本自動做 | 最後一台 node10 **正常關機**，沒有被 watchdog 重開；這次有沒有手動停過 `pve-ha-lrm`／`pve-ha-crm`：未確認 |
 | 開機後起服務 | 腳本只起「關機前是 started」的 | 手動逐一 `ha-manager set … --state started` |
 
-> **腳本在哪裡**：repo 的 `tools/pve-cluster-power/`；依第 3 節，三台的 `/usr/local/sbin/cluster-shutdown.sh`、`cluster-startup.sh` 都已安裝（用 `ls -la /usr/local/sbin/cluster-*.sh` 確認；11/01 在 node10 確認過兩個檔都在，權限 700，關機腳本修改於 10/23 15:10、開機腳本 10/23 09:44，node11、node12 沒有確認）。
+> **腳本在哪裡**：repo 的 `tools/pve-cluster-power/`；依第 3 節，三台的 `/usr/local/sbin/cluster-shutdown.sh`、`cluster-startup.sh` 都已安裝（用 `ls -la /usr/local/sbin/cluster-*.sh` 確認；11/01 在 node10 確認過兩個檔都在，權限 700，關機腳本修改於 10/23 15:10、開機腳本 10/23 09:44，11/02 又用 `sha256sum` 確認三台的兩支腳本都一致，見第 3 節）。
 >
 > 下次建議直接用 10/23 的腳本：它會記錄關機前的狀態、自動處理非 HA 的 VM、只還原原本就在跑的服務，不會忘記「改回 started」。手動做的風險就是這一步被漏掉。
 
@@ -404,10 +419,13 @@ ceph osd dump | grep '^flags'
 | 整個叢集重啟後，Lab Ops（`claude --remote-control`）顯示 `Session creation failed`，程序卻還活著 | CT113 開機時 DNS（AdGuard、Pi-hole）還沒起來，啟動當下連線失敗，之後不會自己重連。確認 DNS 通了之後，**只對 `claude` 那個程序** `kill <PID>`，外層的 `while true` 迴圈 10 秒後會自動重啟它。**不要用 `pkill -f`**：外層迴圈與 tmux 的命令列也含同樣的字串，會連迴圈一起殺掉 |
 | `pct exec` 說容器不存在 | 開機後 HA 換了節點；先用 `pvesh get /cluster/resources --type vm` 找出它現在在哪台 |
 | 重啟後 Ceph 的慢操作警告不見了 | 正常：計時在 OSD 重啟時重置。若又出現，代表問題還在，看 BlueStore 慢操作那篇 |
+| 用 Lab Ops 查腳本時被 `rx` 擋下（exit code 3，「已封鎖高風險指令（規則 `\b(shutdown\|poweroff\|halt)\b`）」） | 指令或檔名含 `shutdown`、`poweroff`、`halt` 就會被擋，連唯讀的 `sha256sum /usr/local/sbin/cluster-shutdown.sh` 也一樣（[`rx` 說明](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/claude-code-redact-gateway/)）。改由你自己在節點的 shell 執行；不要用萬用字元之類的寫法去繞過這條保護 |
 
 ## 11. 待辦
 
-- [ ] 下次整個叢集關機時，驗證修正版（node10 正常關機、不被重開）
+- [ ] 下次整個叢集關機時，驗證修正版（node10 正常關機、不被重開）；2026-11-02 已確認三台安裝的就是修正版（第 3 節），剩下要實際跑一次
+- [x] 確認三台安裝的腳本版本一致（2026-11-02，第 3 節）：開機腳本與 repo 相同；關機腳本只差標頭註解
+- [ ] 驗證後把 repo 版（標頭多「停 HA 監看」）放到三台，讓三台雜湊與 repo 一致
 - [x] 比較備份時間確認 10G 網卡的效果（2026-10-25，8-1）：沒有明顯變化
 - [ ] （可選）找出備份真正的瓶頸：Verify 時看 DSM 資源監控，或在 PBS31 執行 `proxmox-backup-client benchmark`
 - [x] 三台的 `/usr/local/sbin/cluster-shutdown.sh` 已換成 5-2 的修正版（10/23，`bash -n` 通過，scp 到 node11、node12）

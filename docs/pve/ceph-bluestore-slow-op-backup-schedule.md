@@ -4,7 +4,7 @@ title: "Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程�
 permalink: /docs/pve/ceph-bluestore-slow-op-backup-schedule/
 date: 2026-10-14
 categories: [PVE, Ceph, PBS, Backup, Troubleshooting]
-last_modified_at: 2026-11-01
+last_modified_at: 2026-11-02
 ---
 
 # Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？
@@ -15,8 +15,8 @@ last_modified_at: 2026-11-01
 | --- | --- |
 | 適合誰看 | 看到 `BLUESTORE_SLOW_OP_ALERT`、想知道要不要換硬碟的人；要排 PVE／PBS 備份時間的人 |
 | 環境 | 三台 Win element M600（Ryzen 9 8945HS、64 GB，硬體見 8-1）；PVE 9.2.21、kernel 7.0.14-23-pve、Ceph 20.2.4-pve5；PBS31 為 PBS 4.2.8，datastore Tokyo16 在 CIFS 掛載上 |
-| 日期 | 2026-10-13～14；10/16 補 slow ops 歷史；10/31 復發（第 11 節） |
-| 結論 | ✅ 硬碟與核心正常；✅ 三台備份錯開；✅ PBS GC 77 → 7 分鐘；✅ 告警消失；✅ 10/21 一週追蹤：retries 沒有上升（142 → 117），期間沒有再出現告警；⚠️ 10/31 復發，這次是 osd.1：retries 41（一週平均約 39）、無 `slow ops`、SMART 無故障徵兆，判斷同為備份時段排隊（第 11 節）；✅ 11/01 第二輪：三顆 OSD 碟 Media Errors 皆 0、核心沒有 NVMe 重置或逾時，osd.0 碟 Unsafe Shutdowns 仍是 15（10/31 曾誤把 node10 的另一顆碟當成 osd.0，已更正）；⏳ 觀察：osd.1 碟 54°C、壽命已用 19%；⏳ 告警 11/01 上午仍在（`lifetime` 86400、`threshold` 1，推算最快 11/01 21:38 後消失，第 11-6 節） |
+| 日期 | 2026-10-13～14；10/16 補 slow ops 歷史；10/31 復發（第 11 節）；11/02 UPS 關開機後的碟溫、型號、寫入量（第 11-7 節） |
+| 結論 | ✅ 硬碟與核心正常；✅ 三台備份錯開；✅ PBS GC 77 → 7 分鐘；✅ 告警消失；✅ 10/21 一週追蹤：retries 沒有上升（142 → 117），期間沒有再出現告警；⚠️ 10/31 復發，這次是 osd.1：retries 41（一週平均約 39）、無 `slow ops`、SMART 無故障徵兆，判斷同為備份時段排隊（第 11 節）；✅ 11/01 第二輪：三顆 OSD 碟 Media Errors 皆 0、核心沒有 NVMe 重置或逾時，osd.0 碟 Unsafe Shutdowns 仍是 15（10/31 曾誤把 node10 的另一顆碟當成 osd.0，已更正）；✅ 11/01 加裝風扇與整叢集重啟後，osd.1 碟溫從 54°C 降到 37°C（尚未分開風扇與重開機的影響，第 11-7 節）；⏳ 觀察：osd.1 壽命已用 20%，實際寫入只占官方 TBW 約 1.8%（第 11-7 節）；✅ 告警在 11/01 下午整叢集重啟（OSD 重啟）後消失（第 11-6、11-8 節） |
 
 ## 1. 先認識幾個名詞
 
@@ -527,15 +527,92 @@ ceph config get osd.1 bluestore_slow_ops_warn_threshold
 | B. 降低備份造成的讀取壓力 | vzdump 頻寬限制或 `max-workers` | 等「反覆出現」再做 |
 | C. 調高 `bluestore_slow_ops_warn_threshold` | 官方文件說單次慢操作可能是誤報，用時間窗內累計次數過濾 | 會降低靈敏度，可能蓋掉真正的硬碟前兆；確認反覆復發且硬碟沒問題後再考慮 |
 
-### 11-7 待辦
+### 11-7 11/01～11/02：UPS 整叢集重啟後的碟溫、型號與寫入量（唯讀）
+
+**背景**：11/01 下午為了接 UPS，整個叢集關機再開機（流程見[整個 PVE 叢集安全關機與開機](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-full-shutdown/)第 9 節）。同一天在機櫃前方加了兩支風扇：機櫃內的藍色風扇面板（裝在交換器下方、NAS 前方，**吹進去**）和夾在機櫃正前方的十四寸電風扇，兩支都插牆插（不接 UPS）。三台節點放在機櫃後面。
+
+**做什麼**：重開機後重查三顆 OSD 碟的型號、溫度、磨損與寫入量；順便查官方規格。全部是唯讀指令，由 Lab Ops 或手動執行（2026-11-02 上午）。
+
+```bash
+ceph osd metadata 0 | grep bluestore_bdev_devices      # node10；node11 查 1、node12 查 2
+smartctl -i /dev/nvme0n1 | grep -iE 'Model Number|Firmware Version|Total NVM Capacity'
+smartctl -a /dev/nvme0n1 | grep -iE 'Model Number|Data Units Written|Power On Hours|Percentage Used|Available Spare|Temperature|Critical Warning|Unsafe Shutdowns|Comp. Temp'
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `ceph osd metadata <編號> \| grep bluestore_bdev_devices` | 先查這顆 OSD 實際用哪個 NVMe；**裝置名稱重開機後可能對調，不能沿用** |
+| `smartctl -i` | 只印識別資訊；用 `grep` 刻意不留序號 |
+| `smartctl -a … \| grep -iE …` | 型號、累計寫入量（`Data Units Written`，括號內是 TB）、通電時數、壽命使用率、溫度與告警 |
+| `Model Number` | 拿來**核對讀到的是不是對的碟**（見下方更正） |
+
+**看到的結果**（2026-11-02 上午，風扇開著）：
+
+**① 重開機後 NVMe 裝置名稱對調了**
+
+| 節點 | OSD | 11/01 上午 | 11/02 |
+| --- | --- | --- | --- |
+| node10 | osd.0 | `nvme0n1` | `nvme0n1`（沒變） |
+| node11 | osd.1 | `nvme0n1` | **`nvme1n1`** |
+| node12 | osd.2 | `nvme1n1` | **`nvme0n1`** |
+
+`nvme0`、`nvme1` 的編號是開機時偵測到的順序，不保證固定。這再次證明：**每次都先用 `ceph osd metadata` 現查，並用 `Model Number` 核對**，不要記裝置名稱。
+
+> ⚠️ **11/02 踩到一次**：同一個上午，node10 讀到 Percentage Used 7%、node12 讀到 11%（通電 29,696 小時），和稍早該 OSD 碟的 5%、4% 對不上；加上 `Model Number` 重查後才確認先前讀到的是另一顆 NVMe（推測是系統碟，未用型號逐一核對）。這和 10/31 的錯誤同一類。
+
+**② 三顆碟的型號與官方規格**
+
+| OSD | 型號 | 運作溫度 | TBW | 整體溫度的 Warning／Critical 門檻 | 規格來源 |
+| --- | --- | --- | --- | --- | --- |
+| osd.0（node10） | BIWIN NV7200 2TB | 0～70°C | 約 800（**第三方評測，BIWIN 官方沒查到，未證實**） | 90／95°C | 溫度：BIWIN 官方頁面的搜尋摘要（規格書原頁開不起來，未能親自核對） |
+| osd.1（node11） | Lexar SSD THOR PRO 2TB | 0～70°C | 1200 | 100／110°C | [Lexar 官方產品頁](https://www.lexar.com/global/products/Lexar-THOR-PRO-PCIe-Gen-4x4-NVMe-SSD/) |
+| osd.2（node12） | KINGSTON SNV3S2000G | 0～70°C | 640 | **75／80°C** | [Kingston 官方規格書](https://www.kingston.com/datasheets/SNV3S_us.pdf) |
+
+三顆都是消費級 M.2 SSD；三顆型號不同，門檻也各不相同。三顆的 `Critical Warning` 都是 `0x00`，Warning／Critical Comp. Temperature Time 都是 0／0（沒有進入過警告溫度）。
+
+**③ 碟溫：加風扇與重開機之後都明顯下降**
+
+| OSD | 11/01 上午（風扇前） | 11/01 晚上 | 11/02 08:12（風扇開） |
+| --- | --- | --- | --- |
+| osd.0 | 40°C | 41°C | 40°C |
+| osd.1 | **54°C** | 36°C | 37°C |
+| osd.2 | 49°C | 40°C | 39°C |
+
+- osd.1 降 17～18°C、osd.2 降約 10°C，隔一夜（含昨晚備份時段）仍維持；osd.0 沒有變。
+- **還不能把降溫都算在風扇頭上**：同一天也重開機、HA 把 Guest 重新分配到不同節點、量測時段和室溫也不同。要分開看，需要做 A/B 對照（11-8 待辦）。
+- node12 碟的 Sensor 2 昨晚與今早都是 73°C，Sensor 1 是 50～53°C，整體溫度卻只有 39～40°C，且整體溫度在 49 → 40 → 39°C 變動時 Sensor 2 完全不動。**我認為 Warning／Critical 門檻是針對「整體溫度」（Composite），不是各個 Sensor**（NVMe 規格的說法，沒有逐字核對），所以餘裕是 75 − 39 ＝ 36°C，不是和 73°C 比；Sensor 2 到底量的是什麼、準不準，**未確認**。
+- 三顆碟的 `Unsafe Shutdowns` 是 15／24／12，**和 11/01 的基準完全相同**：11/01 的整叢集關機是乾淨的，沒有碟被硬斷電。
+
+**④ 寫入量基準（2026-11-02 上午，之後的比較以此為起點）**
+
+| OSD | Percentage Used | Data Units Written | 通電時數 | 寫入 ÷ 官方 TBW | Available Spare（門檻） |
+| --- | --- | --- | --- | --- | --- |
+| osd.0（BIWIN） | 5% | 43,104,967（22.0 TB） | 8,645 | 約 2.8% | 100%（1%） |
+| osd.1（Lexar） | **20%** | 42,257,002（21.6 TB） | 10,602 | **約 1.8%** | 100%（10%） |
+| osd.2（Kingston） | 4% | 36,679,667（18.7 TB） | **1,187** | 約 2.9% | 100%（10%） |
+
+換算：1 個單位約 512,000 位元組；之後用「新值 − 基準」乘上 512,000 位元組，就是這段期間的實際寫入量。
+
+**判讀**：
+
+- **osd.1（Lexar）是離群值**：Percentage Used 是 20%，但實際寫入只占官方 TBW 約 1.8%（約 11 倍差距）；另外兩顆的使用率和寫入占比大致同步（約 1.4～2 倍）。原因不確定，可能是寫入放大、NAND 耐久本來較低（第三方說法是 QLC，未證實），或廠商的壽命公式和官方 TBW 不一致（都是推測）。osd.1 同時也是 10/31 慢操作告警與 54°C 的那顆；三件事湊在同一顆，**不下因果結論**，但列為優先追蹤。
+- **osd.2（Kingston）通電只有 1,187 小時**（約 49 天），累計已寫入 18.7 TB（平均約 380 GB／天），遠高於另外兩顆（約 50～60 GB／天）。**推測**含加入 Ceph 時的資料回填或搬移，所以平均值會高估現在的寫入速度（KB 沒有換碟紀錄可對照，未確認）。
+- 粗估壽命（只用到目前為止的平均速度外推）：osd.1 還有約 4.8 年、osd.0 很久、osd.2 約 3.3 年（偏悲觀）。**真正需要的是近期的實際速度**，所以要用 11/03、11/30 兩次量測的差值（11-8 待辦）。
+- 三顆都不是資料中心級 SSD；BlueStore 有大量同步寫入，消費級碟沒有斷電保護電容時，同步寫入延遲通常較高，這**可能**是備份期間出現慢操作告警的背景因素之一。**沒有證據**，也不建議跑會寫入的壓力測試去驗證，先當背景知識。
+
+### 11-8 待辦
 
 - [x] 確認告警何時自動消失：11/01 上午與 14:24 仍在（osd.1）；11/01 下午為了接 UPS 整個叢集關機再開機（OSD 重新啟動）之後，`ceph -s` 回到 `HEALTH_OK`，告警消失。所以這次不是自然過期，而是 OSD 重啟後計時被重置（推測）
 - [ ] 11/02 上午再看 `ceph health detail`，確認 11/01 晚上的備份（21:00～22:00）之後告警沒有復發
 - [ ] 確認 `lifetime`、`threshold` 是否為預設（`ceph config dump | grep slow_ops`、`grep slow_ops /etc/pve/ceph.conf`）
 - [x] 閒置時段第二輪唯讀檢查（2026-11-01 完成，見 11-4）
-- [ ] 補查三顆碟的 Critical Warning、`Comp. Temperature Time`（Warning／Critical）、`Thermal Temp`
-- [ ] 11/30 前後重查三顆碟的 Percentage Used、Unsafe Shutdowns、溫度（以 11/01 的數字為基準）
-- [ ] 查 Lexar THOR PRO 2TB 的耐久（TBW）與溫度規格（目前沒有查）
+- [x] 補查三顆碟的 Critical Warning、`Comp. Temperature Time`（2026-11-02：三顆 Critical Warning 都是 `0x00`，Warning／Critical Comp. Temp. Time 都是 0／0，見 11-7）
+- [ ] `Thermal Temp`：11/02 的輸出沒有看到這個欄位，未確認這幾顆有沒有回報
+- [ ] 11/03 上午再量一次三顆碟，用 `Data Units Written` 的差值算實際每日寫入量（已設提醒）
+- [ ] 11/30 前後重查三顆碟的 Percentage Used、Unsafe Shutdowns、溫度與寫入量（以 11/02 的數字為基準，見 11-7；已設提醒）
+- [ ] 風扇 A/B 對照：閒置時段（避開 21:00～22:00 備份）把兩支風扇全關 30～60 分鐘（時間是估計）後量溫度，再全開同樣時間再量，分出風扇與重開機各自的影響
+- [ ] 追蹤 node12 碟的 Sensor 2（73°C）：備份期間、風扇關閉時各讀一次，看會不會隨負載或風扇變化
+- [x] 查 Lexar THOR PRO 2TB 的耐久（TBW）與溫度規格（2026-11-02：官方產品頁 1200 TBW、運作溫度 0～70°C，見 11-7）
 - [ ] 確認 `slow operation`／`log_latency` 字串是否寫在 `/var/log/ceph/ceph-osd.N.log`（未驗證）
 - [ ] 若三顆 OSD 反覆輪流告警，才依第 8 節評估降低單一備份的並行讀取（vzdump 頻寬限制或 `max-workers`）
 
@@ -553,9 +630,13 @@ ceph config get osd.1 bluestore_slow_ops_warn_threshold
 | 查 osd.1 的 SMART 找不到 `nvme1n1` | 裝置編號每台不同；先用 `ceph osd metadata <OSD 編號>` 查 `bluestore_bdev_devices` |
 | 告警還在，但現在不慢 | 門檻 1、時間窗 24 小時：過去 24 小時內有過任何一次慢操作就會顯示；用 `ceph health detail` 確認是哪一顆，等最後一次慢操作之後滿 24 小時，期間不要重啟 OSD（第 11-6 節） |
 | Lab Ops 在 `grep -c` 輸出 0 時停下來 | 沒有符合行時回傳碼是 1，輸出的 0 就是結果，告訴它繼續 |
+| 重開機後 `smartctl` 讀到的 Percentage Used 或通電時數，和先前對不上 | 很可能讀到另一顆 NVMe（系統碟）。先用 `ceph osd metadata <OSD 編號>` 查裝置，再用輸出的 `Model Number` 核對（node10 BIWIN、node11 Lexar、node12 Kingston）；11/02 發生過一次（第 11-7 節） |
+| 整叢集重開機後，OSD 碟的裝置名稱變了 | NVMe 編號依開機偵測順序，會對調（11/02：node11 變 `nvme1n1`、node12 變 `nvme0n1`）；不要記名稱，每次先查 |
+| 貼指令出現 `syntax error near unexpected token` | 指令裡的 `<…>` 是要自己換成實際名稱的占位符，連角括號一起貼，shell 會把 `<` 當成輸入重新導向；把整個 `<…>` 換成查到的名稱再貼 |
 
 ## 13. 延伸閱讀
 
+- [整個 PVE 叢集安全關機與開機](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-full-shutdown/)（第 9 節：11/01 為了接 UPS 的關開機，osd.1 告警隨 OSD 重啟消失）
 - [PVE 重開後 Ceph 又故障：修正 BlueStore 裡的 OSD 金鑰](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-osd-key-recovery-2026-09-22/)（9/20 `aio_submit retries` 原列為觀察項目）
 - [PBS 更新後，怎麼確認備份還能用？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)
 - [Proxmox VE Backup and Restore](https://pve.proxmox.com/pve-docs/chapter-vzdump.html)
