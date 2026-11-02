@@ -4,7 +4,7 @@ title: "PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？"
 date: 2026-10-02
 categories: [PVE, HA, ProxCenter]
 permalink: /docs/pve/pve-ha-placement-policy/
-last_modified_at: 2026-11-01
+last_modified_at: 2026-11-02
 ---
 
 # PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？
@@ -746,7 +746,7 @@ ssh root@node12 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | 用 ProxCenter 完整逐台更新三台，每台確認 DNS／DC 位置 | ✅ 2026-10-03（第 10 節） |
 | ProxCenter 搬移非 HA VM 時是否遵守 Affinity rules | 已改為 DC 加入 HA、由 PVE 規則保證，不再依賴 |
 | 逐台更新時 DC 規則全程有效、服務維護後是否自動搬回 | ✅ 2026-10-08：規則有效；服務不一定自動搬回，需手動（第 11 節） |
-| 單節點故障演練：實測 Ceph I/O latency、HA 恢復時間，並確認告警鏈（Graylog「節點離線」、另兩台的監控腳本與 postfix 寄信）在一台失聯時仍會寄信 | ⏳ 未演練（2026-10-19 列入待辦；需事先排時段、避開 21:00～03:00 備份） |
+| 單節點故障演練：實測 Ceph I/O latency、HA 恢復時間，並確認告警鏈（Graylog「節點離線」、另兩台的監控腳本與 postfix 寄信）在一台失聯時仍會寄信 | ⏳ 未演練（2026-10-19 列入待辦；2026-11-02 完成演練計畫與量測腳本，見[單節點故障演練](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-single-node-failure-drill/)；日期未定） |
 | Dynamic Load 與 Automatic Rebalance 的實際行為 | ✅ 10/20 查證（未找到官方 admin guide 章節，依開發者郵件論壇與官方論壇公告）：pve-ha-manager 5.2.0（pve-manager 9.1.8）起加入 Dynamic Load，可勾選 Automatic Rebalance 並設定不平衡門檻等參數，避免不必要的遷移；**只平衡 HA 資源**，且遷移一定遵守 node／resource affinity 規則；開發者標示為 technology preview，目標在 9.2 穩定。本叢集維持 `ha=static`、不開自動平衡（LXC 遷移會重啟） |
 | ProxCenter DRS 停用、規則改由 PVE 統一管理 | ✅ 2026-10-13（第 12 節） |
 | ProxCenter Operation mode 改為 Manual（保險） | ✅ 2026-10-19，Guest types 同時改為只留 VMs（第 12-2 節） |
@@ -761,6 +761,7 @@ ssh root@node12 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)（Shutdown Policy 改為 migrate）
 - [ProxCenter 逐台更新 PVE](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/)
+- [單節點故障演練](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-single-node-failure-drill/)：拔掉一台電源，量 Ceph、HA 與告警鏈
 - [Proxmox VE：High Availability（含 CRS、HA rules）](https://pve.proxmox.com/pve-docs/chapter-ha-manager.html)
 - [Ceph：Monitor／OSD 心跳與 down／out 設定](https://docs.ceph.com/en/latest/rados/configuration/mon-osd-interaction/)
 - [ProxCenter 文件：DRS](https://docs.proxcenter.io/automation/drs/)
