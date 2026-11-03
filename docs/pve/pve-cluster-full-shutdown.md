@@ -4,7 +4,7 @@ title: "整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）
 date: 2026-10-23
 categories: [PVE, Ceph, HA]
 permalink: /docs/pve/pve-cluster-full-shutdown/
-last_modified_at: 2026-11-02
+last_modified_at: 2026-11-03
 ---
 
 # 整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）
@@ -211,7 +211,7 @@ PVE 節點 ──①──▶ PBS31（tokyo16 上的 VM） ──②──▶ to
 
 | 段落 | 走哪裡 | 速度上限 |
 | --- | --- | --- |
-| ① 節點 → PBS31 | 節點網卡 → 10G 交換器 → tokyo16 區域網路 3 → 虛擬交換器 → PBS31 | 節點的網卡（Realtek，推測 2.5G） |
+| ① 節點 → PBS31 | 節點網卡 → 10G 交換器 → tokyo16 區域網路 3 → 虛擬交換器 → PBS31 | 節點的網卡（Realtek，**實測 2.5G**：三台各兩張網卡的 `ethtool` 都是 2500Mb/s，2026-11-02） |
 | ② PBS31 → tokyo16 | 同一台 NAS、同一個虛擬交換器內部 | 不經過實體網路 |
 
 關鍵是 **PBS31 的虛擬交換器綁在哪張網卡**：如果還綁區域網路 2，① 不會用到 10G，② 甚至可能從區域網路 2 出去、繞交換器再從區域網路 3 回來。
@@ -413,12 +413,13 @@ ceph osd dump | grep '^flags'
 | 腳本中途停下（HA 已停但沒關機） | 執行 `cluster-startup.sh`，會解除旗標（沒設的旗標 unset 也無害）並啟動原本的服務 |
 | 開機後用名稱連不到節點 | DNS 在叢集裡，HA 服務啟動前用 IP 連 |
 | 開機腳本說找不到 `/etc/pve/priv/ha-before-shutdown.txt` | 關機腳本沒跑到第 1 步，或已經用過一次（用過會改名為 `/root/ha-before-shutdown-used-…`） |
-| WinClient 開機出現 `no efidisk configured`、`failed to reset PCI device` | 這台 VM 原本的設定（沒有 EFI 磁碟、有 PCI 直通），`Task finished with 2 warning(s)` 仍正常啟動 |
+| WinClient 開機出現 `no efidisk configured`、`failed to reset PCI device` | 這台 VM 原本的設定（沒有 EFI 磁碟、有 PCI 直通），`Task finished with 2 warning(s)` 仍正常啟動。**備份時也會出現同樣的訊息**（2026-11-02 查證）：只在 VM 關機時備份才有，開機時備份沒有，見[Ceph 慢操作那篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/)第 12 節 |
 | 關機前 PBS31 網頁登不進去，重開後正常 | 原因未確認（和 SSH 金鑰設定無關，網頁用 PAM）；再發生時用 SSH 執行 `journalctl -u proxmox-backup-proxy --since "1 hour ago" \| grep -iE "auth\|login\|fail"` 抓原因 |
 | 開機後 HA 資源都沒起來 | 手動關機時資源被設成 `stopped`，HA 不會自己起來；逐一 `ha-manager set <資源> --state started`，DC 先。腳本版會自動處理 |
 | 整個叢集重啟後，Lab Ops（`claude --remote-control`）顯示 `Session creation failed`，程序卻還活著 | CT113 開機時 DNS（AdGuard、Pi-hole）還沒起來，啟動當下連線失敗，之後不會自己重連。確認 DNS 通了之後，**只對 `claude` 那個程序** `kill <PID>`，外層的 `while true` 迴圈 10 秒後會自動重啟它。**不要用 `pkill -f`**：外層迴圈與 tmux 的命令列也含同樣的字串，會連迴圈一起殺掉 |
 | `pct exec` 說容器不存在 | 開機後 HA 換了節點；先用 `pvesh get /cluster/resources --type vm` 找出它現在在哪台 |
 | 重啟後 Ceph 的慢操作警告不見了 | 正常：計時在 OSD 重啟時重置。若又出現，代表問題還在，看 BlueStore 慢操作那篇 |
+| 要動 CT113（Lab Ops 所在）前想還原點 | CT113 目前**沒有任何快照**：清理用的 `pre-cleanup2-20261101` 在 11/02 上午已不存在。動它之前先拍一個新快照，名稱不要含 `reboot` |
 | 用 Lab Ops 查腳本時被 `rx` 擋下（exit code 3，「已封鎖高風險指令（規則 `\b(shutdown\|poweroff\|halt)\b`）」） | 指令或檔名含 `shutdown`、`poweroff`、`halt` 就會被擋，連唯讀的 `sha256sum /usr/local/sbin/cluster-shutdown.sh` 也一樣（[`rx` 說明](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/claude-code-redact-gateway/)）。改由你自己在節點的 shell 執行；不要用萬用字元之類的寫法去繞過這條保護 |
 
 ## 11. 待辦

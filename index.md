@@ -79,6 +79,8 @@ last_modified_at: 2026-10-22
 | [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](docs/pve/proxcenter-enterprise-update/) | 企業版 ProxCenter 自己要怎麼更新；`docker compose up -d` 的陷阱；CT110 擴容 |
 | [PVE 更新重開後 HA 服務卡在 error](docs/pve/pve-ha-service-error-after-reboot/) | HA 服務顯示 error；要手動重開節點 |
 | [整個 PVE 叢集安全關機與開機：一鍵腳本](docs/pve/pve-cluster-full-shutdown/) | 搬機房、停電維護，要把三台全關再開回來 |
+| [啟用 PVE 防火牆（階段 1a）：只收緊 Ceph 與沒用的埠](docs/pve/pve-firewall-stage1a-ceph-hardening/) | 想擋 VM／CT 被入侵後打節點，又怕鎖死自己或擋到 Ceph；遠端操作要排自動保險 |
+| [Corosync 加第二條 link（備援）：熱載入、不用重啟](docs/pve/corosync-second-link/) | 叢集心跳只有一條線，想消除單點故障 |
 | [PVE HA 放置策略：PVE 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy/) | 兩台 DNS 不能放同一台，規則要設在哪裡 |
 | [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新 PBS 前後要查什麼；怎麼安全清理舊 kernel |
 | [PVE 9 登入一直跳「No valid subscription」](docs/pve/pve9-subscription-nag-removal/) | 沒買訂閱，想取消登入提示 |

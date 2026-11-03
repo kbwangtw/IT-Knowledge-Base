@@ -4,7 +4,7 @@ title: "PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？"
 permalink: /docs/pve/pve-cluster-fail2ban-hardening/
 date: 2026-09-14
 categories: [PVE, Security, Fail2Ban, Network]
-last_modified_at: 2026-11-01
+last_modified_at: 2026-11-03
 ---
 
 # PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？
@@ -190,7 +190,8 @@ ss -lntp | grep ':8006'
 | `root@pam` 啟用 TOTP | **10/15 已完成**（第 10 節） | VPN 是 split tunnel，VPN 用戶端可直達 8006；用戶端被入侵時多一道驗證 |
 
 - 日後要啟用 PVE Firewall，先保留主控台與管理連線，盤點 Corosync、Ceph、備份和管理需要的流量，再逐台測試。
-- **10/31 重新評估**：盤點後結論仍是**不啟用完整 PVE Firewall**。具體風險是 Ceph 的 `public_network` 在服務網（啟用後不在文件列出的自動放行清單內）、5 個 VM／CT 的網卡防火牆旗標已開（總開關啟用時立刻生效）。改評估只限制 8006 的 `pveproxy` 的 `ALLOW_FROM`，白名單盤點中（暫停）。完整過程見 [內網橫向感染評估](https://kbwangtw.github.io/IT-Knowledge-Base/docs/network/internal-network-lateral-movement-assessment/)。
+- **10/31 重新評估**：盤點後結論是先不啟用完整 PVE Firewall。具體風險是 Ceph 的 `public_network` 在服務網（啟用後不在文件列出的自動放行清單內）、14 個 VM／CT 的網卡防火牆旗標已開（10/31 原寫 5 個，11/02 更正：當時的指令只看到 node10 本機的 Guest；總開關啟用後是否過濾它們，文件沒寫）。當時改評估只限制 8006 的 `pveproxy` 的 `ALLOW_FROM`，**11/02 已取消**。完整過程見 [內網橫向感染評估](https://kbwangtw.github.io/IT-Knowledge-Base/docs/network/internal-network-lateral-movement-assessment/)。
+- **11/02 更新**：使用者改在叢集啟用 PVE Firewall 的階段 1a（只收緊 Ceph 與沒用的埠，管理埠 8006、22、3128 暫時對整個服務網開放），啟用後 14 個旗標已開的 Guest 沒有被擋；做法與實測見[啟用 PVE 防火牆（階段 1a）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-firewall-stage1a-ceph-hardening/)。
 - `ignoreip` 只放必要且確認可信的管理來源。遇到誤封，先核對來源與日誌再解除那一筆；**不要**為了方便把整個大網段放行。
 
 ## 10. 10/15：`root@pam` 啟用 TOTP 與 token 清理
