@@ -106,9 +106,11 @@ last_modified_at: 2026-10-22
 | [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 告警設好了，怎麼證明它真的會寄信 |
 | [在 PVE Cluster 用 LXC 架設 Wazuh（一）：安裝與接上 Agent](docs/pve/wazuh-lxc-ubuntu2204-sop/) | 自建資安監控：建容器、安裝、備份與 HA、幫各種主機裝 Agent |
 | [Wazuh 維運（二）：資料保留、告警調校、弱點修補與整合](docs/pve/wazuh-lxc-ubuntu2204-operations/) | Wazuh 裝好後：磁碟不爆、告警降噪、看弱點、接其他系統 |
+| [Wazuh 4.14.8 升級到 4.14.9 SOP](docs/pve/wazuh-4-14-9-upgrade-sop/) | Dashboard 提示有新版；備份、依序升級中央元件與 18 台 Agent、驗收與還原 |
 | [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh/) | 把資安數據放進一頁儀表板 |
 | [用 Grafana 建立戰情中心（二）：接上 LibreNMS](docs/pve/grafana-war-room-librenms/) | 把設備上下線狀態放進同一頁 |
 | [用 Grafana 建立戰情中心（三）：接上 Prometheus（Ceph 與 PVE）](docs/pve/grafana-war-room-prometheus/) | Ceph 健康、節點負載、VM 在哪台節點與 HA 狀態 |
+| [Grafana 13.3 新版整理：這次更新了什麼、要不要升級](docs/pve/grafana-13-3-release-notes/) | 想知道新版有哪些功能、哪些還是預覽、升級前注意什麼 |
 | [LibreNMS 溫度告警誤報：LXC 重複感測器與門檻整理](docs/pve/librenms-temperature-sensor-cleanup/) | 一直跳 Temperature above threshold；容器重複回報、門檻不合理 |
 | [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](docs/pve/pve-cluster-fail2ban-hardening/) | 有人一直猜密碼；加上兩步驟驗證 |
 | [不再把 PVE 8006 開到網際網路：改用 WireGuard](docs/pve/wireguard-remote-access-replace-8006/) | 在外面要管理家裡或公司的主機 |
