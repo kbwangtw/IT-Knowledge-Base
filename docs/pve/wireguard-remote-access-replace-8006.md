@@ -4,7 +4,7 @@ title: "不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家"
 permalink: /docs/pve/wireguard-remote-access-replace-8006/
 date: 2026-10-12
 categories: [PVE, WireGuard, VPN, Security, Network]
-last_modified_at: 2026-11-01
+last_modified_at: 2026-11-03
 ---
 
 # 不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家
@@ -15,8 +15,8 @@ last_modified_at: 2026-11-01
 | --- | --- |
 | 適合誰看 | 為了在外面管理 PVE 而開了 port forward 的人；想用 WireGuard 連回家的人 |
 | 環境 | PVE 9.2.21；ct:109 為 Debian 13 + WireGuard + WGDashboard；中華電信光世代數據機（固定 IP） |
-| 日期 | 2026-10-12 建置；10/13 停用 8006、加上監控；10/15 啟用 2FA |
-| 結論 | ✅ iPhone（4G/5G）與筆電經 VPN 開得到 PVE；✅ 8006 轉送已停用並從外部確認；✅ VPN 異常與整台停機都會寄信；✅ WGDashboard 啟用 TOTP |
+| 日期 | 2026-10-12 建置；10/13 停用 8006、加上監控；10/15 啟用 2FA；11/03 升級 WGDashboard 到 v4.3.4 |
+| 結論 | ✅ iPhone（4G/5G）與筆電經 VPN 開得到 PVE；✅ 8006 轉送已停用並從外部確認；✅ VPN 異常與整台停機都會寄信；✅ WGDashboard 啟用 TOTP ✅ WGDashboard 已升到 v4.3.4（跨過 v4.3.2 安全更新） |
 
 > 文中內網位址為示範值（198.51.100.0/24）；不公開對外 IP 與任何金鑰。
 
@@ -530,7 +530,121 @@ pct exec 109 -- bash -c 'cd /etc/wgdashboard/src && sed -i "s/^enable_totp *=.*/
 
 WGDashboard 啟用時**沒有提供備用碼**（10/15 實際確認），這段指令就是救援方式。換手機時，先在新手機綁定再移除舊手機的項目。
 
-## 14. 常見問題
+## 14. 升級 WGDashboard 到 v4.3.4（11/03）
+
+**一句話**：WGDashboard 從 v4.3.1 升到 v4.3.4，跨過 v4.3.2 的安全更新；人在現場、先備份與快照，用官方的 `./wgd.sh update` 升級，升完用 systemd 重啟，VPN 與 2FA 都正常。
+
+### 14-1 為什麼要升
+
+| 版本 | 日期 | 內容（來源：GitHub release 頁面） |
+| --- | --- | --- |
+| v4.3.2「March Security Update 1」 | 2026-04-10 | **安全更新**：公告說有「critical vulnerabilities」，可能讓未經驗證的人存取主機檔案系統；影響 v4.2.x 以後、且**暴露在公開網路**的安裝；私有或僅本機的部署「不認為有風險」；沒有 CVE 編號，技術細節說之後在 Discord 公布 |
+| v4.3.3 | 2026-04-10 | 只支援 **Python 3.12 以上**；新增 AmneziaWG 2.0 |
+| v4.3.4 | 2026-10-26 | 修 MySQL 升級錯誤、備份還原改用資料庫方言、更新相依套件；沒列安全修正與重大變更 |
+
+本環境的判斷：
+
+- 原本是 **v4.3.1**，在 v4.3.2 的安全更新**之前**。
+- 10086 沒有對外：數據機只轉送 UDP 51820（見第 11 節），所以公告的主要情境不適用。
+- 但 10086 在 ct:109 上監聽所有網卡（第 4 節），服務網內的任何機器都連得到。**推論**：風險主要來自內網裡被入侵的機器；公告沒有這樣寫。ct:109 存著 WireGuard 金鑰、又是通往內網的入口，所以選擇近期升級。
+
+### 14-2 升級前檢查（唯讀）
+
+```bash
+ha-manager status | grep ct:109
+pct exec 109 -- python3 --version
+pct exec 109 -- cat /etc/wgdashboard/src/venv/pyvenv.cfg
+pct exec 109 -- /etc/wgdashboard/src/venv/bin/python --version
+```
+
+| 檢查 | 結果 |
+| --- | --- |
+| ct:109 在哪台 | node12（HA 會搬動，先查再下指令） |
+| 系統 Python | 3.13.5，符合 v4.3.3 起「3.12 以上」的要求 |
+| `venv` 的 Python | 3.13.5，**不需要**刪掉重建 |
+
+### 14-3 備份與快照
+
+**做什麼**：升級失敗時有三道退路：PBS 備份、CT 快照、設定檔。
+
+```bash
+vzdump 109 --storage PBS31 --mode snapshot
+pct snapshot 109 pre-wgd-upgrade-20261103
+pct exec 109 -- tar czf /root/wg-backup-20261103.tgz /etc/wireguard /etc/wgdashboard/src/wg-dashboard.ini
+pct exec 109 -- tar tzvf /root/wg-backup-20261103.tgz
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `vzdump 109 --storage PBS31 --mode snapshot` | 在 ct:109 所在的節點執行；增量備份，約 20 秒 |
+| `pct snapshot 109 <名稱>` | 拍快照；名稱不要含 `reboot` |
+| `tar czf … /etc/wireguard …` | 把 WireGuard 設定與 WGDashboard 的 ini 打包在 CT 內（**含金鑰，只留在 CT 裡**，升完確認後刪掉） |
+| `tar tzvf` | 列出內容，確認真的有東西 |
+
+**看到的結果**：備份 `Backup job finished successfully`；快照建立完成；`tar` 檔 1,218 位元組，內容有 `wg0.conf`（709 位元組）、`wg-dashboard.ini`（1,075 位元組）和空的 `WGDashboard_Backup/`。檔案小是因為只有少數 peer。**這個 tar 沒有包含資料庫**，但 PBS 備份與快照涵蓋整個 CT，所以資料庫已有保險。
+
+### 14-4 升級
+
+**做什麼**：用官方的 `./wgd.sh update`。官方文件說明這是「方法 1（v4.0 以後）」；方法 2 是 `git pull … --force` 加 `./wgd.sh install`（文件沒寫 `--force` 對本機修改的影響，沒用到）。
+
+```bash
+pct enter 109
+cd /etc/wgdashboard/src
+./wgd.sh update
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `pct enter 109` | 進入 ct:109 的互動式 shell；**不要用一行的 `pct exec`**，腳本會停下來問 Y/N |
+| `./wgd.sh update` | 官方更新指令：停止服務、下載指定版本、重新安裝 |
+
+**看到的結果**：
+
+- 先問 `Are you sure you want to update to the v4.3.4? (Y/N)`，回答 `y`。
+- 停止 WGDashboard（gunicorn），從 GitHub 下載 v4.3.4。
+- 安裝：找到既有的 `log`、`download`、`db` 資料夾（**資料庫保留**）、編譯前端（Node.js v20.19.2、npm 9.2.0）、安裝相依套件、找到既有的 `ssl-tls.ini`。
+- 結尾 `Update completed!`，沒有 `error` 或 `Traceback`。腳本提示再執行 `./wgd.sh start`，但**服務是由 systemd 管的**，改用下一步。
+
+### 14-5 用 systemd 重啟並驗證
+
+```bash
+systemctl restart wg-dashboard
+sleep 5
+systemctl status wg-dashboard --no-pager | head -6
+wg show interfaces
+ss -lnt | grep 10086
+```
+
+| 檢查 | 結果 |
+| --- | --- |
+| `systemctl status` | `active (running)`，Main PID 是 gunicorn |
+| `wg show interfaces` | `wg0`（隧道沒掉） |
+| `ss -lnt \| grep 10086` | 監聽 `0.0.0.0:10086` |
+| 版本 | 登入頁頁尾顯示 **WGDashboard v4.3.4** |
+| 2FA | 登入表單仍有「OTP from your authenticator」欄位 |
+| 登入 | 輸入驗證碼後能進入儀表板 |
+| VPN | 手機關 Wi-Fi、只用 4G，開 WireGuard，連得回內網 |
+
+> 用 `systemctl` 而不是 `./wgd.sh start`，是為了讓 systemd 和實際的程序狀態一致。第 13-1 節確認過停止 WGDashboard 只停網頁介面，wg0 由核心獨立運作；這次升級與重啟後 `wg show interfaces` 仍有 `wg0`。
+
+### 14-6 相依套件預設從第三方鏡像下載
+
+`./wgd.sh update` 內部會執行安裝，並列出一份 PyPI 鏡像清單；**預設選了 `mirrors.aliyun.com`（阿里雲）**（腳本挑延遲最低的），所以這次的 Python 相依套件不是從 `pypi.org` 下載的。
+
+| 項目 | 說明 |
+| --- | --- |
+| 有證據被竄改嗎 | 沒有，也無法在這裡驗證 |
+| 風險 | 阿里雲是大型公開鏡像，風險低但不是零；ct:109 存著 WireGuard 金鑰，相依套件是供應鏈的一環 |
+| 要更保守 | 驗證都正常之後，重跑 `./wgd.sh install`，出現鏡像選單時選 `[1] https://pypi.org/simple/`，讓相依套件從官方 PyPI 重裝（**尚未做**） |
+
+### 14-7 收尾
+
+- [ ] 觀察 1～2 天沒問題後，刪除快照：`pct delsnapshot 109 pre-wgd-upgrade-20261103`
+- [ ] 刪除 CT 內的 `/root/wg-backup-20261103.tgz`（含金鑰）
+- [ ] （可選）用官方 PyPI 重裝相依套件（見 14-6）
+- [ ] 之後 10086 若要縮小到只讓管理員電腦連，可以放進 PVE 防火牆階段 2 的 Guest 層規則（尚未做）
+
+## 15. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
@@ -543,11 +657,18 @@ WGDashboard 啟用時**沒有提供備用碼**（10/15 實際確認），這段�
 | Agent 停機沒有觸發 504 | 正常關機產生的是 506；改用 Manager 主動檢查 |
 | 測試觸發了但沒收到信 | Grace Period 30 分鐘內不重複寄 |
 | WGDashboard 2FA 被鎖 | 從 PVE 節點把 `enable_totp` 改回 false |
+| `grep DASHBOARD_VERSION /etc/wgdashboard/src/dashboard.py` 沒有輸出 | v4.3.4 的版本號不在這個位置；看登入頁頁尾或設定頁顯示的版本 |
+| `./wgd.sh update` 停下來問 Y/N | 要用 `pct enter 109` 進互動式 shell；`pct exec` 一行帶過會卡住 |
+| 升完腳本說「Enter ./wgd.sh start」 | 服務由 systemd 管，用 `systemctl restart wg-dashboard`（第 14-5 節） |
+| 升級時預設用了阿里雲的 PyPI 鏡像 | 見第 14-6 節，可事後改用官方 PyPI 重裝 |
+| Python 版本比 3.12 低 | v4.3.3 起不支援；要先刪 `src` 裡的 `venv`、升 Python，再 `./wgd.sh install` 與 `./wgd.sh update` |
 
-## 15. 延伸閱讀
+## 16. 延伸閱讀
 
 - [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-fail2ban-hardening/)
 - [PVE HA 放置策略](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)
 - [把 PVE、PBS 與 NAS 的日誌集中到 Graylog](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxmox-graylog-syslog-pipeline-sop/)
 - [WireGuard 官方網站](https://www.wireguard.com/)
 - [WGDashboard 專案](https://github.com/donaldzou/WGDashboard)
+- [WGDashboard 更新文件](https://docs.wgdashboard.dev/Update.html)
+- [WGDashboard releases（v4.3.2 安全更新、v4.3.3 Python 3.12 要求、v4.3.4）](https://github.com/WGDashboard/WGDashboard/releases)
