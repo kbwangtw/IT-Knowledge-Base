@@ -106,7 +106,7 @@ last_modified_at: 2026-10-22
 | [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18/) | 告警設好了，怎麼證明它真的會寄信 |
 | [在 PVE Cluster 用 LXC 架設 Wazuh（一）：安裝與接上 Agent](docs/pve/wazuh-lxc-ubuntu2204-sop/) | 自建資安監控：建容器、安裝、備份與 HA、幫各種主機裝 Agent |
 | [Wazuh 維運（二）：資料保留、告警調校、弱點修補與整合](docs/pve/wazuh-lxc-ubuntu2204-operations/) | Wazuh 裝好後：磁碟不爆、告警降噪、看弱點、接其他系統 |
-| [Wazuh 4.14.8 升級到 4.14.9 SOP](docs/pve/wazuh-4-14-9-upgrade-sop/) | Dashboard 提示有新版；備份、依序升級、驗收與還原 |
+| [Wazuh 4.14.8 升級到 4.14.9 SOP](docs/pve/wazuh-4-14-9-upgrade-sop/) | Dashboard 提示有新版；備份、依序升級中央元件與 18 台 Agent、驗收與還原 |
 | [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh/) | 把資安數據放進一頁儀表板 |
 | [用 Grafana 建立戰情中心（二）：接上 LibreNMS](docs/pve/grafana-war-room-librenms/) | 把設備上下線狀態放進同一頁 |
 | [用 Grafana 建立戰情中心（三）：接上 Prometheus（Ceph 與 PVE）](docs/pve/grafana-war-room-prometheus/) | Ceph 健康、節點負載、VM 在哪台節點與 HA 狀態 |

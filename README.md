@@ -30,7 +30,7 @@
 - [PVE 告警實測：三項核心告警完整驗證成功](docs/pve/graylog-pve-alert-validation-2026-09-18.md)
 - [在 PVE Cluster 用 LXC 架設 Wazuh（一）：安裝與接上 Agent](docs/pve/wazuh-lxc-ubuntu2204-sop.md)
 - [Wazuh 維運（二）：資料保留、告警調校、弱點修補與整合](docs/pve/wazuh-lxc-ubuntu2204-operations.md)：告警調校、弱點修補、LibreNMS 動態群組、jt-ipam／Grafana 整合
-- [Wazuh 4.14.8 升級到 4.14.9 SOP](docs/pve/wazuh-4-14-9-upgrade-sop.md)：升級前備份、Indexer／Manager／Dashboard 依序升級、驗收（中央元件已實測，Agent 待升級）
+- [Wazuh 4.14.8 升級到 4.14.9 SOP](docs/pve/wazuh-4-14-9-upgrade-sop.md)：升級前備份、Indexer／Manager／Dashboard 依序升級、驗收（已實測：中央元件與 18 台 Agent 全部完成）
 - [用 Grafana 建立戰情中心（一）：接上 Wazuh](docs/pve/grafana-war-room-wazuh.md)
 - [用 Grafana 建立戰情中心（二）：接上 LibreNMS](docs/pve/grafana-war-room-librenms.md)
 - [用 Grafana 建立戰情中心（三）：接上 Prometheus（Ceph 與 PVE）](docs/pve/grafana-war-room-prometheus.md)

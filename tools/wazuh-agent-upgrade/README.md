@@ -32,4 +32,6 @@
 
 ## 測試狀態
 
-邏輯已用模擬的 `agent_control` 與 `agent_upgrade` 測過（預演、成功、非 Active、版本不符、逾時、Windows 略過、人工確認、前一台失敗時不動後面的）。**尚未在真實的 Wazuh 環境測過**，請先對一台低影響的 Linux Agent 試跑。
+邏輯先用模擬的 `agent_control` 與 `agent_upgrade` 測過（預演、成功、非 Active、版本不符、逾時、Windows 略過、人工確認、前一台失敗時不動後面的），再在真實的 Wazuh 環境先對一台 Linux Agent 試跑，成功後放開。
+
+2026-11-02～03 實際用於 Wazuh 4.14.8 → 4.14.9：ai、AdGuard、Pihole、pbs31、三個 PVE 節點，每台約 1～1.5 分鐘，全部成功；Windows 主機（ca、DC02、DC01）由人工用 MSI 升級，不經過這支腳本。完整過程見 `docs/pve/wazuh-4-14-9-upgrade-sop.md` 第 8.7 節。

@@ -9,7 +9,7 @@ last_modified_at: 2026-11-02
 
 # Wazuh 4.14.8 升級到 4.14.9 SOP（All-in-one，LXC）
 
-> **一句話**：Wazuh Dashboard 提示有新 patch 4.14.9；這篇是 2026-11-02 實際升級 All-in-one 的完整紀錄：備份、依序升級 Indexer、Manager、Filebeat、Dashboard，再逐項驗收。中央元件已升級並驗收完成；Agent 已先升級 2 台用戶端（ubclient、WinClient），其餘另行進行。
+> **一句話**：Wazuh Dashboard 提示有新 patch 4.14.9；這篇是 2026-11-02 實際升級 All-in-one 的完整紀錄：備份、依序升級 Indexer、Manager、Filebeat、Dashboard，再逐項驗收。中央元件與 18 台 Agent 已全部升級並驗收完成；Agent 先手動升級 6 台，再用 Wazuh 內建的 `agent_upgrade` 腳本依序升級其餘。
 
 | 項目 | 內容 |
 | --- | --- |
@@ -19,7 +19,7 @@ last_modified_at: 2026-11-02
 | 版本 | 4.14.8 → 4.14.9（2026-10-14 發布） |
 | 風險 | 中：升級期間 Indexer、Manager、Dashboard 會中斷；有快照與 PBS 備份即可還原 |
 | 實測中斷時間 | Filebeat 與 Dashboard 停止約 10～17 分鐘（含逐步確認時間；Indexer 停機時間未精確記錄） |
-| 結論 | ✅ 中央元件（Indexer、Manager、Filebeat、Dashboard）升級完成並驗收；✅ 兩台用戶端 Agent（ubclient、WinClient）已升級並驗證「升級不需重新註冊」；⏳ 其餘 16 台 Agent 尚未升級（見待辦） |
+| 結論 | ✅ 中央元件（Indexer、Manager、Filebeat、Dashboard）升級完成並驗收；✅ 18 台 Agent 全部升級為 4.14.9（2026-11-02～03），升級不需重新註冊，`agent_upgrade -l` 回報 `All agents are updated.`；⏳ 兩個無關但尚未釐清的觀察（DC01 的 DFSR 警告、Graylog 與 wireguard 是誰升級的，見 8.9） |
 
 > **關於指令**：指令依官方 [All-in-one 升級指南](https://documentation.wazuh.com/current/upgrade-guide/upgrading-central-components.html)整理，並已在本環境實測；若與官方當下版本不同，以官方為準。4.14.9 的內容見下方第 1 節（來源：官方 [4.14.9 Release notes](https://documentation.wazuh.com/4.14/release-notes/release-4-14-9.html)，2026-10-14 發布）。
 
@@ -383,9 +383,9 @@ apt-get update 2>&1 | tail -n 3
 
 > jt-ipam 同步的日誌很長，`tail -20` 只會看到最後的 LibreNMS 與 AdGuard，要用 `grep -iE "wazuh|ERROR"` 才看得到 Wazuh 那一段。
 
-## 8. ⑤ 升級各台 Agent（已完成 2 台，其餘進行中）
+## 8. ⑤ 升級各台 Agent（18 台全部完成）
 
-> 本節的流程已在 ubclient（Linux 用戶端）與 WinClient（Windows 11 用戶端）各實測一次，見 8.6；其餘 16 台尚未升級，指令依同樣流程類推，**容器版（`pct push`、`pct exec`）尚未實測**。Agent 版本不能高於 Manager，所以要在 Manager 升完之後才做（本次已完成）。
+> 本節記錄實際做法。前 6 台（ubclient、WinClient、grafana、ProxCenter、librenms、IPAM）手動升級（8.3、8.4、8.6）；其餘改用 Wazuh 內建的 `agent_upgrade`，並以腳本 [`tools/wazuh-agent-upgrade`](https://github.com/kbwangtw/it-knowledge-base/tree/main/tools/wazuh-agent-upgrade) 一次一台、失敗就停（8.7）；Windows Server 三台手動升級（8.8）。Agent 版本不能高於 Manager，所以要在 Manager 升完之後才做（本次已完成）。**8.3 的 `pct push`、`pct exec` 寫法沒有實際使用**，實際是在容器內直接 `wget` 與 `dpkg -i`（8.6 的 grafana、ProxCenter、librenms、IPAM）。
 
 ### 8.1 原則
 
@@ -548,6 +548,102 @@ $p = Start-Process msiexec.exe -ArgumentList '/i','C:\Temp\wazuh-agent-4.14.9-1.
 
 兩台都是 `Wazuh v4.14.9`、`Active`，第二行回傳 `1`（沒有重新註冊）。
 
+### 8.7 腳本升級：`agent_upgrade`（2026-11-02～03）
+
+做什麼 → 在 Wazuh Manager 主機上，用內建的 `agent_upgrade` 由 Manager 下載升級包（WPK）推給 Agent。不需要任何主機的 SSH 或密碼，也不用在每台手動下載 `.deb`。
+
+先確認 Manager 能用、列出還沒升級的 Agent（唯讀）：
+
+```bash
+/var/ossec/bin/agent_upgrade -h
+/var/ossec/bin/agent_upgrade -l
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `-h` | 顯示這個版本支援的參數（`-a` 指定 Agent、`-v` 版本、`--package_type` 等） |
+| `-l` | 列出 Manager 認為過期的 Agent；全部升完會顯示 `All agents are updated.` |
+
+本次看到的結果：`-l` 列出 12 台（網域與用戶端以外的都在內），代表 Manager 可以連到官方下載升級包。
+
+**為什麼不直接用 `-a` 一次升全部**：一次推多台，失敗時分不清是哪一台、也沒有逐台驗證與人工確認的機會。所以包成腳本：
+
+| 保護 | 說明 |
+| --- | --- |
+| 一次一台 | 升完確認「版本為目標版本且 Active」才做下一台，兩台之間間隔 60 秒 |
+| 失敗就停 | 任何一台失敗、逾時、查不到版本，整批停止，後面的不會被動到 |
+| 升級前檢查 | 該 Agent 必須是 Active 且版本為 `v4.14.8`；Manager 也必須已是 `4.14.9` |
+| 預設只預演 | 沒加 `--run` 只列出會做什麼，不動任何東西 |
+| Windows 略過 | 作業系統為 Windows 的一律略過（要先清待重開機項目，見 8.8），另有 `HARD_SKIP` 清單 |
+| 重要主機要確認 | DNS、PVE 節點、備份伺服器每台要人工輸入 `y` |
+
+用法：
+
+```bash
+./wazuh-upgrade-agents.sh 013            # 預演
+./wazuh-upgrade-agents.sh --run 013      # 實際執行
+```
+
+腳本先用假的 `agent_control` 與 `agent_upgrade` 測過邏輯（預演、成功、非 Active、版本不符、逾時、Windows 略過、人工確認、前一台失敗時不動後面的），再在真實環境先對一台試跑，成功後才放開。
+
+**實測結果**（每台約 1～1.5 分鐘，`agent_upgrade` 會等到升級完成才回來）：
+
+| 日期 | Agent | 結果 |
+| --- | --- | --- |
+| 11-02 | ai（013）先試跑 | `Agent 013 upgraded: Wazuh v4.14.8 -> v4.14.9`，驗證成功 |
+| 11-03 | AdGuard（008）、Pihole（009） | 兩台**分開**升級，各自前後用 `nslookup` 測 DNS，升級後解析正常 |
+| 11-03 | pbs31（017） | 升級後 `proxmox-backup`、`proxmox-backup-proxy` 都是 `active` |
+| 11-03 | node11、node10、node12（001～003） | 一次一台，升級前用 `pvesh get /nodes/$(hostname)/tasks --source active` 確認沒有進行中的工作，升級後 `pve-cluster`、`pvedaemon`、`pveproxy` 都是 `active`、`Nodes: 3`、`Quorate: Yes` |
+
+> 4.14.8 的 Agent 若沒有 `find` 指令，WPK 升級會失敗（4.14.9 才修，#38431）。本次容器與節點都沒遇到。
+
+**升級前的檢查**（用於 DNS、PVE 節點、備份伺服器這類不能隨便動的主機）：
+
+```bash
+nslookup <網域名稱> <DNS 位址>          # DNS 升級前後各測一次
+pvesh get /nodes/$(hostname)/tasks --source active --output-format text   # 在每台 PVE 節點
+grep -E "schedule|starttime" /etc/pve/jobs.cfg                           # 備份排程時間
+systemctl is-active pve-cluster pvedaemon pveproxy; pvecm status | grep -E "Quorate|Nodes"   # 節點升級後
+systemctl is-active proxmox-backup proxmox-backup-proxy                  # pbs31 升級後
+```
+
+備份排程在晚上（本環境為 21:00～22:00），選上午升級、離備份很遠。`jobs.cfg` 在叢集共用的 `/etc/pve`，三台節點看到的一樣。
+
+### 8.8 Windows Server：ca、DC02、DC01（2026-11-03）
+
+三台都是 Windows Server 2025 Standard，不能用腳本，沿用 WinClient 的流程（8.6）：事前檢查、備份、MSI 升級、驗證。
+
+**順序**：先 `ca`（非網域控制站），再 DC02，等一段時間後 DC01；一次一台、不同時段。
+
+**網域控制站升級前後各確認一次網域服務**（系統管理員的 PowerShell）：
+
+```powershell
+Get-Service NTDS, DNS, Netlogon, kdc | Select-Object Name, Status
+dcdiag /q
+```
+
+看到的結果：四個服務都是 `Running`；`dcdiag /q` 沒有輸出代表正常。`ca` 另外確認 `CertSvc`（憑證服務）仍是 `Running`。
+
+| Agent | 事前檢查 | 升級 | 驗證 |
+| --- | --- | --- | --- |
+| ca（016） | `PendingFileRenameOperations` 只有 1 筆 Edge 更新殘留，判斷與 Agent 檔案無關，**不重開機** | `ExitCode: 0` | `v4.14.9`、`CertSvc` 仍 `Running`、Manager 端 `Active` 且只有 1 筆 |
+| DC02（014） | 全部乾淨（無待重開機、無待處理項目、`dcdiag /q` 無輸出） | `ExitCode: 0` | `v4.14.9`、四個網域服務 `Running`、`dcdiag /q` 無輸出、Manager 端 `Active` 且只有 1 筆 |
+| DC01（015） | 待重開機項目乾淨、網域服務 `Running`，但 `dcdiag /q` 有 `DFSREvent` 警告（見 8.9） | 手動 MSI，同 DC02 流程 | `v4.14.9`、網域服務 `Running`、`dcdiag /q` 輸出與升級前相同；Manager 端 `Active` 且只有 1 筆 |
+
+**`ca` 為什麼沒有重開機**：判斷待重開機要看三項（`RebootPending`、`RebootRequired`、`PendingFileRenameOperations`）。`ca` 只剩一筆 Edge 更新殘留，沒有 `Config.Msi\*.rbf`（MSI 的回復檔），而 4.14.9 的 MSI 把「待重開機」判斷縮小到 Agent 自己的檔案（#39746）。這是依版本說明做的判斷，升級成功驗證了它（`ExitCode: 0`）。
+
+### 8.9 結果與尚未釐清的觀察
+
+**結果**：Manager 端 `agent_upgrade -l` 回報 `All agents are updated.`，18 台全部是 `Wazuh v4.14.9`、`Active`，每台只有 1 筆（沒有任何一台重新註冊）。
+
+**尚未釐清（不影響升級結果）**：
+
+| 項目 | 觀察 | 狀態 |
+| --- | --- | --- |
+| DC01 的 `DFSREvent` 警告 | `dcdiag /q` 回報「最近 24 小時 SYSVOL 開始共用時發生警告或錯誤事件」。升級前後輸出相同，DC02 全程乾淨，所以多半是升級之前就有、與 Agent 升級無關，但 `DFSREvent` 只看 24 小時，無法完全排除（推測）。查法：`Get-WinEvent -FilterHashtable @{LogName='DFS Replication'; Level=2,3; StartTime=(Get-Date).AddHours(-24)}`、`net share \| findstr /i "SYSVOL NETLOGON"`、`repadmin /replsummary` | ⏳ 待查 |
+| Graylog、wireguard 是誰升的 | 11-02 17:04 用腳本升級 ai，同日 21:07 再跑時，這兩台已是 4.14.9，不是我們升的。可能是手動升級、Dashboard 的升級按鈕或其他維運腳本。查法：`grep -i "agents/upgrade" /var/ossec/logs/api.log`、容器內 `grep wazuh-agent /var/log/dpkg.log` | ⏳ 待查 |
+| AdGuard 升級前的 DNS 逾時 | 升級前第一次 `nslookup` 出現兩次逾時後才回應，升級後沒有；逾時發生在升級前，與升級無關。可能是第一次查詢沒有快取、上游較慢（推測） | 觀察 |
+
 ## 9. 還原
 
 | 狀況 | 怎麼辦 |
@@ -568,6 +664,9 @@ $p = Start-Process msiexec.exe -ArgumentList '/i','C:\Temp\wazuh-agent-4.14.9-1.
 | 忘了 Indexer 管理帳號密碼 | 網頁登入的管理員通常就是同一組；也可從 `/root/wazuh-install-files.tar` 的 `wazuh-passwords.txt` 找（若曾用 `wazuh-passwords-tool` 重設過，裡面是舊密碼）。重設密碼會牽動 Filebeat 與 Manager 的 keystore，也可能讓 Grafana 帳號消失，**不要在升級當下做** |
 | Linux Agent 升級時 `dpkg frontend lock was locked by ... process` | 另一個程式（常見是開機後的 `aptd` 或自動更新）占用套件管理員，**這次沒有安裝成功**。不要刪 lock 檔案、不要強制結束程式；用 `ps -fp <PID>` 看是誰，等它釋放後重試 `dpkg -i`（見 8.6） |
 | Windows Agent 升級前，`Test-Path` 都是 `False`，但 `PendingFileRenameOperations` 有內容（尤其含 `Config.Msi\*.rbf`） | 這仍是「待重開機」，先重開機，開機後該項沒有輸出再用 MSI 升級（見 8.6） |
+| 腳本顯示「已是 v4.14.9，略過」，但那台不是你升級的 | 先確認不是自己或其他自動化做的：`grep -i "agents/upgrade" /var/ossec/logs/api.log`（Manager）、`grep wazuh-agent /var/log/dpkg.log`（該主機）；在釐清前不影響其他台的升級 |
+| `agent_upgrade` 腳本整批停下來 | 腳本會印出是哪一台、為什麼（非 Active、版本不符、逾時）。**不要重跑**，先用 `agent_control -i <ID>` 看狀態，並在該主機看 `/var/ossec/logs/upgrade.log`；Agent 升級失敗時 Wazuh 會自動回復舊版 |
+| 網域控制站 `dcdiag /q` 有輸出（例如 `DFSREvent`） | 升級前就有的話先不要動它，查清楚（8.9）；Agent 停在 4.14.8 沒有急迫性，Manager 是 4.14.9 時舊一版的 Agent 仍可回報 |
 | 把上一段輸出也貼進終端機，出現一堆 `command not found` | 無害，那些文字被當成指令執行但沒有效果；以後只複製指令那幾行 |
 | `_flush` 回報 total 與 successful 差 1，failed 為 0 | 停 Indexer 前用 `_cat/shards` 確認沒有主分片未啟動，只有副本 `UNASSIGNED` 就可繼續 |
 | jt-ipam 日誌只看到 LibreNMS、AdGuard | `tail -20` 太短，改用 `grep -iE "wazuh\|ERROR"` |
@@ -585,9 +684,11 @@ $p = Start-Process msiexec.exe -ArgumentList '/i','C:\Temp\wazuh-agent-4.14.9-1.
 - [x] 升級 Indexer、Manager、Filebeat、Dashboard 並驗收（2026-11-02）
 - [x] 驗收本環境特有項目：`api.yaml` host、55000 與 9201 規則、`indexer-proxy`、Grafana、jt-ipam
 - [x] 升級 2 台 Disconnected 的用戶端（ubclient、WinClient）並驗證「升級不需重新註冊」（8.6）
-- [ ] 升級其餘 16 台 Agent（第 8 節）：低影響容器先、DNS 兩台分開、PVE 節點一次一台，Windows 主機（DC01、DC02 等）最後、一次一台
-- [ ] 實測容器版升級（`pct push`、`pct exec`），確認後移除第 8 節開頭的「尚未實測」標註
-- [ ] 確認 `ca`（Agent 016）的作業系統再決定升級方式（尚未確認）
+- [x] 升級其餘 16 台 Agent（第 8 節）：腳本升級 ai、AdGuard、Pihole、pbs31、三個 PVE 節點，手動升級 ca、DC02、DC01；`agent_upgrade -l` 回報 `All agents are updated.`
+- [x] 確認 `ca`（Agent 016）的作業系統：Windows Server 2025 Standard，已手動升級
+- [ ] 查 DC01 的 `DFSREvent` 警告（8.9）：確認 `SYSVOL`、`NETLOGON` 共用、`repadmin /replsummary` 的 `fails` 為 0，並判斷是升級前就存在
+- [ ] 查 Graylog、wireguard 是誰升級的（8.9）
+- [ ] 腳本已在真實環境成功執行（ai、AdGuard、Pihole、pbs31、三個節點），可視需要把 `HARD_SKIP` 預設值調整為只含 Windows
 - [ ] 觀察弱點數量與 SCA 通過率的前後差異（#38474、SCA 修正可能造成變動）
 - [ ] 視需要清理 `/var/ossec/etc/ossec.conf.new`
 - [ ] Wazuh 穩定後，再排 Grafana 13.3 升級（見 [Grafana 13.3 新版整理](../grafana-13-3-release-notes/)）
