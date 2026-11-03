@@ -4,12 +4,12 @@ title: "內網橫向感染評估：先看清楚網路長怎樣，再決定要不
 date: 2026-10-31
 categories: [Network, Security, PVE]
 permalink: /docs/network/internal-network-lateral-movement-assessment/
-last_modified_at: 2026-11-01
+last_modified_at: 2026-11-03
 ---
 
 # 內網橫向感染評估：先看清楚網路長怎樣，再決定要不要裝防火牆
 
-> **一句話**：想「在叢集上建一台軟體防火牆來防橫向感染」，先盤點後發現——叢集／備份網已經在**獨立的交換器**上，真正的缺口是「管理介面和使用者在同一個網段」；現階段結論是**不裝防火牆、不啟用完整 PVE Firewall**，改評估風險小很多的 `pveproxy` 來源限制（⏳ 盤點做到一半，已暫停）。
+> **一句話**：想「在叢集上建一台軟體防火牆來防橫向感染」，先盤點後發現——叢集／備份網已經在**獨立的交換器**上，真正的缺口是「管理介面和使用者在同一個網段」；10/31 的結論是先不裝防火牆，改評估風險小很多的 `pveproxy` 來源限制；後來（11/02）`pveproxy` 來源限制**取消**，改在叢集啟用 PVE Firewall 的階段 1a（只收緊 Ceph 與沒用的埠，見[啟用文章](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-firewall-stage1a-ceph-hardening/)），8006／22／3128 仍對整個服務網開放（第 9 節）。
 
 > 文中 IP 都是文件示範位址（服務／管理網 192.0.2.0/24、叢集／備份網 198.51.100.0/24）；最後一個數字和真實環境對得上，但網段不是真的。
 
@@ -17,8 +17,8 @@ last_modified_at: 2026-11-01
 | --- | --- |
 | 適合誰看 | 想評估「內網要不要加防火牆」、手上只有不能設定的交換器；PVE 管理頁面和一般設備在同一網段的人 |
 | 環境 | PVE 9.2 三節點（node10／11／12）、Ceph、PBS31；兩台 TP-Link 交換器（TL-SX1008 10G、TL-SG108-M2 2.5G）；上游是中華電信數據機（NAT 模式、DHCP 由數據機發） |
-| 日期 | 2026-10-31（討論與唯讀盤點）；2026-11-01（數據機轉送刪除後的外部驗證）；**這篇沒有改任何 PVE 設定** |
-| 結論 | ✅ 叢集／備份網已物理隔離 ✅ 節點不轉送封包（`ip_forward = 0`）✅ 8006、3000 的數據機轉送規則已刪除，只剩 UDP 51820 → WireGuard，11/01 已從外部驗證（8006、3000 連不上、VPN 可用）⚠️ 管理介面與使用者同網段 ⚠️ Ceph MON 綁在服務網 ⏳ `pveproxy` 來源限制的白名單盤點中（暫停） |
+| 日期 | 2026-10-31（討論與唯讀盤點）；2026-11-01（數據機轉送刪除後的外部驗證）；**10/31～11/01 的盤點沒有改任何 PVE 設定**；11/02～03 的設定變更見第 9 節 |
+| 結論 | ✅ 叢集／備份網已物理隔離 ✅ 節點不轉送封包（`ip_forward = 0`）✅ 8006、3000 的數據機轉送規則已刪除，只剩 UDP 51820 → WireGuard，11/01 已從外部驗證（8006、3000 連不上、VPN 可用）⚠️ 管理介面與使用者同網段 ⚠️ Ceph MON 綁在服務網（11/02～03 起 PVE Firewall 只放行三台節點，第 9 節）取消（2026-11-02）：`pveproxy` 來源限制 |
 
 ## 1. 先認識幾個名詞
 
@@ -80,7 +80,7 @@ sysctl net.ipv4.ip_forward
 pve-firewall status
 pve-firewall localnet
 cat /etc/pve/firewall/cluster.fw
-grep -l 'firewall=1' /etc/pve/qemu-server/*.conf /etc/pve/lxc/*.conf
+grep -l 'firewall=1' /etc/pve/nodes/*/qemu-server/*.conf /etc/pve/nodes/*/lxc/*.conf
 ss -lntup | grep -E ':(22|8006|3128|3300|6789|8007) '
 ss -tn state established '( sport = :3300 or sport = :6789 )'
 awk '{print $1}' /var/log/pveproxy/access.log | sort | uniq -c | sort -rn | head -20
@@ -93,7 +93,7 @@ awk '{print $1}' /var/log/pveproxy/access.log | sort | uniq -c | sort -rn | head
 | `ip -br addr` | 每張網卡的 IP；節點是否有兩張網卡 |
 | `sysctl net.ipv4.ip_forward` | `0` 代表節點不在兩個網段之間轉送封包 |
 | `pve-firewall status`、`localnet` | 防火牆現況，以及 `local_network` 偵測到哪個網段 |
-| `grep -l 'firewall=1' …` | 列出「網卡防火牆旗標已開」的 VM／CT（`/etc/pve` 是整個叢集共用） |
+| `grep -l 'firewall=1' …` | 列出「網卡防火牆旗標已開」的 VM／CT。**要用 `/etc/pve/nodes/*/…` 才涵蓋整個叢集**：`/etc/pve/qemu-server`、`/etc/pve/lxc` 只指向本機節點的 Guest（10/31 當時用了這兩個路徑，只看到 node10 上的 5 個，2026-11-02 更正） |
 | `ss -lntup \| grep …` | 這些服務在哪些位址監聽；`0.0.0.0`、`*` 代表所有網卡都聽 |
 | `ss -tn state established …` | 現在有誰連到 Ceph MON |
 | `awk … access.log` | 近期連到 8006 的來源 IP 排行 |
@@ -110,7 +110,7 @@ awk '{print $1}' /var/log/pveproxy/access.log | sort | uniq -c | sort -rn | head
 | `pve-firewall status` | `disabled/running`；`cluster.fw` 只有 `enable: 0`、`ebtables: 0` | 防火牆完全沒用到，沒有任何規則 |
 | `local_network` | 192.0.2.0/24（整個服務網） | 啟用後，預設會放行整個服務網到管理埠，**單純啟用不會限制任何人** |
 | 監聽 | 22、8006、3128 在所有位址；Ceph MON 只在服務網位址 | 管理埠對服務網全開 |
-| `firewall=1` 的 VM／CT | 整個叢集只有 5 個：VM106（DC01）、CT100、CT103、CT112、CT113 | 總開關啟用時只有這 5 個會被過濾 |
+| `firewall=1` 的 VM／CT | 15 個 Guest 裡有 **14 個**已開，只有 CT109（WireGuard）沒有：VM104、106、107、108、111；CT100、101、102、103、105、110、112、113、114。（10/31 原寫「只有 5 個」是錯的：當時的指令只看到 node10 本機的 Guest，11/02 更正） | 總開關啟用後這些 Guest 是否被過濾，見第 5 節；11/02 實測沒有被擋 |
 | Ceph MON 連線 | 9 條，**來源全是 node10 自己** | ✅ 這個時間點沒有外部 IP 連到 node10 的 MON（只看一台、一個時間點） |
 
 8006 來源（node10 的 `access.log`，近期）：
@@ -150,23 +150,23 @@ awk '{print $1}' /var/log/pveproxy/access.log | sort | uniq -c | sort -rn | head
 | # | 文件寫的 | 對這個環境的意思 |
 | --- | --- | --- |
 | 1 | 啟用後預設放行：管理主機到 8006、22、3128、5900-5999、60000-60050；**叢集網的 Corosync UDP 5405-5412**。文件這一頁**沒有提到 Ceph** | Ceph 的 3300、6789 與 OSD 埠都在服務網上，總開關啟用後**會被擋**；Ceph 一斷，VM／CT 磁碟卡住，HA 資源跟著出事 |
-| 2 | VM／CT 的每張虛擬網卡有**自己的防火牆旗標**，要和總開關同時啟用才生效 | 上表 5 個旗標已開的 VM／CT，在總開關啟用的那一刻開始被過濾。VM 層的預設進站政策我記得是 DROP，但這份文件沒寫，**未在這個環境驗證** |
+| 2 | VM／CT 的每張虛擬網卡有**自己的防火牆旗標**，要和總開關同時啟用才生效；叢集層、VM／CT 層的 `enable` 預設是 0，主機層預設是 1；各層 `policy_in`／`policy_out` 的預設值文件沒寫 | 上表 14 個旗標已開的 VM／CT（CT109 除外）。文件**沒寫** VM 層 `enable` 為 0 時的實際行為（目前沒有任何 `<VMID>.fw`）。**11/02 實測**：總開關啟用後，這 14 個 Guest 的 DNS、AD 與各服務網頁都正常，沒有被擋；推測 VM 層 `enable` 為 0 時不過濾（文件沒證實） |
 
 另外：`local_network` 預設就是整個服務網，所以「只啟用、不改規則」既不會限制使用者，又會讓 Ceph 出事。要限制管理來源，必須改 `local_network` 別名或管理 IP set。
 
-> 2026-10-15 的決定（[Fail2Ban 強化文件第 9 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-fail2ban-hardening/)）是「PVE Firewall 長期可選，設錯可能擋到 Corosync／Ceph」。今天的盤點**沒有推翻**這個決定，反而找到具體的擋法：Ceph 在服務網、5 個 VM／CT 旗標已開。
+> 2026-10-15 的決定（[Fail2Ban 強化文件第 9 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-fail2ban-hardening/)）是「PVE Firewall 長期可選，設錯可能擋到 Corosync／Ceph」。今天的盤點**沒有推翻**這個決定，反而找到具體的擋法：Ceph 在服務網、14 個 VM／CT 旗標已開。（11/02 更新：後來使用者決定啟用，做縮小版的階段 1a，見第 9 節與[啟用文章](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-firewall-stage1a-ceph-hardening/)。）
 
 ## 6. 選項比較
 
 | 選項 | 內容 | 風險 | 評估 |
 | --- | --- | --- | --- |
 | A. 維持現狀 | 8006 對服務網全開，靠 TOTP、Fail2Ban、SSH 金鑰 `from=` 限制 | 低 | 可接受；風險是 VM／CT 被入侵後有路徑打 8006 |
-| **B. `pveproxy` 的 `ALLOW_FROM`** | 只對 8006 加來源限制，先在一台節點試 | **低**（只影響 8006，SSH 仍可進節點還原） | **建議**；白名單盤點完成後再做 |
-| C. 完整 PVE Firewall | 節點、VM、CT、Ceph、Corosync 全部納入 | 高 | **目前不建議** |
+| B. `pveproxy` 的 `ALLOW_FROM` | 只對 8006 加來源限制，先在一台節點試 | 低（只影響 8006，SSH 仍可進節點還原） | 10/31 曾建議；**2026-11-02 取消**，此列保留作紀錄 |
+| C. 完整 PVE Firewall | 節點、VM、CT、Ceph、Corosync 全部納入 | 高 | 10/31 當時不建議；11/02 改做縮小版的階段 1a（第 9 節），沒有一次做完整版 |
 
 使用者只有管理員一人，所以「來源白名單」放的就是管理員自己的電腦；**電腦被入侵時，白名單擋不住**。B 真正防的是「VM、LXC 或其他有線設備被入侵後去打 8006」。
 
-### 6-1 B 的設定草稿（尚未套用）
+### 6-1 B 的設定草稿（已取消，保留作紀錄）
 
 ```text
 # /etc/default/pveproxy
@@ -197,7 +197,7 @@ POLICY="deny"
 | 現象 | 怎麼辦 |
 | --- | --- |
 | 想在叢集上建防火牆 VM 防橫向感染 | 先看第 3 節：同網段流量不經過它；先做主機層限制 |
-| 啟用 PVE Firewall 後 Ceph 或 VM 出問題 | 第 5 節兩個地雷：Ceph 不在自動放行清單、VM／CT 網卡旗標已開；啟用前先建立規則，且要有實體主控台 |
+| 啟用 PVE Firewall 後 Ceph 或 VM 出問題 | 第 5 節兩個地雷：Ceph 不在自動放行清單、VM／CT 網卡旗標已開；啟用前先建立規則；沒有實體主控台時先排自動保險，做法見[啟用文章](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-firewall-stage1a-ceph-hardening/) |
 | 盤點 SSH 來源，輸出只有 `108 for from` | `awk` 欄位取錯。用 `grep -oE 'Accepted [a-z-]+ for [^ ]+ from [0-9.]+' \| awk '{print $4, $6}'`，第 4 欄是帳號、第 6 欄是來源 IP |
 | `access.log` 只看到一台節點的來源 | 每台節點各自記錄，三台都要看，監控系統可能只連其中一台 |
 | 白名單的某個 IP 不認得 | **不要放進去**，先查清楚是誰（JT-IPAM、DHCP 租約表） |
@@ -205,19 +205,53 @@ POLICY="deny"
 
 ## 8. 待辦
 
-- [ ] 確認 192.0.2.54 是誰（是不是管理員電腦的舊 DHCP 位址）
-- [ ] 在數據機為管理員電腦做 DHCP 保留（或電腦手動固定 IP）
-- [ ] 三台節點各自的 `access.log` 來源排行、SSH 來源（修正版指令）、`/etc/default/pveproxy` 現況
+- [x] ~~確認 192.0.2.54 是誰（是不是管理員電腦的舊 DHCP 位址）~~：取消（2026-11-02）
+- [x] ~~在數據機為管理員電腦做 DHCP 保留（或電腦手動固定 IP）~~：取消（2026-11-02）
+- [x] ~~三台節點各自的 `access.log` 來源排行、SSH 來源（修正版指令）、`/etc/default/pveproxy` 現況~~：取消（2026-11-02）
 - [x] node10 的 `grep -E 'auth_(cluster|service|client)_required' /etc/pve/ceph.conf`：確認 Ceph 是否強制 `cephx`（2026-11-01 確認 `auth_client_required`、`auth_cluster_required`、`auth_service_required` 三項都是 `cephx`，所以 Ceph MON 在服務網連得到，並不等於不用認證就能存取）
-- [ ] 決定是否採用選項 B；採用時先在一台節點測試「允許的來源連得到、不在名單的來源被拒絕」，並備妥還原方式（⏳ 2026-10-31 暫停）
+- [x] ~~決定是否採用選項 B；採用時先在一台節點測試「允許的來源連得到、不在名單的來源被拒絕」，並備妥還原方式（⏳ 2026-10-31 暫停）~~：取消（2026-11-02）
 - [x] 數據機刪除 8006、3000 轉送規則後，從外部再測一次（2026-11-01 完成，見 4-3）
-- [ ] 評估 Corosync 增加第二條 link（可用性，不是資安；目前單一 link 在 SX1008）
+- [x] 評估 Corosync 增加第二條 link（可用性，不是資安；原本單一 link 在 SX1008）（2026-11-02 完成，見[新文章](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/corosync-second-link/)）
 - [ ] 對照官方規格表，確認 TL-SX1008、TL-SG108-M2 確實沒有網管功能
+- [ ] 管理員電腦固定 IP，之後才能縮小 8006／22／3128 的來源（階段 1b；使用者之後找時間設定，見第 9 節）
+- [ ] 階段 2、3：Guest 層規則（高價值 Guest 如 DC01、DC02 先），尚未開始
 
-## 9. 延伸閱讀
+## 9. 2026-11-02～03 補充：後來做了什麼
+
+> 第 1～8 節保留 10/31 當時的盤點與判斷；這一節記錄 11/02～03 之後的決定與實測。
+
+| 項目 | 決定／結果 |
+| --- | --- |
+| 目標 | 使用者想用防火牆擋「VM／CT 被入侵後的橫向移動」 |
+| `pveproxy` 來源限制（選項 B） | **取消（2026-11-02）** |
+| Ceph `public_network` 搬到叢集網 | **不搬，取消（2026-11-02）**（9-1） |
+| Corosync 第二條 link | **完成（2026-11-02）**，見[新文章](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/corosync-second-link/) |
+| PVE Firewall 階段 1a | **完成**：11/02 叢集層啟用，11/03 三台主機層全部生效；只收緊 Ceph 與沒用的埠，見[啟用文章](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-firewall-stage1a-ceph-hardening/) |
+| 階段 1b、2、3 | 尚未開始 |
+
+### 9-1 Ceph `public_network` 不搬（取消）
+
+曾經問過要不要把 Ceph `public_network` 從服務網搬到叢集網，目的是網路整理。**決定：不搬，取消（2026-11-02）**。依據兩點：
+
+1. 三台節點兩張網卡實測都是 2.5G（`ethtool` 的 nic0、nic1 皆 2500Mb/s），叢集網的 10G 交換器對節點沒有速度好處，搬了只是把兩條 2.5G 線上的流量合併成一條。
+2. PVE 官方文件沒有改 `public_network` 網段或 MON IP 的程序（只說 cluster network 之後可以搬）；Ceph 官方說既有 MON 不該改 IP。
+
+### 9-2 實測補充
+
+- 三台 `pve-firewall localnet` 的 `local_network` 都是整個服務網 /24（自動偵測）。所以啟用 PVE Firewall 後，同網段的 Guest 也算「本機網路」，可連 8006、22 等；**被入侵的 Guest → 節點這條路徑預設不會被擋**，階段 1a 也還沒擋（8006、22、3128 暫時對整個服務網 /24 開放），要等階段 1b 縮小來源。
+- Ceph MON（3300、6789）連線快照：11/03 在三台各看一次，連進本機 Ceph 埠的來源都只有三台節點自己（服務網與叢集網位址）。只是一個時間點、只看已建立的 TCP 連線；`ceph.conf` 沒有寫死的 `monhost`。
+- 啟用後 Ceph 的埠只放行三台節點；Ceph 的內部通訊（MON 在 quorum、OSD 都 up）沒有受影響。
+
+### 9-3 還沒做
+
+階段 1b（管理員電腦固定 IP 後，縮小 8006、22、3128 的來源）、階段 2、3（Guest 層規則）尚未開始；要不要做、怎麼做，以使用者當時的決定為準。
+
+## 10. 延伸閱讀
 
 - [Proxmox VE Firewall](https://pve.proxmox.com/pve-docs/chapter-pve-firewall.html)
 - [pveproxy 手冊（Host-based Access Control）](https://pve.proxmox.com/pve-docs/pveproxy.8.html)
 - [Ceph 網路設定參考](https://docs.ceph.com/en/latest/rados/configuration/network-config-ref/)
+- [啟用 PVE 防火牆（階段 1a）：只收緊 Ceph 與沒用的埠](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-firewall-stage1a-ceph-hardening/)
+- [Corosync 加第二條 link（備援）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/corosync-second-link/)
 - [不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wireguard-remote-access-replace-8006/)
 - [PVE 一直被嘗試登入：怎麼確認 Fail2Ban 真的有擋？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-fail2ban-hardening/)
