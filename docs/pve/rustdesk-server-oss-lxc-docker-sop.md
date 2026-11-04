@@ -66,7 +66,7 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | 4 | 部署 hbbs／hbbr | ✅ | 2026-11-04：兩容器穩定運行；21115／21116（tcp＋udp）／21117／21118／21119 皆在監聽；`data` 下自動產生 Key 與資料庫 |
 | 5 | 取得 Key、設定 Client | ✅ | 2026-11-04：UBClient 與 WinClient 先顯示「就緒」但連線出現「金鑰不符」；用 SHA256 比對發現兩台的 Key 與 Server 不同，重貼 `id_ed25519.pub` 後雜湊一致，UBClient → WinClient 連線成功（見 4-5） |
 | 6 | 防火牆與對外連線 | ✅ | 2026-11-04：CT 內 ufw 啟用，只放行 21115／21116（tcp＋udp）／21117；UBClient 實測 21115～21117 連得上、21118／21119 逾時；CT 重開後規則保留、容器自動啟動；ufw 啟用後兩台 Client 互連正常 |
-| 7 | 備份與 HA | ⏳ | 2026-11-04：既有排程已涵蓋；手動備份完成（protected）；還原成另一個 CT 後公鑰雜湊與原機一致；加入 HA 與遷移測試尚待執行 |
+| 7 | 備份與 HA | ⏳ | 2026-11-04：既有排程已涵蓋；手動備份完成（protected）；還原成另一個 CT 後公鑰雜湊與原機一致；已加入 HA（ct:115 started）；遷移測試尚待執行 |
 
 ## 4. 步驟
 
@@ -399,8 +399,6 @@ pct exec <新ID> -- sh -c "tr -d '\n' < /opt/rustdesk/data/id_ed25519.pub | sha2
 
 #### 4-7C 加入 HA
 
-⏳ 尚未執行：
-
 ```bash
 ha-manager add ct:115 --state started --max_restart 1 --max_relocate 1
 ha-manager status | grep ct:115
@@ -411,6 +409,11 @@ ha-manager status | grep ct:115
 | HA 條件 | rootfs 在共享儲存（本案為 Ceph RBD），其他節點才能接手 |
 | 規則 | 不需要互斥規則，RustDesk 只有這一台 |
 | 升級 | `cd /opt/rustdesk && docker compose pull && docker compose up -d`，升級前先備份 `data` |
+
+**本案實測**（2026-11-04）：
+
+- `ha-manager add ct:115 --state started --max_restart 1 --max_relocate 1` 後，`ha-manager status` 先顯示 `service ct:115 (node11, queued)`（CRM 尚未處理，過渡狀態），稍後變為 `started`；三台 LRM 維持 `active`；加入過程未重開 CT
+- ⏳ 手動遷移到其他節點後，容器、ufw 與 Client 連線是否正常，尚待驗證
 
 ## 5. 常見問題
 
