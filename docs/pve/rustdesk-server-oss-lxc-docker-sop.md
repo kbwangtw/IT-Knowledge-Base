@@ -16,8 +16,8 @@ last_modified_at: 2026-11-04
 | --- | --- |
 | 適合誰看 | 想在 PVE 自建遠端桌面中繼／註冊服務的人；第一次接觸 RustDesk 的人 |
 | 環境 | PVE 9.x；LXC（Ubuntu 22.04 範本，unprivileged）；Docker Compose；`rustdesk/rustdesk-server` 映像檔 |
-| 日期 | 2026-11-04（實作中） |
-| 結論 | ⏳ 實作進行中：已完成環境確認與範本下載（4-0）；其餘步驟依官方文件整理，**尚未實測**，完成後會換成實測結果 |
+| 日期 | 2026-11-04 |
+| 結論 | ✅ CT 115 完成 RustDesk Server OSS 部署：Docker Compose 跑 hbbs／hbbr、ufw 只放行必要 Port、兩台 Client 互連正常、PBS 備份與還原後 Key 一致、已加入 HA 並驗證遷移；⏳ VPN 使用者從外部連入、映像版本固定尚待處理 |
 | 官方文件 | [RustDesk Server OSS](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/)、[Docker 安裝](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/docker/)、[Client 設定](https://rustdesk.com/docs/en/self-host/client-configuration/) |
 
 > 文中 IP 都是文件示範位址（192.0.2.0/24），`<網域>` 請換成自己的網域，指令執行前請替換。
@@ -66,7 +66,7 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | 4 | 部署 hbbs／hbbr | ✅ | 2026-11-04：兩容器穩定運行；21115／21116（tcp＋udp）／21117／21118／21119 皆在監聽；`data` 下自動產生 Key 與資料庫 |
 | 5 | 取得 Key、設定 Client | ✅ | 2026-11-04：UBClient 與 WinClient 先顯示「就緒」但連線出現「金鑰不符」；用 SHA256 比對發現兩台的 Key 與 Server 不同，重貼 `id_ed25519.pub` 後雜湊一致，UBClient → WinClient 連線成功（見 4-5） |
 | 6 | 防火牆與對外連線 | ✅ | 2026-11-04：CT 內 ufw 啟用，只放行 21115／21116（tcp＋udp）／21117；UBClient 實測 21115～21117 連得上、21118／21119 逾時；CT 重開後規則保留、容器自動啟動；ufw 啟用後兩台 Client 互連正常 |
-| 7 | 備份與 HA | ⏳ | 2026-11-04：既有排程已涵蓋；手動備份完成（protected）；還原成另一個 CT 後公鑰雜湊與原機一致；已加入 HA（ct:115 started）；遷移測試尚待執行 |
+| 7 | 備份與 HA | ✅ | 2026-11-04：既有排程已涵蓋；手動備份完成（protected）；還原成另一個 CT 後公鑰雜湊與原機一致；已加入 HA（ct:115 started）；手動遷移後容器、ufw、Key 與 Client 連線驗證通過 |
 
 ## 4. 步驟
 
@@ -413,7 +413,7 @@ ha-manager status | grep ct:115
 **本案實測**（2026-11-04）：
 
 - `ha-manager add ct:115 --state started --max_restart 1 --max_relocate 1` 後，`ha-manager status` 先顯示 `service ct:115 (node11, queued)`（CRM 尚未處理，過渡狀態），稍後變為 `started`；三台 LRM 維持 `active`；加入過程未重開 CT
-- ⏳ 手動遷移到其他節點後，容器、ufw 與 Client 連線是否正常，尚待驗證
+- 手動遷移（`ha-manager migrate ct:115 node10`）完成後，hbbs／hbbr 容器、ufw 與公鑰雜湊驗證皆通過，Client 連線正常（遷移會讓 CT 短暫重啟，RustDesk 約有幾十秒不可用）
 
 ## 5. 常見問題
 
@@ -430,12 +430,11 @@ ha-manager status | grep ct:115
 
 ## 6. 待辦
 
-- [ ] 依本文實作並回填 4-1～4-7 的實測結果與日期
-- [ ] 確認 `id_ed25519.pub` 實際落在 `data` 的哪個位置
-- [ ] 確認 Docker 在 unprivileged LXC（PVE 9）的實際行為，必要時補充設定
-- [ ] 決定映像檔是否固定版本號，並記錄使用的版本
-- [ ] 決定外部連線方式（VPN 或公網轉發）並補防火牆規則
-- [ ] 完成 PBS 備份、還原測試與 HA 驗證
+- [ ] 從 VPN 連入，用內網 IP 做一次完整連線測試（先確認 VPN 的 `AllowedIPs` 涵蓋 Server 所在網段）
+- [ ] 把 `compose.yml` 的 `latest` 固定成版本 tag（目前實測為 hbbs 1.1.16；tag 名稱需先到 Docker Hub 確認）
+- [ ] 記錄 Client 連線型態（直連或中繼）
+- [ ] 取消手動備份的 protected 保護（不再需要時，到 PBS 操作）
+- [ ] 評估是否限制 ufw 放行來源（目前不限來源，僅內網與 VPN 可達）
 
 ## 7. 延伸閱讀
 
