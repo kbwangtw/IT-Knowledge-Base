@@ -65,7 +65,7 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | 3 | 容器內更新並安裝 Docker | ✅ | 2026-11-04：CT 內 `apt` 更新、時區 Asia/Taipei；Docker 安裝完成，`hello-world` 成功（nesting 有效） |
 | 4 | 部署 hbbs／hbbr | ✅ | 2026-11-04：兩容器穩定運行；21115／21116（tcp＋udp）／21117／21118／21119 皆在監聽；`data` 下自動產生 Key 與資料庫 |
 | 5 | 取得 Key、設定 Client | ✅ | 2026-11-04：UBClient 與 WinClient 先顯示「就緒」但連線出現「金鑰不符」；用 SHA256 比對發現兩台的 Key 與 Server 不同，重貼 `id_ed25519.pub` 後雜湊一致，UBClient → WinClient 連線成功（見 4-5） |
-| 6 | 防火牆與對外連線 | ⏳ | — |
+| 6 | 防火牆與對外連線 | ⏳ | 2026-11-04：CT 內 ufw 啟用，只放行 21115／21116（tcp＋udp）／21117；UBClient 實測 21115～21117 連得上、21118／21119 逾時；Client 重開後「就緒」與互連、CT 重開後規則是否保留尚待驗證 |
 | 7 | 備份與 HA | ⏳ | — |
 
 ## 4. 步驟
@@ -321,6 +321,35 @@ nc -zv 192.0.2.115 21117
 ```
 
 TCP 會顯示 succeeded；UDP 21116 用 `nc -zvu` 只能做參考，最準的是 Client 實際顯示「就緒」。
+
+**用 ufw 限制 Port（本案做法：內網加 VPN，不限來源，不做公網轉發）**：
+
+```bash
+apt install -y ufw
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 21115/tcp
+ufw allow 21116/tcp
+ufw allow 21116/udp
+ufw allow 21117/tcp
+ufw show added
+ufw enable
+ufw status verbose
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `default deny incoming` | 沒明說放行的進站連線全擋，21118、21119 也因此被擋 |
+| `allow 21116/tcp` 與 `21116/udp` | 兩個都要：UDP 負責 ID 註冊，TCP 負責連線 |
+| `ufw show added` | 啟用前先列出已加的規則，確認無誤再 `enable` |
+
+> 本案 CT 沒有放行 22（SSH）：管理一律從 PVE 節點用 `pct enter` 進入，不受 ufw 影響。hbbs／hbbr 用 `network_mode: host`，Port 直接綁在 CT 網路，所以 ufw 能管到；一般橋接模式的 `-p` 發佈 Port 可能繞過 ufw，兩者不同。
+
+**本案實測**（2026-11-04）：
+
+- unprivileged LXC 內 `ufw enable` 成功，`ufw status verbose` 顯示 `active`、開機自動啟用、`Default: deny (incoming), allow (outgoing)`，四條放行規則（IPv4／IPv6 各一組）
+- 從 UBClient 用 `nc -zv -w2` 測試：21115、21116、21117 `succeeded`；21118、21119 `timed out`（被擋）
+- ⏳ 容器在 ufw 啟用後仍為 `Up`、兩台 Client 重開後仍「就緒」且能互連、`pct reboot 115` 後規則保留，尚待驗證
 
 ### 4-7 備份與 HA
 
