@@ -64,7 +64,7 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | 3 | 容器內安裝 Docker | ⏳ | — |
 | 3 | 容器內更新並安裝 Docker | ✅ | 2026-11-04：CT 內 `apt` 更新、時區 Asia/Taipei；Docker 安裝完成，`hello-world` 成功（nesting 有效） |
 | 4 | 部署 hbbs／hbbr | ✅ | 2026-11-04：兩容器穩定運行；21115／21116（tcp＋udp）／21117／21118／21119 皆在監聽；`data` 下自動產生 Key 與資料庫 |
-| 5 | 取得 Key、設定 Client | ⏳ | — |
+| 5 | 取得 Key、設定 Client | ⏳ | 2026-11-04：測試 Client 填入 ID Server 與 Key 後，畫面底部顯示「就緒」；兩台 Client 互連尚未實測 |
 | 6 | 防火牆與對外連線 | ⏳ | — |
 | 7 | 備份與 HA | ⏳ | — |
 
@@ -253,6 +253,8 @@ cat /opt/rustdesk/data/id_ed25519.pub
 多台 Client 的省力做法：先設好一台 → **Export Server Config** → 在其他 Client 用 **Import Server Config** → Apply。命令列也可用 `rustdesk.exe --config <config-string>` 套用。
 
 **應該看到**：Client 主畫面底部顯示「就緒（Ready）」；兩台 Client 互相輸入對方 ID 可連線。
+
+**本案實測**（2026-11-04）：測試 Client 設定 ID Server（填 Server 的內網 IP）與 Key，中繼伺服器與 API 伺服器留空，主畫面底部顯示「就緒」。⏳ 兩台 Client 互相連線尚未實測。
 
 ### 4-6 防火牆與對外連線
 
