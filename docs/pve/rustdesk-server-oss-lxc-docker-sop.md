@@ -16,8 +16,8 @@ last_modified_at: 2026-11-04
 | --- | --- |
 | 適合誰看 | 想在 PVE 自建遠端桌面中繼／註冊服務的人；第一次接觸 RustDesk 的人 |
 | 環境 | PVE 9.x；LXC（Ubuntu 22.04 範本，unprivileged）；Docker Compose；`rustdesk/rustdesk-server` 映像檔 |
-| 日期 | 2026-11-04（草稿） |
-| 結論 | ⏳ 以官方文件整理的步驟，**尚未在本環境實測**；實作後請把每節的「應該看到」換成實測結果 |
+| 日期 | 2026-11-04（實作中） |
+| 結論 | ⏳ 實作進行中：已完成環境確認與範本下載（4-0）；其餘步驟依官方文件整理，**尚未實測**，完成後會換成實測結果 |
 | 官方文件 | [RustDesk Server OSS](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/)、[Docker 安裝](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/docker/)、[Client 設定](https://rustdesk.com/docs/en/self-host/client-configuration/) |
 
 > 文中 IP 都是文件示範位址（192.0.2.0/24），`<網域>` 請換成自己的網域，指令執行前請替換。
@@ -58,7 +58,8 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 
 | # | 步驟 | 狀態 | 實測紀錄 |
 | --- | --- | --- | --- |
-| 1 | 規劃 IP 與 Port | ⏳ | — |
+| 0 | 確認環境、下載範本 | ✅ | 2026-11-04：PVE 9.2.24、kernel 7.0.14-26-pve；cluster nextid 為 115；`local` 下載 Ubuntu 22.04 範本（124M，checksum OK） |
+| 1 | 規劃 IP 與 Port | ⏳ | 連線方式：內網＋VPN，不轉發公網 Port；需加入 HA |
 | 2 | 建立 LXC | ⏳ | — |
 | 3 | 容器內安裝 Docker | ⏳ | — |
 | 4 | 部署 hbbs／hbbr | ⏳ | — |
@@ -67,6 +68,38 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | 7 | 備份與 HA | ⏳ | — |
 
 ## 4. 步驟
+
+### 4-0 確認環境、下載範本
+
+**做什麼**：建 CT 之前，先確認 ID、儲存池、網路橋接與範本都就緒。
+
+**怎麼做**（在 PVE 節點 shell）：
+
+```bash
+pveversion
+pvesm status
+pvesh get /cluster/nextid
+pvesh get /cluster/resources --type vm --output-format json-pretty | grep -E '"vmid"|"name"|"node"'
+pveam update
+pveam available --section system | grep ubuntu-22.04
+pveam download local ubuntu-22.04-standard_22.04-1_amd64.tar.zst
+pveam list local
+```
+
+| 指令 | 意思 |
+| --- | --- |
+| `pvesh get /cluster/nextid` | 整個 cluster 內下一個可用 ID。`pct list` 只列本節點，會漏看別的節點的 CT |
+| `pvesh get /cluster/resources --type vm ...` | 列出全 cluster 的 VM／CT，確認 ID 沒被占用 |
+| `pveam update` / `available` | 更新並查詢可下載的 LXC 範本 |
+| `pveam download local ...` | 把範本下載到 `local`（節點本機），建 CT 時只讀一次 |
+
+**本案實測**（2026-11-04）：
+
+- PVE 9.2.24、kernel 7.0.14-26-pve；儲存池有 `VM_Pool`（RBD，可用約 1.4 TB）、`cephfs`、`local`、`local-lvm`、`PBS31`
+- 橋接為 `vmbr0`
+- cluster 內 ID 100～114 已使用，`nextid` 回 **115**，RustDesk 使用 CT 115
+- `local` 原本沒有範本，下載 `ubuntu-22.04-standard_22.04-1_amd64.tar.zst`（124M），`checksum verified`
+- rootfs 放 `VM_Pool`（共享儲存），之後才能加入 HA
 
 ### 4-1 規劃 IP 與 Port
 
@@ -90,15 +123,15 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 **怎麼做**（在 PVE 節點 shell；CT ID、儲存池、IP 請依環境替換）：
 
 ```bash
-pct create 120 local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
+pct create 115 local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
   --hostname rustdesk \
   --cores 2 --memory 1024 --swap 512 \
   --rootfs <儲存池>:16 \
-  --net0 name=eth0,bridge=vmbr0,ip=192.0.2.120/24,gw=192.0.2.1 \
+  --net0 name=eth0,bridge=vmbr0,ip=192.0.2.115/24,gw=192.0.2.1 \
   --unprivileged 1 \
   --features nesting=1,keyctl=1 \
   --onboot 1
-pct start 120
+pct start 115
 ```
 
 | 片段 | 意思 |
@@ -109,13 +142,13 @@ pct start 120
 | `--features nesting=1,keyctl=1` | 讓容器內能跑 Docker；`keyctl` 在 unprivileged 容器跑 Docker 時常需要 |
 | `--onboot 1` | PVE 開機時自動啟動 |
 
-**應該看到**：`pct status 120` 顯示 `status: running`；`pct enter 120` 進得去。
+**應該看到**：`pct status 115` 顯示 `status: running`；`pct enter 115` 進得去。
 
 ### 4-3 容器內安裝 Docker
 
 **做什麼**：安裝 Docker Engine 與 Compose plugin。
 
-**怎麼做**（`pct enter 120` 之後）：
+**怎麼做**（`pct enter 115` 之後）：
 
 ```bash
 apt update && apt install -y ca-certificates curl
@@ -196,7 +229,7 @@ cat /opt/rustdesk/data/id_ed25519.pub
 
 | 欄位 | 填什麼 |
 | --- | --- |
-| ID Server | hbbs 的 IP 或網域，例如 `192.0.2.120` 或 `<網域>`（預設 21116，可省略） |
+| ID Server | hbbs 的 IP 或網域，例如 `192.0.2.115` 或 `<網域>`（預設 21116，可省略） |
 | Relay Server | 選填；指 hbbr（21117），留空時 RustDesk 會自行推斷 |
 | API Server | OSS 版**不需要**（Pro 才用） |
 | Key | 上面讀到的 `id_ed25519.pub` 內容 |
@@ -212,7 +245,7 @@ cat /opt/rustdesk/data/id_ed25519.pub
 | 場景 | 做法 |
 | --- | --- |
 | 只在內網用 | 內網防火牆放行 21115～21117（21116 含 UDP）即可 |
-| 要讓外網連 | 邊界防火牆／路由器把 21115～21117 轉發到 `192.0.2.120`（21116 要 TCP＋UDP）；有條件的話限制來源 IP |
+| 要讓外網連 | 邊界防火牆／路由器把 21115～21117 轉發到 `192.0.2.115`（21116 要 TCP＋UDP）；有條件的話限制來源 IP |
 | 走 VPN | 讓外部 Client 先連 VPN，再用內網 IP 連 RustDesk，可不開公網 Port（建議做法，**屬建議、未實測**） |
 
 > 若 PVE 資料中心防火牆已啟用，要為這台 CT 補上對應規則，否則 Client 連不到。
@@ -220,9 +253,9 @@ cat /opt/rustdesk/data/id_ed25519.pub
 **驗證**（在另一台機器上）：
 
 ```bash
-nc -zv 192.0.2.120 21115
-nc -zv 192.0.2.120 21116
-nc -zv 192.0.2.120 21117
+nc -zv 192.0.2.115 21115
+nc -zv 192.0.2.115 21116
+nc -zv 192.0.2.115 21117
 ```
 
 TCP 會顯示 succeeded；UDP 21116 用 `nc -zvu` 只能做參考，最準的是 Client 實際顯示「就緒」。
@@ -233,7 +266,7 @@ TCP 會顯示 succeeded；UDP 21116 用 `nc -zvu` 只能做參考，最準的是
 
 | 項目 | 做法 |
 | --- | --- |
-| 備份 | 把 CT 120 加入 PBS／vzdump 排程（`data` 在 CT 內，一併備份） |
+| 備份 | 把 CT 115 加入 PBS／vzdump 排程（`data` 在 CT 內，一併備份） |
 | 還原測試 | 還原成另一個 CT ID，確認 `/opt/rustdesk/data/id_ed25519.pub` 與原本一致 |
 | HA | 若 rootfs 在共享儲存（如 Ceph RBD），可加入 HA；Key 不變 Client 才不用重設 |
 | 升級 | `cd /opt/rustdesk && docker compose pull && docker compose up -d`，升級前先備份 `data` |
