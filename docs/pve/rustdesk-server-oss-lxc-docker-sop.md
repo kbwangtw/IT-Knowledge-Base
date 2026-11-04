@@ -50,7 +50,7 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | --- | --- |
 | 要不要對外網開放 | 只在內網／VPN 用最安全；要讓外面的人連，需要固定公網 IP 或網域，並在邊界防火牆轉發 Port。是否沿用既有的 WireGuard 入口，請依自己的環境決定 |
 | 內網用網域還是 IP | Client 可以直接填 IP；用網域較好維護，但內網解析要正確。內網兩端若出現連不上，請見「常見問題」的 NAT loopback |
-| 21118／21119 要不要開 | 只有用 Web Client 才需要。官方警告：這兩個 Port 開著時，hbbs／hbbr 會信任 `X-Real-IP`、`X-Forwarded-For` 標頭而不驗證；要用的話只放在反向代理後面並用防火牆限制，**不用就保持關閉** |
+| 21118／21119 要不要開 | 只有用 Web Client 才需要。官方警告：這兩個 Port 開著時，hbbs／hbbr 會信任 `X-Real-IP`、`X-Forwarded-For` 標頭而不驗證；要用的話只放在反向代理後面並用防火牆限制，**不用就不要放行**。注意：本案實測這兩個 Port 預設就會監聽，所以要靠防火牆擋，不是不設定就關閉 |
 | Key 與 `data` 目錄 | `data` 目錄裡有 Server 的私鑰，遺失或重建後所有 Client 都要重填新 Key。備份 CT 時務必一併涵蓋 |
 | 開源版沒有管理介面 | 不能在網頁上看裝置清單、做權限控管；需要這些要評估 Pro |
 
@@ -64,7 +64,7 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | 3 | 容器內安裝 Docker | ⏳ | — |
 | 3 | 容器內更新並安裝 Docker | ✅ | 2026-11-04：CT 內 `apt` 更新、時區 Asia/Taipei；Docker 安裝完成，`hello-world` 成功（nesting 有效） |
 | 4 | 部署 hbbs／hbbr | ✅ | 2026-11-04：兩容器穩定運行；21115／21116（tcp＋udp）／21117／21118／21119 皆在監聽；`data` 下自動產生 Key 與資料庫 |
-| 5 | 取得 Key、設定 Client | ⏳ | 2026-11-04：測試 Client 填入 ID Server 與 Key 後，畫面底部顯示「就緒」；兩台 Client 互連尚未實測 |
+| 5 | 取得 Key、設定 Client | ✅ | 2026-11-04：UBClient 與 WinClient 先顯示「就緒」但連線出現「金鑰不符」；用 SHA256 比對發現兩台的 Key 與 Server 不同，重貼 `id_ed25519.pub` 後雜湊一致，UBClient → WinClient 連線成功（見 4-5） |
 | 6 | 防火牆與對外連線 | ⏳ | — |
 | 7 | 備份與 HA | ⏳ | — |
 
@@ -239,7 +239,7 @@ ls /opt/rustdesk/data
 cat /opt/rustdesk/data/id_ed25519.pub
 ```
 
-> 官方文件說公鑰「通常在 hbbs 第一次執行時產生」並存成 `id_ed25519.pub`；官方 Docker 頁沒寫明路徑，所以請以 `ls` 看到的為準。**不要貼出私鑰（`id_ed25519`）**，文章與工單裡也不要貼真實 Key。
+> 官方文件說公鑰「通常在 hbbs 第一次執行時產生」並存成 `id_ed25519.pub`；本案實測位於 `/opt/rustdesk/data/`。**不要貼出私鑰（`id_ed25519`）**，文章與工單裡也不要貼真實 Key。
 
 在 Client：選單（⋮）→ **網路（Network）** → 解鎖 → 填入：
 
@@ -254,7 +254,51 @@ cat /opt/rustdesk/data/id_ed25519.pub
 
 **應該看到**：Client 主畫面底部顯示「就緒（Ready）」；兩台 Client 互相輸入對方 ID 可連線。
 
-**本案實測**（2026-11-04）：測試 Client 設定 ID Server（填 Server 的內網 IP）與 Key，中繼伺服器與 API 伺服器留空，主畫面底部顯示「就緒」。⏳ 兩台 Client 互相連線尚未實測。
+> **「就緒」不代表 Key 正確。** 「就緒」只表示 Client 成功向 hbbs 註冊，註冊時不驗證 Key；發起連線時才會比對，Key 不對會出現「金鑰不符」。所以設定完一定要做下面的雜湊比對與實際連線測試。
+
+**驗證 Key 是否一致（不用貼出 Key）**：三個地方各算一次 SHA256 前 12 碼，必須完全相同。雜湊無法還原出 Key，只取前 12 碼，可以放心貼在工單裡。
+
+Server（CT 內）：
+
+```bash
+tr -d '\n' < /opt/rustdesk/data/id_ed25519.pub | sha256sum | cut -c1-12
+```
+
+Linux Client：
+
+```bash
+grep '^key' ~/.config/rustdesk/RustDesk2.toml | awk -F"'" '{printf "%s", $2}' | sha256sum | cut -c1-12
+```
+
+Windows Client（PowerShell）：
+
+```powershell
+$k = ((Select-String -Path "$env:APPDATA\RustDesk\config\RustDesk2.toml" -Pattern '^key').Line -replace "^key\s*=\s*'","") -replace "'$",""
+[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($k))).Replace("-","").Substring(0,12).ToLower()
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `tr -d '\n'` | 去掉換行，只算 Key 本身 |
+| `sha256sum \| cut -c1-12` | 取 SHA256 前 12 碼當指紋 |
+| `awk -F"'" '{printf "%s", $2}'` | 設定檔的 `key = '…'` 取單引號中間的內容 |
+| PowerShell 兩個 `-replace` | 去掉 `key = '` 與結尾的 `'` |
+
+**Client 設定檔位置**（本案實測）：
+
+| 系統 | 路徑 | 備註 |
+| --- | --- | --- |
+| Linux | `~/.config/rustdesk/RustDesk2.toml` | 使用者設定；服務（root）設定位置未確認 |
+| Windows（使用者） | `%APPDATA%\RustDesk\config\RustDesk2.toml` | 已確認 |
+| Windows（服務） | `C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config\RustDesk2.toml` | 已確認；兩份的 `rendezvous_server` 與 `key` 要一致 |
+
+**本案實測**（2026-11-04）：
+
+- 測試 Client 設定 ID Server（填 Server 的內網 IP）與 Key，中繼伺服器與 API 伺服器留空，主畫面底部顯示「就緒」
+- 兩台 VM（UBClient、WinClient）都顯示「就緒」，hbbs 的 `peer` 表有兩筆 ID，但 UBClient → WinClient 連線出現「金鑰不符」
+- 雜湊比對：Server `42ce40056630`；兩台 Client 皆為 `5c7441f484c1`。兩台 Client 的 Key 一致，但都不是 Server 目前的公鑰（Key 來源未查明）
+- 兩台重新貼上 Server 的 `id_ed25519.pub` 並套用後，雜湊皆與 Server 一致，UBClient → WinClient 連線成功
+- ⏳ 連線型態（直連或中繼）與反方向連線尚未記錄
 
 ### 4-6 防火牆與對外連線
 
@@ -296,6 +340,7 @@ TCP 會顯示 succeeded；UDP 21116 用 `nc -zvu` 只能做參考，最準的是
 | `docker run` 在 LXC 內失敗，出現權限或 `sysctl`／`AppArmor` 相關錯誤 | 確認 CT 的 `features` 有 `nesting=1,keyctl=1`，改完要重開 CT；仍失敗時查 PVE 版本與 Docker 的相容說明（**未確認**具體原因，請貼實際錯誤訊息再判斷） |
 | Client 一直顯示「正在連接」或「就緒」不亮 | 先查 21116 的 **UDP** 是否放行；再確認 ID Server 填對、Key 與 `id_ed25519.pub` 完全一致 |
 | 可以註冊但連線很慢、一直走中繼 | 直連打洞失敗是正常現象（對稱型 NAT 等），會自動走 hbbr；確認 21117/tcp 通 |
+| Client 都顯示「就緒」，連線卻出現「金鑰不符」 | 「就緒」不驗證 Key。用 SHA256 前 12 碼比對 Server 的 `id_ed25519.pub` 與各 Client 設定檔裡的 `key`（見 4-5）；不一致就把 Server 的公鑰重新貼到 Client 的「網路」頁並套用，Windows 要連服務那份設定也一併確認 |
 | 在同一個內網、用網域連不上 | 可能是路由器不支援 NAT loopback；內網改填內網 IP，或設定內網 DNS 指向內網位址。官方有專文介紹 NAT loopback 問題 |
 | 重建容器後所有 Client 都要重設 Key | `data` 目錄沒掛載或被刪，Server 重新產生了新 Key；從備份還原 `data` 即可 |
 | 21118／21119 被掃描或濫用的疑慮 | 不用 Web Client 就不要開；要用就放在反向代理後面並以防火牆限制 |
