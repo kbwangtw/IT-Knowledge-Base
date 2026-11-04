@@ -4,7 +4,7 @@ title: "不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家"
 permalink: /docs/pve/wireguard-remote-access-replace-8006/
 date: 2026-10-12
 categories: [PVE, WireGuard, VPN, Security, Network]
-last_modified_at: 2026-11-03
+last_modified_at: 2026-11-04
 ---
 
 # 不再把 PVE 8006 開到網際網路：改用 WireGuard 連回家
@@ -15,8 +15,8 @@ last_modified_at: 2026-11-03
 | --- | --- |
 | 適合誰看 | 為了在外面管理 PVE 而開了 port forward 的人；想用 WireGuard 連回家的人 |
 | 環境 | PVE 9.2.21；ct:109 為 Debian 13 + WireGuard + WGDashboard；中華電信光世代數據機（固定 IP） |
-| 日期 | 2026-10-12 建置；10/13 停用 8006、加上監控；10/15 啟用 2FA；11/03 升級 WGDashboard 到 v4.3.4 |
-| 結論 | ✅ iPhone（4G/5G）與筆電經 VPN 開得到 PVE；✅ 8006 轉送已停用並從外部確認；✅ VPN 異常與整台停機都會寄信；✅ WGDashboard 啟用 TOTP ✅ WGDashboard 已升到 v4.3.4（跨過 v4.3.2 安全更新） |
+| 日期 | 2026-10-12 建置；10/13 停用 8006、加上監控；10/15 啟用 2FA；11/03 升級 WGDashboard 到 v4.3.4；11/04 相依套件改用官方 PyPI 重建 |
+| 結論 | ✅ iPhone（4G/5G）與筆電經 VPN 開得到 PVE；✅ 8006 轉送已停用並從外部確認；✅ VPN 異常與整台停機都會寄信；✅ WGDashboard 啟用 TOTP ✅ WGDashboard 已升到 v4.3.4（跨過 v4.3.2 安全更新） ✅ 相依套件已改用官方 PyPI 重建 |
 
 > 文中內網位址為示範值（198.51.100.0/24）；不公開對外 IP 與任何金鑰。
 
@@ -627,21 +627,43 @@ ss -lnt | grep 10086
 
 > 用 `systemctl` 而不是 `./wgd.sh start`，是為了讓 systemd 和實際的程序狀態一致。第 13-1 節確認過停止 WGDashboard 只停網頁介面，wg0 由核心獨立運作；這次升級與重啟後 `wg show interfaces` 仍有 `wg0`。
 
-### 14-6 相依套件預設從第三方鏡像下載
+### 14-6 相依套件的來源：預設鏡像與改用官方 PyPI 重建（11/04）
 
-`./wgd.sh update` 內部會執行安裝，並列出一份 PyPI 鏡像清單；**預設選了 `mirrors.aliyun.com`（阿里雲）**（腳本挑延遲最低的），所以這次的 Python 相依套件不是從 `pypi.org` 下載的。
+`./wgd.sh update`、`./wgd.sh install` 都會列出一份 PyPI 鏡像清單，**預設選延遲最低的（這次是 `mirrors.aliyun.com`，阿里雲）**，不是 `pypi.org`。
 
 | 項目 | 說明 |
 | --- | --- |
+| 11/03 升級時 | 沿用 2026-02-24 建立的舊 `venv`；`pip` 對已裝好的套件會跳過，所以那次從阿里雲下載的只有當時有變動的少數套件（推測，依 `venv` 建立日期與舊套件版本判斷） |
 | 有證據被竄改嗎 | 沒有，也無法在這裡驗證 |
-| 風險 | 阿里雲是大型公開鏡像，風險低但不是零；ct:109 存著 WireGuard 金鑰，相依套件是供應鏈的一環 |
-| 要更保守 | 驗證都正常之後，重跑 `./wgd.sh install`，出現鏡像選單時選 `[1] https://pypi.org/simple/`，讓相依套件從官方 PyPI 重裝（**尚未做**） |
+| 為什麼還是換 | 阿里雲是大型公開鏡像，風險低但不是零；ct:109 存著 WireGuard 金鑰，相依套件是供應鏈的一環，少一層第三方比較保守 |
+| **重點** | 只重跑 `./wgd.sh install` **不會**換掉已裝好的套件；要把舊 `venv` 改名、重建，才會全部從官方 PyPI 重新下載 |
+
+**做法（11/04）**：
+
+| 步驟 | 指令（在 ct:109 所在節點） | 說明 |
+| --- | --- | --- |
+| 0 | `pct snapshot 109 pre-pypi-reinstall-20261104`；`pct exec 109 -- bash -c '/etc/wgdashboard/src/venv/bin/pip freeze > /root/pip-before.txt'` | 先拍快照，並記下目前的套件清單（60 個） |
+| 1 | `pct exec 109 -- systemctl stop wg-dashboard`；`pct exec 109 -- mv /etc/wgdashboard/src/venv /etc/wgdashboard/src/venv.old` | 停掉網頁服務、舊環境改名當退路；`wg0` 隧道不受影響（第 13-1 節） |
+| 2 | `pct enter 109`，`cd /etc/wgdashboard/src`，**手動輸入** `./wgd.sh install`，選單出現後輸入 `1` | 選 `https://pypi.org/simple/` |
+| 3 | `pip freeze` 與步驟 0 的清單 `diff` | 看版本差異與套件增減 |
+| 4 | `pct exec 109 -- systemctl start wg-dashboard`，驗證 | `active (running)`、`wg0`、10086、登入、手機 4G 連 VPN |
+| 5 | 確認正常後，刪快照與舊環境 | 見 14-7 |
+
+**看到的結果**：
+
+- 選單選 `1` 之後，輸出 `Will download Python packages from https://pypi.org/simple/`，並出現 `Creating Python Virtual Environment under ./venv`（升級那次沒有這一行，因為沿用舊環境）。
+- 套件 60 → 59 個：約 20 個升到較新版本（例如 `certifi`、`urllib3`、`Werkzeug`、`click`、`chardet`），**沒有新增任何套件名稱**，只少了 `greenlet`。`requirements.txt` 沒有 `greenlet`、SQLAlchemy 2.1.6 的 `Requires` 只有 `typing-extensions`，所以它是舊環境的殘留，新環境不需要。
+- 版本變新是因為重建抓「當下最新」；版本比對只能看版本號，**驗證不了套件內容**。
+- 啟動後 `systemctl status` 是 `active (running)`，10086 監聽，登入頁有 OTP 欄位，可以登入，手機 4G 連得回內網。
+
+> ⚠️ **第一次沒選到 `pypi.org`**：操作時把 `cd` 與 `./wgd.sh install` 兩行一起貼上，貼上的結尾換行被選單當成 Enter，自動採用預設的阿里雲。於是先把這次建好的 `venv` 改名（`venv.aliyun`），再**一行一行手動輸入**重做。互動式指令不要用貼上。
 
 ### 14-7 收尾
 
-- [ ] 觀察 1～2 天沒問題後，刪除快照：`pct delsnapshot 109 pre-wgd-upgrade-20261103`
-- [ ] 刪除 CT 內的 `/root/wg-backup-20261103.tgz`（含金鑰）
-- [ ] （可選）用官方 PyPI 重裝相依套件（見 14-6）
+- [x] 刪除快照 `pre-wgd-upgrade-20261103`（2026-11-04 完成）
+- [x] 刪除 CT 內的 `/root/wg-backup-20261103.tgz`（含金鑰；2026-11-04 完成）
+- [x] 用官方 PyPI 重建 `venv`（2026-11-04 完成，見 14-6）
+- [x] 刪除 `pre-pypi-reinstall-20261104` 快照、`venv.old`、`venv.aliyun`、`/root/pip-before.txt`、`/root/pip-after.txt`（2026-11-04 完成）
 - [ ] 之後 10086 若要縮小到只讓管理員電腦連，可以放進 PVE 防火牆階段 2 的 Guest 層規則（尚未做）
 
 ## 15. 常見問題
@@ -660,8 +682,11 @@ ss -lnt | grep 10086
 | `grep DASHBOARD_VERSION /etc/wgdashboard/src/dashboard.py` 沒有輸出 | v4.3.4 的版本號不在這個位置；看登入頁頁尾或設定頁顯示的版本 |
 | `./wgd.sh update` 停下來問 Y/N | 要用 `pct enter 109` 進互動式 shell；`pct exec` 一行帶過會卡住 |
 | 升完腳本說「Enter ./wgd.sh start」 | 服務由 systemd 管，用 `systemctl restart wg-dashboard`（第 14-5 節） |
-| 升級時預設用了阿里雲的 PyPI 鏡像 | 見第 14-6 節，可事後改用官方 PyPI 重裝 |
+| 升級時預設用了阿里雲的 PyPI 鏡像 | 見第 14-6 節，11/04 已改用官方 PyPI 重建 |
 | Python 版本比 3.12 低 | v4.3.3 起不支援；要先刪 `src` 裡的 `venv`、升 Python，再 `./wgd.sh install` 與 `./wgd.sh update` |
+| `./wgd.sh install` 的鏡像選單沒等我輸入就用了預設 | 貼上多行指令時，結尾的換行會被互動式提示當成 Enter；互動式指令要**一行一行手動輸入**，等選單出現再輸入編號 |
+| 想讓相依套件換成官方 PyPI | 只重跑 `./wgd.sh install` 不會換掉已裝好的套件（`pip` 會跳過）；要把舊 `venv` 改名、重建（第 14-6 節） |
+| 重建 `venv` 後套件版本變新、少了某些套件 | 重建會抓當下最新版；舊環境殘留的套件（例如 `greenlet`）消失是正常的，先確認 `requirements.txt` 沒有它 |
 
 ## 16. 延伸閱讀
 
