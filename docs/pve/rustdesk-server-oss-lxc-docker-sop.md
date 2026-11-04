@@ -1,0 +1,270 @@
+---
+layout: default
+title: "在 PVE 用 LXC + Docker 架設 RustDesk Server（開源版）"
+date: 2026-11-04
+categories: [PVE, LXC, Docker, RustDesk]
+permalink: /docs/pve/rustdesk-server-oss-lxc-docker-sop/
+last_modified_at: 2026-11-04
+---
+{% raw %}
+
+# 在 PVE 用 LXC + Docker 架設 RustDesk Server（開源版）
+
+> **一句話**：RustDesk 是開源的遠端桌面軟體；自己架一台 Server（hbbs + hbbr），遠端連線就不用經過別人的伺服器。這篇在 PVE 建一台 LXC，用 Docker Compose 跑 RustDesk Server OSS，再讓 Client 指到自己的 Server。
+
+| 項目 | 內容 |
+| --- | --- |
+| 適合誰看 | 想在 PVE 自建遠端桌面中繼／註冊服務的人；第一次接觸 RustDesk 的人 |
+| 環境 | PVE 9.x；LXC（Ubuntu 22.04 範本，unprivileged）；Docker Compose；`rustdesk/rustdesk-server` 映像檔 |
+| 日期 | 2026-11-04（草稿） |
+| 結論 | ⏳ 以官方文件整理的步驟，**尚未在本環境實測**；實作後請把每節的「應該看到」換成實測結果 |
+| 官方文件 | [RustDesk Server OSS](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/)、[Docker 安裝](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/docker/)、[Client 設定](https://rustdesk.com/docs/en/self-host/client-configuration/) |
+
+> 文中 IP 都是文件示範位址（192.0.2.0/24），`<網域>` 請換成自己的網域，指令執行前請替換。
+
+## 1. 先認識幾個名詞
+
+| 名詞 | 白話解釋 | 預設 Port |
+| --- | --- | --- |
+| **hbbs** | ID／Rendezvous Server：讓 Client 登記自己的 ID、互相「找到對方」、協助穿透 NAT | 21115/tcp、21116/tcp+udp、（選用）21118/tcp |
+| **hbbr** | Relay Server：兩台機器無法直連時，由它中繼流量 | 21117/tcp、（選用）21119/tcp |
+| **Key（id_ed25519.pub）** | hbbs 第一次啟動自動產生的公鑰；Client 填了才會加密並只連你的 Server | — |
+| **NAT 穿透（hole punching）** | 兩端各在路由器後面，先試著打洞直連；失敗才走 hbbr 中繼 | — |
+| **OSS 與 Pro** | OSS 免費、只有 hbbs／hbbr；Web 管理介面、API、OIDC、LDAP、2FA、裝置管理屬於 Pro（付費） | — |
+| **LXC／CT** | 輕量容器，和 PVE 主機共用 Linux kernel | — |
+| **Docker Compose** | 用一個 `compose.yml` 描述並啟動多個容器 | — |
+
+```text
+Client A ──21116──▶ hbbs（登記 ID、協助打洞）◀──21116── Client B
+    │                                                      │
+    └──────── 直連成功：A ◀────────────▶ B ────────────────┘
+    │
+    └── 直連失敗 ──21117──▶ hbbr（中繼）◀──21117── Client B
+
+hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
+```
+
+## 2. 開工前先決定的事（風險與盲點）
+
+| 項目 | 說明 |
+| --- | --- |
+| 要不要對外網開放 | 只在內網／VPN 用最安全；要讓外面的人連，需要固定公網 IP 或網域，並在邊界防火牆轉發 Port。是否沿用既有的 WireGuard 入口，請依自己的環境決定 |
+| 內網用網域還是 IP | Client 可以直接填 IP；用網域較好維護，但內網解析要正確。內網兩端若出現連不上，請見「常見問題」的 NAT loopback |
+| 21118／21119 要不要開 | 只有用 Web Client 才需要。官方警告：這兩個 Port 開著時，hbbs／hbbr 會信任 `X-Real-IP`、`X-Forwarded-For` 標頭而不驗證；要用的話只放在反向代理後面並用防火牆限制，**不用就保持關閉** |
+| Key 與 `data` 目錄 | `data` 目錄裡有 Server 的私鑰，遺失或重建後所有 Client 都要重填新 Key。備份 CT 時務必一併涵蓋 |
+| 開源版沒有管理介面 | 不能在網頁上看裝置清單、做權限控管；需要這些要評估 Pro |
+
+## 3. 進度表
+
+| # | 步驟 | 狀態 | 實測紀錄 |
+| --- | --- | --- | --- |
+| 1 | 規劃 IP 與 Port | ⏳ | — |
+| 2 | 建立 LXC | ⏳ | — |
+| 3 | 容器內安裝 Docker | ⏳ | — |
+| 4 | 部署 hbbs／hbbr | ⏳ | — |
+| 5 | 取得 Key、設定 Client | ⏳ | — |
+| 6 | 防火牆與對外連線 | ⏳ | — |
+| 7 | 備份與 HA | ⏳ | — |
+
+## 4. 步驟
+
+### 4-1 規劃 IP 與 Port
+
+**做什麼**：替這台 Server 準備一個固定 IP，並列出要開放的 Port。
+
+| Port | 協定 | 用途 | 是否必開 |
+| --- | --- | --- | --- |
+| 21115 | TCP | NAT 類型測試 | 必開 |
+| 21116 | TCP **和** UDP | ID 註冊／心跳（UDP）、打洞與連線（TCP） | 必開 |
+| 21117 | TCP | Relay 中繼 | 必開 |
+| 21118 | TCP | Web Client（選用） | 不用就關 |
+| 21119 | TCP | Web Client（選用） | 不用就關 |
+| 21114 | TCP | Web 管理介面 | 僅 Pro 使用，OSS 不需要 |
+
+> 21116 一定要 TCP 與 UDP 都通，是最常漏掉的地方。
+
+### 4-2 在 PVE 建立 LXC
+
+**做什麼**：建一台 unprivileged LXC，並開啟 `nesting`（Docker 跑在 LXC 內需要）。
+
+**怎麼做**（在 PVE 節點 shell；CT ID、儲存池、IP 請依環境替換）：
+
+```bash
+pct create 120 local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
+  --hostname rustdesk \
+  --cores 2 --memory 1024 --swap 512 \
+  --rootfs <儲存池>:16 \
+  --net0 name=eth0,bridge=vmbr0,ip=192.0.2.120/24,gw=192.0.2.1 \
+  --unprivileged 1 \
+  --features nesting=1,keyctl=1 \
+  --onboot 1
+pct start 120
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `--cores 2 --memory 1024` | 本案預估值（**推測**）：hbbs／hbbr 很輕量，連線數多了再加 |
+| `--rootfs <儲存池>:16` | 16 GB 系統碟，放 Docker 映像檔與 `data` 綽綽有餘 |
+| `--unprivileged 1` | 非特權容器，安全性較好 |
+| `--features nesting=1,keyctl=1` | 讓容器內能跑 Docker；`keyctl` 在 unprivileged 容器跑 Docker 時常需要 |
+| `--onboot 1` | PVE 開機時自動啟動 |
+
+**應該看到**：`pct status 120` 顯示 `status: running`；`pct enter 120` 進得去。
+
+### 4-3 容器內安裝 Docker
+
+**做什麼**：安裝 Docker Engine 與 Compose plugin。
+
+**怎麼做**（`pct enter 120` 之後）：
+
+```bash
+apt update && apt install -y ca-certificates curl
+curl -fsSL https://get.docker.com | sh
+docker --version
+docker compose version
+```
+
+> `get.docker.com` 是 Docker 官方的便利安裝腳本，適合測試與內網；正式環境想完全掌控版本，請改用 [官方 apt repository 安裝](https://docs.docker.com/engine/install/ubuntu/)。
+
+**應該看到**：兩個 `version` 指令都有輸出；`docker run --rm hello-world` 能成功（若失敗，見「常見問題」）。
+
+### 4-4 部署 hbbs／hbbr
+
+**做什麼**：建立 `compose.yml`，用 host 網路跑 hbbs 與 hbbr。
+
+**怎麼做**：
+
+```bash
+mkdir -p /opt/rustdesk && cd /opt/rustdesk
+cat > compose.yml <<'EOF'
+services:
+  hbbs:
+    container_name: hbbs
+    image: rustdesk/rustdesk-server:latest
+    command: hbbs
+    volumes:
+      - ./data:/root
+    network_mode: "host"
+    depends_on:
+      - hbbr
+    restart: unless-stopped
+
+  hbbr:
+    container_name: hbbr
+    image: rustdesk/rustdesk-server:latest
+    command: hbbr
+    volumes:
+      - ./data:/root
+    network_mode: "host"
+    restart: unless-stopped
+EOF
+docker compose up -d
+docker compose ps
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `./data:/root` | 把主機的 `data` 目錄掛進容器，Key 與資料庫都存在這裡，重建容器不會遺失 |
+| `network_mode: "host"` | 官方建議 Linux 使用；容器直接用主機網路，免去逐一對應 Port（僅 Linux 有效） |
+| `restart: unless-stopped` | 容器異常或主機重開後自動拉起 |
+| `latest` | 方便但版本會變動；正式環境建議改成固定版本號（**推測**：到 Docker Hub 查最新 tag） |
+
+> 若想強制所有連線都走中繼（不嘗試直連），官方做法是在 `hbbs` 加上 `environment: - ALWAYS_USE_RELAY=Y`。一般不需要。
+
+**應該看到**：`docker compose ps` 兩個容器都是 `running`；用下列指令確認 Port 有在監聽：
+
+```bash
+ss -tulnp | grep -E '2111[5-9]'
+```
+
+預期至少看到 21115/tcp、21116/tcp、21116/udp、21117/tcp。
+
+### 4-5 取得 Key 並設定 Client
+
+**做什麼**：讀出公鑰，填進每台 Client。
+
+**怎麼做**：
+
+```bash
+ls /opt/rustdesk/data
+cat /opt/rustdesk/data/id_ed25519.pub
+```
+
+> 官方文件說公鑰「通常在 hbbs 第一次執行時產生」並存成 `id_ed25519.pub`；官方 Docker 頁沒寫明路徑，所以請以 `ls` 看到的為準。**不要貼出私鑰（`id_ed25519`）**，文章與工單裡也不要貼真實 Key。
+
+在 Client：選單（⋮）→ **網路（Network）** → 解鎖 → 填入：
+
+| 欄位 | 填什麼 |
+| --- | --- |
+| ID Server | hbbs 的 IP 或網域，例如 `192.0.2.120` 或 `<網域>`（預設 21116，可省略） |
+| Relay Server | 選填；指 hbbr（21117），留空時 RustDesk 會自行推斷 |
+| API Server | OSS 版**不需要**（Pro 才用） |
+| Key | 上面讀到的 `id_ed25519.pub` 內容 |
+
+多台 Client 的省力做法：先設好一台 → **Export Server Config** → 在其他 Client 用 **Import Server Config** → Apply。命令列也可用 `rustdesk.exe --config <config-string>` 套用。
+
+**應該看到**：Client 主畫面底部顯示「就緒（Ready）」；兩台 Client 互相輸入對方 ID 可連線。
+
+### 4-6 防火牆與對外連線
+
+**做什麼**：只放行必要的 Port，並限制來源。
+
+| 場景 | 做法 |
+| --- | --- |
+| 只在內網用 | 內網防火牆放行 21115～21117（21116 含 UDP）即可 |
+| 要讓外網連 | 邊界防火牆／路由器把 21115～21117 轉發到 `192.0.2.120`（21116 要 TCP＋UDP）；有條件的話限制來源 IP |
+| 走 VPN | 讓外部 Client 先連 VPN，再用內網 IP 連 RustDesk，可不開公網 Port（建議做法，**屬建議、未實測**） |
+
+> 若 PVE 資料中心防火牆已啟用，要為這台 CT 補上對應規則，否則 Client 連不到。
+
+**驗證**（在另一台機器上）：
+
+```bash
+nc -zv 192.0.2.120 21115
+nc -zv 192.0.2.120 21116
+nc -zv 192.0.2.120 21117
+```
+
+TCP 會顯示 succeeded；UDP 21116 用 `nc -zvu` 只能做參考，最準的是 Client 實際顯示「就緒」。
+
+### 4-7 備份與 HA
+
+**做什麼**：確保 `data`（Key）有被備份，節點故障時能自動接手。
+
+| 項目 | 做法 |
+| --- | --- |
+| 備份 | 把 CT 120 加入 PBS／vzdump 排程（`data` 在 CT 內，一併備份） |
+| 還原測試 | 還原成另一個 CT ID，確認 `/opt/rustdesk/data/id_ed25519.pub` 與原本一致 |
+| HA | 若 rootfs 在共享儲存（如 Ceph RBD），可加入 HA；Key 不變 Client 才不用重設 |
+| 升級 | `cd /opt/rustdesk && docker compose pull && docker compose up -d`，升級前先備份 `data` |
+
+## 5. 常見問題
+
+| 現象 | 怎麼辦 |
+| --- | --- |
+| `docker run` 在 LXC 內失敗，出現權限或 `sysctl`／`AppArmor` 相關錯誤 | 確認 CT 的 `features` 有 `nesting=1,keyctl=1`，改完要重開 CT；仍失敗時查 PVE 版本與 Docker 的相容說明（**未確認**具體原因，請貼實際錯誤訊息再判斷） |
+| Client 一直顯示「正在連接」或「就緒」不亮 | 先查 21116 的 **UDP** 是否放行；再確認 ID Server 填對、Key 與 `id_ed25519.pub` 完全一致 |
+| 可以註冊但連線很慢、一直走中繼 | 直連打洞失敗是正常現象（對稱型 NAT 等），會自動走 hbbr；確認 21117/tcp 通 |
+| 在同一個內網、用網域連不上 | 可能是路由器不支援 NAT loopback；內網改填內網 IP，或設定內網 DNS 指向內網位址。官方有專文介紹 NAT loopback 問題 |
+| 重建容器後所有 Client 都要重設 Key | `data` 目錄沒掛載或被刪，Server 重新產生了新 Key；從備份還原 `data` 即可 |
+| 21118／21119 被掃描或濫用的疑慮 | 不用 Web Client 就不要開；要用就放在反向代理後面並以防火牆限制 |
+| 想要網頁管理介面 | OSS 沒有；需評估 RustDesk Server Pro |
+
+## 6. 待辦
+
+- [ ] 依本文實作並回填 4-1～4-7 的實測結果與日期
+- [ ] 確認 `id_ed25519.pub` 實際落在 `data` 的哪個位置
+- [ ] 確認 Docker 在 unprivileged LXC（PVE 9）的實際行為，必要時補充設定
+- [ ] 決定映像檔是否固定版本號，並記錄使用的版本
+- [ ] 決定外部連線方式（VPN 或公網轉發）並補防火牆規則
+- [ ] 完成 PBS 備份、還原測試與 HA 驗證
+
+## 7. 延伸閱讀
+
+- [RustDesk Server OSS（官方總覽）](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/)
+- [RustDesk Server OSS：Docker 安裝](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/docker/)
+- [RustDesk Client 設定](https://rustdesk.com/docs/en/self-host/client-configuration/)
+- [Docker Engine 安裝（Ubuntu）](https://docs.docker.com/engine/install/ubuntu/)
+- 同類型的 LXC 建置範例：[在 PVE Cluster 用 LXC 架設 Wazuh（一）](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-sop/)
+
+{% endraw %}
