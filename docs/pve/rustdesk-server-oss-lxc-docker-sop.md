@@ -65,7 +65,7 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | 3 | 容器內更新並安裝 Docker | ✅ | 2026-11-04：CT 內 `apt` 更新、時區 Asia/Taipei；Docker 安裝完成，`hello-world` 成功（nesting 有效） |
 | 4 | 部署 hbbs／hbbr | ✅ | 2026-11-04：兩容器穩定運行；21115／21116（tcp＋udp）／21117／21118／21119 皆在監聽；`data` 下自動產生 Key 與資料庫 |
 | 5 | 取得 Key、設定 Client | ✅ | 2026-11-04：UBClient 與 WinClient 先顯示「就緒」但連線出現「金鑰不符」；用 SHA256 比對發現兩台的 Key 與 Server 不同，重貼 `id_ed25519.pub` 後雜湊一致，UBClient → WinClient 連線成功（見 4-5） |
-| 6 | 防火牆與對外連線 | ⏳ | 2026-11-04：CT 內 ufw 啟用，只放行 21115／21116（tcp＋udp）／21117；UBClient 實測 21115～21117 連得上、21118／21119 逾時；CT 重開後規則保留、容器自動啟動；Client 重開後「就緒」與互連尚待驗證 |
+| 6 | 防火牆與對外連線 | ✅ | 2026-11-04：CT 內 ufw 啟用，只放行 21115／21116（tcp＋udp）／21117；UBClient 實測 21115～21117 連得上、21118／21119 逾時；CT 重開後規則保留、容器自動啟動；ufw 啟用後兩台 Client 互連正常 |
 | 7 | 備份與 HA | ⏳ | — |
 
 ## 4. 步驟
@@ -350,7 +350,8 @@ ufw status verbose
 - unprivileged LXC 內 `ufw enable` 成功，`ufw status verbose` 顯示 `active`、開機自動啟用、`Default: deny (incoming), allow (outgoing)`，四條放行規則（IPv4／IPv6 各一組）
 - 從 UBClient 用 `nc -zv -w2` 測試：21115、21116、21117 `succeeded`；21118、21119 `timed out`（被擋）
 - `pct reboot 115` 後，`ufw status` 仍為 `active` 且四條規則保留；hbbs、hbbr 自動回到 `Up`（驗證 CT `onboot` 與 `restart: unless-stopped`）
-- ⏳ 兩台 Client 在 ufw 啟用後重開仍「就緒」且能互連（用來驗證 UDP 21116 未被擋），尚待驗證
+- ufw 啟用後，兩台 Client（UBClient、WinClient）互連正常，代表 UDP 21116 未被擋
+- ⏳ 連線型態（直連或中繼）未記錄；VPN 使用者從 VPN 連入的情境尚未實測
 
 ### 4-7 備份與 HA
 
