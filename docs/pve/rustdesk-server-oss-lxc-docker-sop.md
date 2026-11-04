@@ -60,7 +60,7 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | --- | --- | --- | --- |
 | 0 | 確認環境、下載範本 | ✅ | 2026-11-04：PVE 9.2.24、kernel 7.0.14-26-pve；cluster nextid 為 115；`local` 下載 Ubuntu 22.04 範本（124M，checksum OK） |
 | 1 | 規劃 IP 與 Port | ⏳ | 連線方式：內網＋VPN，不轉發公網 Port；需加入 HA |
-| 2 | 建立 LXC | ✅ | 2026-11-04：CT 115 建立並啟動；rootfs 16G 放 VM_Pool、unprivileged、onboot=1；Gateway、外網、DNS 解析皆通；`nesting` 待用 `pct config` 再確認 |
+| 2 | 建立 LXC | ✅ | 2026-11-04：CT 115 建立並啟動；rootfs 16G 放 VM_Pool、unprivileged、onboot=1；Gateway、外網、DNS 解析皆通；`pct config` 確認 `features: nesting=1,keyctl=1`、`cores: 2` |
 | 3 | 容器內安裝 Docker | ⏳ | — |
 | 4 | 部署 hbbs／hbbr | ⏳ | — |
 | 5 | 取得 Key、設定 Client | ⏳ | — |
@@ -149,7 +149,7 @@ pct start 115
 - `pct config 115` 顯示 `rootfs: VM_Pool:vm-115-disk-0,size=16G`、`unprivileged: 1`、`onboot: 1`、`memory: 1024`、`swap: 512`
 - 網路與 DNS 以兩台內網 DNS 設定（`--nameserver "<DNS1> <DNS2>"`，多個 DNS 以空格分隔並加引號）
 - 容器內 `ping` Gateway、`ping 8.8.8.8` 皆 0% loss；`getent hosts deb.debian.org` 只回 IPv6 位址（推測：內網 DNS 未回 IPv4，是否影響 apt 以 4-3 的 `apt update` 為準）
-- ⏳ `features: nesting=1,keyctl=1` 尚未在 `pct config` 看到，Docker 安裝前要先確認
+- `pct config 115` 確認 `features: nesting=1,keyctl=1`、`cores: 2`、`arch: amd64`
 
 ### 4-3 容器內安裝 Docker
 
