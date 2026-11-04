@@ -225,8 +225,8 @@ ss -tulnp | grep -E '2111[5-9]'
 - 啟動 30 秒後 `docker compose ps` 兩容器皆為 `Up`，未重啟
 - `ss -tulnp` 看到 21115/tcp、21116/tcp、21116/udp、21117/tcp，以及 **21118/tcp（hbbs）、21119/tcp（hbbr）也預設在監聽**，即使沒有使用 Web Client。因為用 host 網路，它們綁在所有網卡上，需要用防火牆限制來源（見 4-6）
 - `data` 目錄產生 `id_ed25519`（私鑰）、`id_ed25519.pub`（公鑰，44 bytes）、`db_v2.sqlite3`（含 -shm、-wal）
-- 私鑰預設權限為 `-rw-r--r--`，建議改成 600：`chmod 600 /opt/rustdesk/data/id_ed25519`
-- 映像檔使用 `latest`（image ID `8ecdab65deb7`），尚未固定版本號
+- 私鑰預設權限為 `-rw-r--r--`，已改成 600：`chmod 600 /opt/rustdesk/data/id_ed25519`，改完 `ls -l` 顯示 `-rw-------`，不需重啟容器
+- 映像檔使用 `latest`（image ID `8ecdab65deb7`）；`docker exec hbbs hbbs --version` 回 `hbbs 1.1.16`。是否固定成版本 tag 仍待確認（需先到 Docker Hub 確認 tag 名稱）
 
 ### 4-5 取得 Key 並設定 Client
 
