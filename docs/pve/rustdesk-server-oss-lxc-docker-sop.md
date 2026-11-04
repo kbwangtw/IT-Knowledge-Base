@@ -66,7 +66,7 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | 4 | 部署 hbbs／hbbr | ✅ | 2026-11-04：兩容器穩定運行；21115／21116（tcp＋udp）／21117／21118／21119 皆在監聽；`data` 下自動產生 Key 與資料庫 |
 | 5 | 取得 Key、設定 Client | ✅ | 2026-11-04：UBClient 與 WinClient 先顯示「就緒」但連線出現「金鑰不符」；用 SHA256 比對發現兩台的 Key 與 Server 不同，重貼 `id_ed25519.pub` 後雜湊一致，UBClient → WinClient 連線成功（見 4-5） |
 | 6 | 防火牆與對外連線 | ✅ | 2026-11-04：CT 內 ufw 啟用，只放行 21115／21116（tcp＋udp）／21117；UBClient 實測 21115～21117 連得上、21118／21119 逾時；CT 重開後規則保留、容器自動啟動；ufw 啟用後兩台 Client 互連正常 |
-| 7 | 備份與 HA | ⏳ | — |
+| 7 | 備份與 HA | ⏳ | 2026-11-04：既有排程已涵蓋；手動備份完成（protected）；還原成另一個 CT 後公鑰雜湊與原機一致；加入 HA 與遷移測試尚待執行 |
 
 ## 4. 步驟
 
@@ -355,13 +355,61 @@ ufw status verbose
 
 ### 4-7 備份與 HA
 
-**做什麼**：確保 `data`（Key）有被備份，節點故障時能自動接手。
+**做什麼**：確認 `data`（Key）有被備份且還原後 Key 不變，再加入 HA，節點故障時自動接手。
+
+#### 4-7A 確認排程並手動備份
+
+```bash
+pvesh get /cluster/backup --output-format yaml
+vzdump 115 --storage <PBS 儲存名稱> --mode snapshot --protected 1 --notes-template '{{guestname}} RustDesk 部署完成'
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `pvesh get /cluster/backup` | 看既有排程備份工作是否涵蓋這台 CT |
+| `--mode snapshot` | 不停機，先對 RBD 做快照再備份 |
+| `--protected 1` | 這份備份不會被保留策略自動刪除；不再需要時到 PBS 取消保護 |
+
+`vzdump` 要在 CT 目前所在的節點執行。`--notes-template` 含中文時會出現 `Wide character in print` 警告，不影響備份。
+
+**本案實測**（2026-11-04）：
+
+- 既有三個 `all: 1` 排程（各節點 21:00、21:30、22:00，保留每日 7 份加最近 3 份），CT 115 自動納入，不需另外設定
+- 手動 `vzdump`：1.41 GiB，約 17 秒，`Backup job finished successfully`，已標記 protected
+- ⏳ 這份 protected 備份留到 HA 與整體驗收完成後，再決定是否取消保護
+
+#### 4-7B 還原測試（用雜湊確認 Key 不變）
+
+```bash
+pvesm list <PBS 儲存名稱> --vmid 115
+pvesh get /cluster/nextid
+pct restore <新ID> <備份 Volid> --storage VM_Pool
+pct set <新ID> --net0 name=eth0,bridge=vmbr0,ip=192.0.2.115/24,gw=192.0.2.1,link_down=1
+pct start <新ID>
+pct exec <新ID> -- sh -c "tr -d '\n' < /opt/rustdesk/data/id_ed25519.pub | sha256sum | cut -c1-12"
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `pct restore <新ID> <Volid>` | 把備份還原成另一個 CT，不動原機 |
+| `link_down=1` | 還原出來的 CT 帶著原本的 IP，先讓網卡斷線，避免和原機搶 IP |
+| `pct exec ... sha256sum` | 不需要網路，直接算公鑰指紋，與原機比對 |
+
+**本案實測**（2026-11-04）：還原成 CT 116，`net0` 確認含 `link_down=1`；還原後公鑰雜湊與原機相同，表示備份中的 Key 完整，還原後 Client 不用重設。
+
+#### 4-7C 加入 HA
+
+⏳ 尚未執行：
+
+```bash
+ha-manager add ct:115 --state started --max_restart 1 --max_relocate 1
+ha-manager status | grep ct:115
+```
 
 | 項目 | 做法 |
 | --- | --- |
-| 備份 | 把 CT 115 加入 PBS／vzdump 排程（`data` 在 CT 內，一併備份） |
-| 還原測試 | 還原成另一個 CT ID，確認 `/opt/rustdesk/data/id_ed25519.pub` 與原本一致 |
-| HA | 若 rootfs 在共享儲存（如 Ceph RBD），可加入 HA；Key 不變 Client 才不用重設 |
+| HA 條件 | rootfs 在共享儲存（本案為 Ceph RBD），其他節點才能接手 |
+| 規則 | 不需要互斥規則，RustDesk 只有這一台 |
 | 升級 | `cd /opt/rustdesk && docker compose pull && docker compose up -d`，升級前先備份 `data` |
 
 ## 5. 常見問題
