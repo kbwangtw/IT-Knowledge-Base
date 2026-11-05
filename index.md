@@ -78,6 +78,7 @@ last_modified_at: 2026-10-22
 | [ProxCenter 逐台更新 PVE：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 想用工具一次一台安全地更新叢集 |
 | [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](docs/pve/proxcenter-enterprise-update/) | 企業版 ProxCenter 自己要怎麼更新；`docker compose up -d` 的陷阱；CT110 擴容 |
 | [PVE 更新重開後 HA 服務卡在 error](docs/pve/pve-ha-service-error-after-reboot/) | HA 服務顯示 error；要手動重開節點 |
+| [PVE 更新後逐台重開（人不在現場）：維護模式加 noout，一次一台](docs/pve/pve-rolling-reboot-after-update/) | 套件更新完裝了新核心要重開，又不在現場、沒有主控台 |
 | [整個 PVE 叢集安全關機與開機：一鍵腳本](docs/pve/pve-cluster-full-shutdown/) | 搬機房、停電維護，要把三台全關再開回來 |
 | [啟用 PVE 防火牆（階段 1a）：只收緊 Ceph 與沒用的埠](docs/pve/pve-firewall-stage1a-ceph-hardening/) | 想擋 VM／CT 被入侵後打節點，又怕鎖死自己或擋到 Ceph；遠端操作要排自動保險 |
 | [Corosync 加第二條 link（備援）：熱載入、不用重啟](docs/pve/corosync-second-link/) | 叢集心跳只有一條線，想消除單點故障 |

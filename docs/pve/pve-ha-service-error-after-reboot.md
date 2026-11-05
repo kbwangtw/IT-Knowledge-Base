@@ -4,7 +4,7 @@ title: "PVE 更新重開後 HA 服務卡在 error：原因與救回步驟"
 permalink: /docs/pve/pve-ha-service-error-after-reboot/
 date: 2026-10-12
 categories: [PVE, HA, Ceph, Troubleshooting]
-last_modified_at: 2026-10-17
+last_modified_at: 2026-11-05
 ---
 
 # PVE 更新重開後 HA 服務卡在 error：原因與救回步驟
@@ -214,7 +214,7 @@ grep -i '^ha' /etc/pve/datacenter.cfg      # 應看到 ha: shutdown_policy=migra
 
 ## 11. 待辦
 
-- [ ] 下次重開時，確認 Shutdown Policy `migrate` 有先把服務搬走
+- [ ] 下次重開時，確認 Shutdown Policy `migrate` 有先把服務搬走（2026-11-05 逐台重開時用的是維護模式，`migrate` 沒有被用到，仍未驗證；流程見[PVE 更新後逐台重開](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-rolling-reboot-after-update/)）
 
 ## 12. 延伸閱讀
 
