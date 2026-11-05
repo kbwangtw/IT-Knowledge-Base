@@ -50,6 +50,7 @@
 - [Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？](docs/pve/ceph-bluestore-slow-op-backup-schedule.md)：硬碟正常、備份錯開、slow ops 歷史、10/31 復發（osd.1）與三顆 OSD 碟的 SMART、碟溫、型號規格、寫入量比較
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy.md)
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](docs/pve/pve-ha-service-error-after-reboot.md)
+- [PVE 更新後逐台重開（人不在現場）：維護模式加 noout，一次一台](docs/pve/pve-rolling-reboot-after-update.md)：判斷要不要重開、`reboot` 不關機、node11→node10→node12、每台 7 步驗收
 - [整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）](docs/pve/pve-cluster-full-shutdown.md)：腳本在 `tools/pve-cluster-power/`
 - [啟用 PVE 防火牆（階段 1a）：只收緊 Ceph 與沒用的埠](docs/pve/pve-firewall-stage1a-ceph-hardening.md)：叢集層加主機層、遠端排自動保險；管理埠暫時對服務網開放
 - [Corosync 加第二條 link（備援）：熱載入、不用重啟](docs/pve/corosync-second-link.md)：服務網當備援 link，三台兩條 link 皆 connected
