@@ -4,7 +4,7 @@ title: "在 PVE Cluster 用 LXC 架設 Wazuh（一）：安裝與接上 Agent"
 date: 2026-09-29
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-sop/
-last_modified_at: 2026-10-17
+last_modified_at: 2026-11-05
 ---
 {% raw %}
 
@@ -832,7 +832,9 @@ ha-manager status | grep -E 'ct:112|lrm'
 
 ### 9-1 版本原則
 
-Agent 版本不可高於 Manager（本案 4.14.8）。安裝時指定版本號，避免裝到比 Manager 新的版本。
+Agent 版本不可高於 Manager。安裝時指定版本號，避免裝到比 Manager 新的版本。
+
+本案 Manager 在 2026-11-02 由 4.14.8 升到 4.14.9（過程見 [Wazuh 4.14.8 升級到 4.14.9 SOP](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-4-14-9-upgrade-sop/)）。**之後新增的 Agent 請下載與 Manager 相同的版本（目前是 4.14.9）**；本節 9-2 到 9-10 的指令與實測紀錄是 2026-09-30 當時的 4.14.8，下載網址裡的版本號要換成目前 Manager 的版本，否則裝完還要再升級一次。
 
 ### 9-2 Linux（Debian／Ubuntu）：下載 .deb 安裝，不加套件庫
 
@@ -1354,6 +1356,89 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 
 第一次貼上 Port 測試指令時被換行截斷，出現 `bash: -c: option requires an argument`；重新完整貼上一行即正常。
 
+### 9-11 Ubuntu 22.04 LXC（RustDesk Server，CT 115）
+
+RustDesk Server（hbbs／hbbr，Docker）跑在 [CT 115](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/rustdesk-server-oss-lxc-docker-sop/)，系統是 Ubuntu 22.04.5 LTS。Agent 裝在**容器本身**（不是裝進 Docker 容器裡），這樣才看得到 Docker 主機的系統、套件與檔案。
+
+與 9-6 的差異：容器能直接連外下載，所以**在容器內直接 `wget` 與 `dpkg -i`**，不用從 PVE 節點 `pct push`；而且 Agent 版本改用與 Manager 相同的 **4.14.9**。
+
+**1. 確認在 RustDesk 容器內，再做事前檢查**（唯讀）。在 PVE 節點用 `pct enter 115` 進入容器：
+
+```bash
+hostname
+cat /etc/os-release | head -2
+uname -m
+dpkg -l wazuh-agent 2>/dev/null | awk 'END{print $2, $3}'
+dpkg -l wazuh-manager 2>/dev/null | awk 'END{print $2, $3}'
+dpkg -l lsb-release 2>/dev/null | awk 'END{print $2, $3}'
+timeout 3 bash -c '</dev/tcp/192.0.2.32/1514' && echo "1514 OK"
+timeout 3 bash -c '</dev/tcp/192.0.2.32/1515' && echo "1515 OK"
+command -v wget curl
+ps aux | grep -E "apt-get|apt |dpkg|unattended-upgrade " | grep -v -E "grep|shutdown"
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `hostname` | **確認不是 Wazuh 主機**（Wazuh 主機的主機名稱是 `wazuh`）；Wazuh 主機已有內建的本機 Agent，不能再裝 `wazuh-agent` |
+| `wazuh-agent`、`wazuh-manager` | 兩個都不該有輸出（RustDesk 容器兩個都沒裝） |
+| `lsb-release` | Agent 的相依套件，Ubuntu 22.04 通常已有 |
+| 1514、1515 | 1514 是 Agent 回報、1515 是註冊，兩個都要通 |
+| 最後一行 | 套件管理員沒有被占用 |
+
+看到的結果：主機名稱 `rustdesk`、Ubuntu 22.04.5 LTS、`x86_64`；`wazuh-agent` 與 `wazuh-manager` 都沒有輸出；`lsb-release 11.1.0ubuntu4`；`1514 OK`、`1515 OK`；`wget`、`curl` 都有；最後一行沒有輸出。
+
+**2. 下載並全新安裝（先不啟動）**：
+
+```bash
+cd /tmp && wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.14.9-1_amd64.deb && ls -lh /tmp/wazuh-agent_4.14.9-1_amd64.deb
+WAZUH_MANAGER='192.0.2.32' WAZUH_AGENT_NAME='RustDesk' dpkg -i ./wazuh-agent_4.14.9-1_amd64.deb
+grep -A2 '<server>' /var/ossec/etc/ossec.conf
+```
+
+這是**新註冊**，要帶 `WAZUH_MANAGER` 與 `WAZUH_AGENT_NAME`（升級既有 Agent 時不能帶）。Agent 名稱沿用既有風格（`IPAM`、`grafana`、`librenms`），註冊後不好改。看到的結果：`.deb` 13,537,544 bytes；`Setting up wazuh-agent (4.14.9-1)`；`<address>192.0.2.32</address>`、`<port>1514</port>`。
+
+**3. 啟動並驗證**：
+
+```bash
+systemctl daemon-reload
+systemctl enable --now wazuh-agent
+sleep 10
+systemctl is-active wazuh-agent
+tail -n 5 /var/ossec/logs/ossec.log
+rm -f /tmp/wazuh-agent_4.14.9-1_amd64.deb
+```
+
+看到的結果：`active`；日誌出現 syscollector 啟動、SCA 開始評估 `cis_ubuntu22-04.yml`、`Monitoring journal entries`，沒有 `ERROR`。在 Wazuh 主機確認：
+
+```bash
+/var/ossec/bin/agent_control -ls | grep -i rustdesk
+/var/ossec/bin/agent_control -i <Agent ID> | grep -iE "name|version|status"
+```
+
+看到的結果：`019,RustDesk,any,Active`，版本 `Wazuh v4.14.9`。
+
+**本案實測（2026-11-05）**：
+
+| 項目 | 結果 |
+| --- | --- |
+| 環境 | CT 115，Ubuntu 22.04.5 LTS，`x86_64` |
+| 事前檢查 | 沒裝過 Agent；`lsb-release` 已有；1514／1515 皆 OK |
+| `<address>` | `192.0.2.32` ✅（`lsb-release` 已在，位址一次寫入） |
+| 服務 | `wazuh-agent` enable 並 active；日誌沒有 `ERROR` |
+| Manager | `ID: 019, Name: RustDesk, Active`，v4.14.9 |
+
+**踩到的雷**（都發生在事前檢查，沒有裝錯東西）：
+
+- **第一次檢查是在 Wazuh 主機上執行的**：兩台都是 Ubuntu 22.04.5，從系統版本分不出來，只有提示字元 `root@wazuh` 與 `hostname` 輸出 `wazuh` 能看出來。所以指令第一行放 `hostname`，並且確認 `wazuh-manager` 沒有輸出。
+- **指令裡的 `<Wazuh IP>` 要換成實際位址，連 `<` `>` 一起換掉**：照貼的話，shell 會把 `<` 當成檔案重導向，出現 `command not found`，連線測試也沒有輸出。
+- **第一次換位址時測成了另一台主機的位址**（Wazuh 轉送日誌的目的地）：兩個連線都沒有輸出，容易誤以為是防火牆問題。連線測試前先確認位址是 Manager 的位址（看其他 Agent 的 `ossec.conf` 裡的 `<address>`）。
+
+**接上後尚待處理**：
+
+- RustDesk 專屬監控：用 FIM 監控 `/opt/rustdesk/data` 下的金鑰（`id_ed25519` 等，**不要貼出私鑰內容**）與 `compose.yml`、收集 hbbs／hbbr 日誌；先觀察預設告警量再加。
+- 確認 jt-ipam 同步後 `fetched` 增加為 20。
+- 這台容器的 IP 要固定（靜態或 DHCP 預留），Manager 與 jt-ipam 用 IP 比對。
+
 ## 常見問題
 
 | 現象 | 怎麼辦 | 參考 |
@@ -1365,6 +1450,9 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 | 外部連不到 55000 | API 刻意只聽本機與允許的來源，這是預期 | 7-4 |
 | Agent 一直是 Pending | 剛註冊時正常，通常數十秒內轉為 Active | 9-6 |
 | PVE 節點裝 Agent 遇到相依性問題 | 先裝相依套件，再用 .deb 安裝，不新增 Wazuh 套件庫 | 9-2a |
+| 新增 Agent 前不確定自己在哪台主機 | 先看提示字元與 `hostname`，並確認 `dpkg -l wazuh-manager` 沒有輸出；Wazuh 主機不能再裝 `wazuh-agent` | 9-11 |
+| 照貼指令後 `command not found`、連線測試沒有輸出 | 指令裡的 `<Wazuh IP>` 要換成實際位址，連 `<` `>` 一起換掉；位址要是 Manager 的，不是其他主機的 | 9-11 |
+| 新裝的 Agent 版本比 Manager 舊 | 下載網址的版本號要與 Manager 相同（現在是 4.14.9），本節舊範例寫的是 4.14.8 | 9-1 |
 | 裝完 Agent 後告警暴增 | 正常；先觀察，再照維運篇第 11 節逐條調校 | [維運篇](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-operations/) |
 
 ## 風險與注意事項

@@ -4,7 +4,7 @@ title: "在 PVE 用 LXC + Docker 架設 RustDesk Server（開源版）"
 date: 2026-11-04
 categories: [PVE, LXC, Docker, RustDesk]
 permalink: /docs/pve/rustdesk-server-oss-lxc-docker-sop/
-last_modified_at: 2026-11-04
+last_modified_at: 2026-11-05
 ---
 {% raw %}
 
@@ -67,6 +67,7 @@ hbbs + hbbr 都跑在同一台 LXC（Docker, network_mode: host）
 | 5 | 取得 Key、設定 Client | ✅ | 2026-11-04：UBClient 與 WinClient 先顯示「就緒」但連線出現「金鑰不符」；用 SHA256 比對發現兩台的 Key 與 Server 不同，重貼 `id_ed25519.pub` 後雜湊一致，UBClient → WinClient 連線成功（見 4-5） |
 | 6 | 防火牆與對外連線 | ✅ | 2026-11-04：CT 內 ufw 啟用，只放行 21115／21116（tcp＋udp）／21117；UBClient 實測 21115～21117 連得上、21118／21119 逾時；CT 重開後規則保留、容器自動啟動；ufw 啟用後兩台 Client 互連正常 |
 | 7 | 備份與 HA | ✅ | 2026-11-04：既有排程已涵蓋；手動備份完成（protected）；還原成另一個 CT 後公鑰雜湊與原機一致；已加入 HA（ct:115 started）；手動遷移後容器、ufw、Key 與 Client 連線驗證通過 |
+| 8 | 接上 Wazuh Agent | ✅ | 2026-11-05：CT 內直接安裝 Agent 4.14.9，名稱 RustDesk，Manager 端 `ID 019、Active`（做法見 [Wazuh（一）9-11](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-sop/)）；FIM 與日誌收集尚未設定 |
 
 ## 4. 步驟
 
@@ -435,6 +436,8 @@ ha-manager status | grep ct:115
 - [ ] 記錄 Client 連線型態（直連或中繼）
 - [ ] 取消手動備份的 protected 保護（不再需要時，到 PBS 操作）
 - [ ] 評估是否限制 ufw 放行來源（目前不限來源，僅內網與 VPN 可達）
+- [ ] Wazuh 專屬監控：用 FIM 監控 `/opt/rustdesk/data` 的金鑰與 `compose.yml`、收集 hbbs／hbbr 日誌（先觀察預設告警量再加）
+- [ ] 確認 jt-ipam 同步到 RustDesk（`fetched` 增加），並固定這台容器的 IP
 
 ## 7. 延伸閱讀
 
