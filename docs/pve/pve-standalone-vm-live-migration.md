@@ -290,7 +290,7 @@ qm status 200
 qm config 200 | grep onboot
 ```
 
-本次 `qm status 200` 為 ✅ `stopped`。**舊 VM 不能再啟動**，否則兩台會用同一個 IP 與 MAC。`onboot` 沒輸出或 `onboot: 0` 都沒問題；若是 `onboot: 1`，執行 `qm set 200 --onboot 0`，避免 node220 重開機時把它又啟動起來。（本次尚未檢查 `onboot`，見待辦）
+本次 `qm status 200` 為 ✅ `stopped`。**舊 VM 不能再啟動**，否則兩台會用同一個 IP 與 MAC。`onboot` 沒輸出或 `onboot: 0` 都沒問題；若是 `onboot: 1`，執行 `qm set 200 --onboot 0`，避免 node220 重開機時把它又啟動起來。（本次沒有檢查 `onboot`，因為舊 VM 之後已刪除，見 7-2）
 
 **舊 VM 會帶著 `lock: migrate`**：2026-11-06 實測，node220 上的舊 VM `qm status 200` 為 `stopped`，`qm config 200` 有 `lock: migrate`。這是用 `--delete 0` 保留舊 VM 時留下的鎖，推測用意是防止誤啟動；對它做啟動、備份等操作會出現 `TASK ERROR: VM is locked (migrate)`。**這不是故障，不要為了消除錯誤就 `qm unlock`**，要等確定刪除舊 VM 時才解鎖，刪除步驟見 7-2。
 
