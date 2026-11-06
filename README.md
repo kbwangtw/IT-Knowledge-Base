@@ -49,6 +49,7 @@
 - [Ceph 換金鑰：為什麼 HEALTH_OK 還不夠？](docs/pve/ceph-20-2-4-cephx-aes256k-migration.md)
 - [Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？備份排程怎麼排？](docs/pve/ceph-bluestore-slow-op-backup-schedule.md)：硬碟正常、備份錯開、slow ops 歷史、10/31 復發（osd.1）與三顆 OSD 碟的 SMART、碟溫、型號規格、寫入量比較
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy.md)
+- [PVE 單節點故障演練：拔掉一台的電源，量 Ceph、HA 與告警鏈](docs/pve/pve-single-node-failure-drill.md)：演練計畫與量測腳本（尚未演練）
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](docs/pve/pve-ha-service-error-after-reboot.md)
 - [PVE 更新後逐台重開（人不在現場）：維護模式加 noout，一次一台](docs/pve/pve-rolling-reboot-after-update.md)：判斷要不要重開、`reboot` 不關機、node11→node10→node12、每台 7 步驗收
 - [整個 PVE 叢集安全關機與開機：一鍵腳本（含 HA、Ceph）](docs/pve/pve-cluster-full-shutdown.md)：腳本在 `tools/pve-cluster-power/`

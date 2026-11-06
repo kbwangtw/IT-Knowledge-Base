@@ -84,6 +84,7 @@ last_modified_at: 2026-10-22
 | [啟用 PVE 防火牆（階段 1a）：只收緊 Ceph 與沒用的埠](docs/pve/pve-firewall-stage1a-ceph-hardening/) | 想擋 VM／CT 被入侵後打節點，又怕鎖死自己或擋到 Ceph；遠端操作要排自動保險 |
 | [Corosync 加第二條 link（備援）：熱載入、不用重啟](docs/pve/corosync-second-link/) | 叢集心跳只有一條線，想消除單點故障 |
 | [PVE HA 放置策略：PVE 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy/) | 兩台 DNS 不能放同一台，規則要設在哪裡 |
+| [PVE 單節點故障演練：拔掉一台的電源](docs/pve/pve-single-node-failure-drill/) | 一台突然掛掉時，Ceph 卡多久、HA 多久恢復、告警信收不收得到（演練計畫） |
 | [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新 PBS 前後要查什麼；怎麼安全清理舊 kernel |
 | [PVE 9 登入一直跳「No valid subscription」](docs/pve/pve9-subscription-nag-removal/) | 沒買訂閱，想取消登入提示 |
 | [一次檢查並統一所有 LXC 的時區](docs/pve/pve-lxc-timezone/) | 容器時間差 8 小時；改時區前先看排程會不會移位；補上缺少的 en_US.UTF-8 語系 |

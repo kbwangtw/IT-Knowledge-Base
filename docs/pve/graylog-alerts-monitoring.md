@@ -4,7 +4,7 @@ title: "Graylog 告警與監控（二）：告警清單與監控腳本"
 date: 2026-10-19
 categories: [PVE, Graylog, Monitoring]
 permalink: /docs/pve/graylog-alerts-monitoring/
-last_modified_at: 2026-10-30
+last_modified_at: 2026-11-02
 ---
 
 # Graylog 告警與監控（二）：告警清單與監控腳本
@@ -1161,7 +1161,7 @@ node12 同樣做法；PBS31 用網頁 **Administration → Shell** 執行 `chmod
 | 項目 | 說明 |
 | --- | --- |
 | 每月看一次 Snapshot Replication | 補上第 6 節抓不到的「排程被改掉」情況：確認六個任務都是「成功」、最近一次執行是前一天 |
-| 單節點故障演練 | 和 PVE HA 文件第 15 節一起做：一台失聯時，確認「節點離線」告警、另兩台第 5、6 節的監控與 postfix 寄信都正常，記錄收信時間 |
+| 單節點故障演練 | 和 PVE HA 文件第 15 節一起做：一台失聯時，確認「節點離線」告警、另兩台第 5、6 節的監控與 postfix 寄信都正常，記錄收信時間。2026-11-02 已寫好計畫：[單節點故障演練](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-single-node-failure-drill/)（演練 Graylog 所在的 node10，第 4 節列出每個告警的預期） |
 | 其他新告警的測試 | 每個新告警都安排安全、可控的測試事件，記錄原始訊息、欄位、事件、收信時間與 Grace 下的重複通知情形 |
 
 ## 12. 延伸閱讀與下載

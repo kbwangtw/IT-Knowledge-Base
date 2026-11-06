@@ -122,7 +122,7 @@ awk '{print $1}' /var/log/pveproxy/access.log | sort | uniq -c | sort -rn | head
 | 192.0.2.29 | 9,374 | JT-IPAM（CT103，使用者確認） |
 | 192.0.2.54 | 74 | **未確認**；推測可能是管理員電腦的舊 DHCP 位址 |
 
-管理員電腦目前是 192.0.2.51，由**數據機以 DHCP 動態分配**（會變）。CT109（WireGuard，在 node11）的 `eth0` 是 192.0.2.27、`valid_lft forever`（推測是靜態設定）。
+管理員電腦目前是 192.0.2.51，由**數據機以 DHCP 動態分配**（會變）。CT109（WireGuard；所在節點會隨 HA 變動，用 `ha-manager status` 確認，2026-11-01 起在 node12）的 `eth0` 是 192.0.2.27、`valid_lft forever`（推測是靜態設定）。
 
 ### 4-3 數據機刪除轉送規則後的外部驗證（2026-11-01）
 
