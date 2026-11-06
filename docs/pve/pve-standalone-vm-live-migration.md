@@ -341,7 +341,7 @@ PBS206 現在和另一台 VM 同在 node221 上，node221 的 VM 備份也寫進
 | 之後 | `qm set 200 --cpu x86-64-v2-AES`、`qm pending 200` 全部為 `cur`、沒有 `new`；VM 在 node220 開機 |
 | 17:01:02 | 第二次嘗試：加上 `--online`，`migration finished successfully (duration 00:18:34)`；`mirror-scsi0`、`mirror-scsi1` 皆完成 |
 | 搬移後 | node221 `qm status 200` 為 `running`，設定與預期相符；node220 `qm status 200` 為 `stopped` |
-| 2026-11-06 | node220 舊 VM：`status: stopped`、`lock: migrate`；對它操作出現 `TASK ERROR: VM is locked (migrate)`（預期行為，見 6-2）。node221 的 `lock` 狀態尚未確認 |
+| 2026-11-06 | node220 舊 VM：`status: stopped`、`lock: migrate`；對它操作出現 `TASK ERROR: VM is locked (migrate)`（預期行為，見 6-2）。node221 新 VM：`status: running`、`qm config 200` 沒有 `lock`（✅ 沒被鎖） |
 
 ## 9. 常見問題
 
@@ -365,7 +365,7 @@ PBS206 現在和另一台 VM 同在 node221 上，node221 的 VM 備份也寫進
 - [ ] 確認兩台 PVE 的 `PBS206` storage 都是 active
 - [ ] 檢查 node220 舊 VM 的 `onboot` 設定
 - [ ] 恢復備份排程，手動備份並還原一台 VM 驗證
-- [ ] 確認 node221 上的 VM 200 沒有 `lock`（`qm config 200 | grep lock` 應沒有輸出）
+- [x] 確認 node221 上的 VM 200 沒有 `lock`：2026-11-06 實測 `status: running`，`qm config 200 | grep lock` 沒有輸出
 - [ ] 刪除 node221 上的 token `root@pam!mig`
 - [ ] 觀察一週後，刪除 node220 上的舊 VM 與磁碟
 - [ ] 規劃 datastore 的第二份副本（外接磁碟、NAS 或異地 PBS）
