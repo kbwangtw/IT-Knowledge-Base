@@ -16,7 +16,7 @@ last_modified_at: 2026-11-06
 | 適合誰看 | 有兩台各自獨立的 PVE（沒有叢集），要把某台 VM 搬到另一台的人 |
 | 環境 | node220、node221 皆為 PVE 9.2.25，**沒有組叢集**；要搬的是 VMID 200（主機名稱 PBS206，Proxmox Backup Server 4.2 的虛擬機） |
 | 日期 | 2026-11-05 |
-| 結論 | ✅ 線上搬移完成（耗時 00:18:34，兩顆磁碟共約 332 GB）<br>✅ node221 上 VM 200 為 `running`，磁碟、網卡、CPU 設定與預期相符；node220 上的舊 VM 為 `stopped`<br>✅ PBS 介面與 datastore 正常，手動備份與還原成功（2026-11-06，使用者回報）<br>✅ 舊 VM 已刪除（`qm unlock 200` 後 `qm destroy 200 --purge`），node220 上沒有殘留磁碟<br>⏳ datastore Verify 結果、備份排程恢復、`PBS206` storage 狀態與 datastore 第二份副本尚未確認，見第 10 節待辦 |
+| 結論 | ✅ 已結案（2026-11-06）：線上搬移完成（耗時 00:18:34，兩顆磁碟共約 332 GB）<br>✅ node221 上 VM 200 為 `running`，磁碟、網卡、CPU 設定與預期相符，沒有 `lock`<br>✅ PBS 介面與 datastore 正常，手動備份與還原成功；兩台 PVE 的 `PBS206` storage 都是 active（使用者回報）<br>✅ 舊 VM 已刪除（`qm unlock 200` 後 `qm destroy 200 --purge`），node220 上沒有殘留磁碟<br>⚠️ datastore Verify 未執行：搬移後 datastore 上沒有排程備份的資料，無從驗證；建議 datastore 有資料後再補跑 |
 
 ## 1. 先認識幾個名詞
 
@@ -275,7 +275,7 @@ qm config 200
 | `qm status 200` | ✅ `running` |
 | `scsi0` | ✅ `local-lvm:vm-200-disk-0`，32 GB |
 | `scsi1` | ✅ `VM_Store:200/vm-200-disk-0.raw`，300 GB（`backup=0` 保留） |
-| `net0` | ✅ `bridge=vmbr0`，MAC 位址與搬移前相同，guest 內的 IP 設定預期不受影響（尚未登入驗證） |
+| `net0` | ✅ `bridge=vmbr0`，MAC 位址與搬移前相同，PBS 介面可正常使用（使用者回報） |
 | `cpu` | ✅ `x86-64-v2-AES` |
 | `ide2` | ✅ `none` |
 
@@ -303,7 +303,7 @@ qm config 200 | grep onboot
 3. 兩台 PVE 的 Datacenter → Storage 裡，名為 `PBS206` 的 storage 變成 active（搬移前顯示 inactive）
 4. 恢復備份排程，手動備份一台 VM，再做一次還原測試
 
-本次實測（2026-11-06，使用者回報）：PBS 介面與 datastore 正常，手動備份與還原都成功。Verify 結果、`PBS206` storage 是否為 active、備份排程是否恢復，本次沒有記錄，仍列在第 10 節待辦。
+本次實測（2026-11-06，使用者回報）：PBS 介面與 datastore 正常，手動備份與還原都成功，兩台 PVE 的 `PBS206` storage 都是 active。**Verify 本次未執行**：datastore 上目前沒有排程備份的資料，沒有東西可驗證。之後有排程備份產生資料，建議補跑一次 Verify，再確認搬移後的資料完整性。
 
 ## 7. 收尾
 
@@ -367,7 +367,7 @@ zfs list | grep vm-200
 
 ### 7-3 搬完之後的風險
 
-PBS206 現在和另一台 VM 同在 node221 上，node221 的 VM 備份也寫進同一台主機，**node221 整台壞掉時，VM 和備份會一起消失**。建議把 datastore 同步一份到別處（外接磁碟、NAS 或異地 PBS）。
+PBS206 現在和另一台 VM 同在 node221 上，node221 的 VM 備份也寫進同一台主機，**node221 整台壞掉時，VM 和備份會一起消失**。建議把 datastore 同步一份到別處（外接磁碟、NAS 或異地 PBS）。這是**後續建議，本次未做**，不影響這次搬移的驗收。
 
 ## 8. 本次實測紀錄
 
@@ -380,6 +380,7 @@ PBS206 現在和另一台 VM 同在 node221 上，node221 的 VM 備份也寫進
 | 17:01:02 | 第二次嘗試：加上 `--online`，`migration finished successfully (duration 00:18:34)`；`mirror-scsi0`、`mirror-scsi1` 皆完成 |
 | 搬移後 | node221 `qm status 200` 為 `running`，設定與預期相符；node220 `qm status 200` 為 `stopped` |
 | 2026-11-06 | 使用者回報：PBS 介面與 datastore 正常，手動備份與還原成功 |
+| 2026-11-06 | 使用者回報：兩台 PVE 的 `PBS206` storage 都是 active；datastore 上沒有排程備份的資料，Verify 無從執行 |
 | 2026-11-06 | 刪除舊 VM：`qm unlock 200`、`qm destroy 200 --purge` 成功，`qm list` 無 VMID 200，`zfs list \| grep vm-200` 無輸出；node221 `pveum user token remove` 回應 `no such token 'mig'`（token 已不存在） |
 | 2026-11-06 | node220 舊 VM（刪除前）：`status: stopped`、`lock: migrate`；對它操作出現 `TASK ERROR: VM is locked (migrate)`（預期行為，見 6-2）。node221 新 VM：`status: running`、`qm config 200` 沒有 `lock`（✅ 沒被鎖） |
 
@@ -394,22 +395,24 @@ PBS206 現在和另一台 VM 同在 node221 上，node221 的 VM 備份也寫進
 | 停機搬移出現 `no matching import/export format found for storage '…'` | 來源是 ZFS 時，停機搬移用 `zfs send` 串流，目標不是 ZFS（本次是 dir 與 lvmthin）就收不下。**原因為推測**，依錯誤訊息推斷，改用 `--online`（區塊鏡像，不依賴 ZFS 串流）後成功，可作為佐證。若目標也有 ZFS storage，停機搬移應該可行（未驗證） |
 | 貼上長指令被截斷，只執行到一半 | 整段放在單行貼上，貼完先看結尾是不是 `--delete 0`。本次曾有一行被截成不完整的網址，帶著 token 的 `Authorization` 標頭送到了錯誤的位址（沒有服務回應，影響很小，但這就是 token 搬完要刪的原因） |
 | 備份任務沒有備份到 datastore 資料 | 本次 `scsi1` 設了 `backup=0`，`vzdump` 不會備份它。所以搬移前的退路備份只會包含系統碟，datastore 資料要靠另一份副本 |
-| node221 的 PBS storage 顯示 `inactive`、`No route to host` | 本次是因為 VM 當時關機沒有回應，不是網路問題。搬完開機後應變回 active（待驗證） |
+| node221 的 PBS storage 顯示 `inactive`、`No route to host` | 本次是因為 VM 當時關機沒有回應，不是網路問題。搬完開機後兩台的 `PBS206` storage 都變回 active（2026-11-06，使用者回報） |
 | 對 node220 的舊 VM 操作時出現 `TASK ERROR: VM is locked (migrate)` | 用 `--delete 0` 保留舊 VM 時，舊 VM 會留著 `lock: migrate`（用 `qm config 200 \| grep lock` 確認）。這是預期行為，推測是防止誤啟動，**不要 `qm unlock` 後再啟動它**。要刪除舊 VM 時才解鎖（`qm unlock 200` 後 `qm destroy 200 --purge`，本次實測可行）。若是 node221 上的新 VM 出現這個鎖，先確認沒有搬移任務還在跑，再處理 |
 | 搬移失敗或中止 | 不要急著重試或手動刪東西。有 `--delete 0` 時來源 VM 通常還在；先檢查來源有沒有 `__migration__` 快照（`zfs list -t snapshot`）、目標有沒有殘留磁碟，再把完整訊息拿去查 |
 
-## 10. 待辦
+## 10. 驗收紀錄
 
-- [x] 登入 PBS 介面，確認 Dashboard 與 datastore 狀態正常：使用者回報正常（2026-11-06）
-- [x] 手動備份並還原一台 VM 驗證：使用者回報成功（2026-11-06）
-- [x] 確認 node221 上的 VM 200 沒有 `lock`：2026-11-06 實測 `status: running`，`qm config 200 | grep lock` 沒有輸出
-- [x] 刪除 node221 上的 token：`pveum user token remove` 回應 `no such token 'mig'`，token 已不存在
-- [x] 刪除 node220 上的舊 VM 與磁碟：2026-11-06 實測完成（見 7-2）
-- [x] 檢查舊 VM 的 `onboot`：舊 VM 已刪除，不需要了
-- [ ] 對 datastore 跑一次 Verify，並記錄結果（搬移後的資料完整性）
-- [ ] 確認兩台 PVE 的 `PBS206` storage 都是 active
-- [ ] 確認備份排程已恢復（搬移前停用的任務）
-- [ ] 規劃 datastore 的第二份副本（外接磁碟、NAS 或異地 PBS）
+| 驗收項目 | 結果 | 依據 |
+| --- | --- | --- |
+| 線上搬移完成 | ✅ `migration finished successfully (duration 00:18:34)` | 實測輸出 |
+| node221 新 VM 設定正確、沒有 `lock` | ✅ `running`，磁碟、網卡、CPU 與預期相符 | 實測輸出（2026-11-06） |
+| PBS 介面與 datastore 正常 | ✅ | 使用者回報（2026-11-06） |
+| 手動備份並還原一台 VM | ✅ | 使用者回報（2026-11-06） |
+| 兩台 PVE 的 `PBS206` storage 為 active | ✅ | 使用者回報（2026-11-06） |
+| 刪除 node220 舊 VM 與磁碟 | ✅ `qm list` 無 VMID 200、`zfs list \| grep vm-200` 無輸出 | 實測輸出（見 7-2） |
+| 刪除 node221 的 token | ✅ `no such token 'mig'`，token 已不存在 | 實測輸出 |
+| datastore Verify | ⚠️ 未執行：datastore 上沒有排程備份的資料 | 使用者回報；有資料後建議補跑 |
+| 備份排程 | 無須處理：使用者回報目前沒有排程備份 | 使用者回報 |
+| datastore 第二份副本 | 後續建議，本次未做（見 7-3） | — |
 
 ## 11. 延伸閱讀
 
