@@ -4,7 +4,7 @@ title: "兩台獨立 PVE 之間搬 VM：用 qm remote-migrate 線上搬移（PBS
 date: 2026-11-05
 categories: [PVE, PBS, 遷移]
 permalink: /docs/pve/pve-standalone-vm-live-migration/
-last_modified_at: 2026-11-05
+last_modified_at: 2026-11-06
 ---
 
 # 兩台獨立 PVE 之間搬 VM：用 qm remote-migrate 線上搬移（PBS 虛擬機實測）
@@ -292,6 +292,8 @@ qm config 200 | grep onboot
 
 本次 `qm status 200` 為 ✅ `stopped`。**舊 VM 不能再啟動**，否則兩台會用同一個 IP 與 MAC。`onboot` 沒輸出或 `onboot: 0` 都沒問題；若是 `onboot: 1`，執行 `qm set 200 --onboot 0`，避免 node220 重開機時把它又啟動起來。（本次尚未檢查 `onboot`，見待辦）
 
+**舊 VM 會帶著 `lock: migrate`**：2026-11-06 實測，node220 上的舊 VM `qm status 200` 為 `stopped`，`qm config 200` 有 `lock: migrate`。這是用 `--delete 0` 保留舊 VM 時留下的鎖，推測用意是防止誤啟動；對它做啟動、備份等操作會出現 `TASK ERROR: VM is locked (migrate)`。**這不是故障，不要為了消除錯誤就 `qm unlock`**，要等確定刪除舊 VM 時才解鎖（見 7-2）。
+
 ### 6-3 確認 PBS 服務本身
 
 這部分要看 PBS 自己的介面，從 PVE 設定看不出來：
@@ -323,7 +325,7 @@ token 的權限等同 root，搬完就刪，不要留著。
 
 ### 7-2 舊 VM 先保留
 
-node220 上的舊 VM 200（含 `local-zfs` 32 GB、`hddpool` 300 GB 的磁碟）因為 `--delete 0` 還在。建議**觀察一週**，確認 PBS 備份、Verify、還原都沒問題，再手動刪除舊 VM 與它的磁碟，釋放空間。
+node220 上的舊 VM 200（含 `local-zfs` 32 GB、`hddpool` 300 GB 的磁碟）因為 `--delete 0` 還在。建議**觀察一週**，確認 PBS 備份、Verify、還原都沒問題，再手動刪除舊 VM 與它的磁碟，釋放空間。舊 VM 有 `lock: migrate`，刪除前要先用 `qm unlock 200` 解鎖；解鎖後**絕對不要啟動它**。刪除的實際指令與結果本次尚未實測，執行後再補。
 
 ### 7-3 搬完之後的風險
 
@@ -339,6 +341,7 @@ PBS206 現在和另一台 VM 同在 node221 上，node221 的 VM 備份也寫進
 | 之後 | `qm set 200 --cpu x86-64-v2-AES`、`qm pending 200` 全部為 `cur`、沒有 `new`；VM 在 node220 開機 |
 | 17:01:02 | 第二次嘗試：加上 `--online`，`migration finished successfully (duration 00:18:34)`；`mirror-scsi0`、`mirror-scsi1` 皆完成 |
 | 搬移後 | node221 `qm status 200` 為 `running`，設定與預期相符；node220 `qm status 200` 為 `stopped` |
+| 2026-11-06 | node220 舊 VM：`status: stopped`、`lock: migrate`；對它操作出現 `TASK ERROR: VM is locked (migrate)`（預期行為，見 6-2）。node221 的 `lock` 狀態尚未確認 |
 
 ## 9. 常見問題
 
@@ -352,6 +355,7 @@ PBS206 現在和另一台 VM 同在 node221 上，node221 的 VM 備份也寫進
 | 貼上長指令被截斷，只執行到一半 | 整段放在單行貼上，貼完先看結尾是不是 `--delete 0`。本次曾有一行被截成不完整的網址，帶著 token 的 `Authorization` 標頭送到了錯誤的位址（沒有服務回應，影響很小，但這就是 token 搬完要刪的原因） |
 | 備份任務沒有備份到 datastore 資料 | 本次 `scsi1` 設了 `backup=0`，`vzdump` 不會備份它。所以搬移前的退路備份只會包含系統碟，datastore 資料要靠另一份副本 |
 | node221 的 PBS storage 顯示 `inactive`、`No route to host` | 本次是因為 VM 當時關機沒有回應，不是網路問題。搬完開機後應變回 active（待驗證） |
+| 對 node220 的舊 VM 操作時出現 `TASK ERROR: VM is locked (migrate)` | 用 `--delete 0` 保留舊 VM 時，舊 VM 會留著 `lock: migrate`（用 `qm config 200 \| grep lock` 確認）。這是預期行為，推測是防止誤啟動，**不要 `qm unlock` 後再啟動它**。要刪除舊 VM 時才解鎖。若是 node221 上的新 VM 出現這個鎖，先確認沒有搬移任務還在跑，再處理 |
 | 搬移失敗或中止 | 不要急著重試或手動刪東西。有 `--delete 0` 時來源 VM 通常還在；先檢查來源有沒有 `__migration__` 快照（`zfs list -t snapshot`）、目標有沒有殘留磁碟，再把完整訊息拿去查 |
 
 ## 10. 待辦
@@ -361,6 +365,7 @@ PBS206 現在和另一台 VM 同在 node221 上，node221 的 VM 備份也寫進
 - [ ] 確認兩台 PVE 的 `PBS206` storage 都是 active
 - [ ] 檢查 node220 舊 VM 的 `onboot` 設定
 - [ ] 恢復備份排程，手動備份並還原一台 VM 驗證
+- [ ] 確認 node221 上的 VM 200 沒有 `lock`（`qm config 200 | grep lock` 應沒有輸出）
 - [ ] 刪除 node221 上的 token `root@pam!mig`
 - [ ] 觀察一週後，刪除 node220 上的舊 VM 與磁碟
 - [ ] 規劃 datastore 的第二份副本（外接磁碟、NAS 或異地 PBS）
