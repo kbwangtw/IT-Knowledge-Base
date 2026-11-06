@@ -449,7 +449,8 @@ occ status | grep -E "installed|maintenance"
 - [ ] SNMP：用 PVE Firewall 限制 UDP 161 只有 LibreNMS 能連；對外開放前一併處理 VM 的入站規則
 - [ ] LibreNMS：評估忽略 Docker 的 `veth*`、`br-*` 介面（語法要查 26.10 的文件，**未確認**）
 - [ ] 確認設備狀態條在運作一天後變綠
-- [ ] 更新既有文件：[Wazuh 維運與 LibreNMS 納管](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-operations/)裡讀取 `devices.authpass`、`cryptopass` 的 `snmp-v3-add.sh`、`snmp-v3-lnms.sh` 與 Graylog v2c 改 v3 的 `UPDATE` 語句，在 LibreNMS 26.10 已經失效
+- [x] 既有文件已加註：[Wazuh 維運與 LibreNMS 納管](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-operations/)的 11-11（`snmp-v3-add.sh`、`snmp-v3-lnms.sh`、Graylog v2c 改 v3 的 `UPDATE`）與 11-12（`snmp-v3-upgrade.sh`、`UPDATE devices SET authalgo…`）在 LibreNMS 26.10 之後已失效，兩節開頭都有警示（2026-11-06）；26.10 之後調整既有設備認證演算法的替代做法**尚未驗證**
+- [ ] 驗證 LibreNMS 26.10 之後調整**既有設備**認證演算法的做法（網頁設備設定的 SNMP 分頁，或官方 CLI／API），驗證後補回上述文件
 - [ ] 觀察 Graylog 索引大小：`app` 容器每個請求一筆日誌，使用者增加後留意
 - [ ] 評估是否要為這台 VM 的日誌補 Graylog Pipeline 規則（目前進 Infrastructure Syslog Stream，但沒有針對 Linux VM 或 Docker 的分類欄位）
 
