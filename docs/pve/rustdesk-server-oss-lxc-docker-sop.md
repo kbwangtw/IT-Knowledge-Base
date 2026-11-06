@@ -17,7 +17,7 @@ last_modified_at: 2026-11-06
 | 適合誰看 | 想在 PVE 自建遠端桌面中繼／註冊服務的人；第一次接觸 RustDesk 的人 |
 | 環境 | PVE 9.x；LXC（Ubuntu 22.04 範本，unprivileged）；Docker Compose；`rustdesk/rustdesk-server` 映像檔 |
 | 日期 | 2026-11-04（部署）；2026-11-06 結案 |
-| 結論 | ✅ CT 115 完成 RustDesk Server OSS 部署：Docker Compose 跑 hbbs／hbbr、ufw 只放行必要 Port、兩台 Client 互連正常、PBS 備份與還原後 Key 一致、已加入 HA 並驗證遷移；VPN 使用者從外部連入未實測（結案原因見第 6 節）。**已結案**，環境無外部使用者，僅作架設練習 |
+| 結論 | ✅ CT 115 完成 RustDesk Server OSS 部署：Docker Compose 跑 hbbs／hbbr、ufw 只放行必要 Port、兩台 Client 互連正常、PBS 備份與還原後 Key 一致、已加入 HA 並驗證遷移；VPN 使用者從外部連入未實測（結案原因見第 6 節）。**已結案**，環境無外部使用者，僅作架設練習；CT 115 已於 2026-11-06 下線並刪除 |
 | 官方文件 | [RustDesk Server OSS](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/)、[Docker 安裝](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/docker/)、[Client 設定](https://rustdesk.com/docs/en/self-host/client-configuration/) |
 
 > 文中 IP 都是文件示範位址（192.0.2.0/24），`<網域>` 請換成自己的網域，指令執行前請替換。
@@ -445,6 +445,8 @@ ha-manager status | grep ct:115
 | Client 連線型態（直連或中繼） | 未記錄 |
 | ufw 放行來源限制 | 未處理：目前不限來源，僅內網與 VPN 可達 |
 | 手動備份的 protected 保護 | 未取消：這份備份不會被保留策略自動刪除，不需要時到 PBS 取消保護 |
+
+**下線**（2026-11-06）：依下方「若要下線這台 Server」的順序處理，已從 HA 移除（`ha-manager remove ct:115`，狀態先顯示 `deleting`，等它消失才停機）、停機後以 `pct destroy 115 --purge` 刪除 CT（含 16G rootfs），其他 CT 不受影響。PBS 上的備份不會隨 `pct destroy` 一起刪除，手動備份仍為 protected，每日排程備份依保留策略逐漸清掉。
 
 **日後若要真的對外提供使用**，至少補做：
 
