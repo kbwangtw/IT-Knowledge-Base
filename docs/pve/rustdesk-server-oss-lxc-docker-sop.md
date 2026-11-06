@@ -4,7 +4,7 @@ title: "在 PVE 用 LXC + Docker 架設 RustDesk Server（開源版）"
 date: 2026-11-04
 categories: [PVE, LXC, Docker, RustDesk]
 permalink: /docs/pve/rustdesk-server-oss-lxc-docker-sop/
-last_modified_at: 2026-11-04
+last_modified_at: 2026-11-06
 ---
 {% raw %}
 
@@ -16,8 +16,8 @@ last_modified_at: 2026-11-04
 | --- | --- |
 | 適合誰看 | 想在 PVE 自建遠端桌面中繼／註冊服務的人；第一次接觸 RustDesk 的人 |
 | 環境 | PVE 9.x；LXC（Ubuntu 22.04 範本，unprivileged）；Docker Compose；`rustdesk/rustdesk-server` 映像檔 |
-| 日期 | 2026-11-04 |
-| 結論 | ✅ CT 115 完成 RustDesk Server OSS 部署：Docker Compose 跑 hbbs／hbbr、ufw 只放行必要 Port、兩台 Client 互連正常、PBS 備份與還原後 Key 一致、已加入 HA 並驗證遷移；⏳ VPN 使用者從外部連入、映像版本固定尚待處理 |
+| 日期 | 2026-11-04（部署）；2026-11-06 結案 |
+| 結論 | ✅ CT 115 完成 RustDesk Server OSS 部署：Docker Compose 跑 hbbs／hbbr、ufw 只放行必要 Port、兩台 Client 互連正常、PBS 備份與還原後 Key 一致、已加入 HA 並驗證遷移；VPN 使用者從外部連入未實測（結案原因見第 6 節）。**已結案**，環境無外部使用者，僅作架設練習 |
 | 官方文件 | [RustDesk Server OSS](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/)、[Docker 安裝](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/docker/)、[Client 設定](https://rustdesk.com/docs/en/self-host/client-configuration/) |
 
 > 文中 IP 都是文件示範位址（192.0.2.0/24），`<網域>` 請換成自己的網域，指令執行前請替換。
@@ -428,13 +428,32 @@ ha-manager status | grep ct:115
 | 21118／21119 被掃描或濫用的疑慮 | 不用 Web Client 就不要開；要用就放在反向代理後面並以防火牆限制 |
 | 想要網頁管理介面 | OSS 沒有；需評估 RustDesk Server Pro |
 
-## 6. 待辦
+## 6. 結案紀錄與未驗證項目
 
-- [ ] 從 VPN 連入，用內網 IP 做一次完整連線測試（先確認 VPN 的 `AllowedIPs` 涵蓋 Server 所在網段）
-- [ ] 把 `compose.yml` 的 `latest` 固定成版本 tag（目前實測為 hbbs 1.1.16；tag 名稱需先到 Docker Hub 確認）
-- [ ] 記錄 Client 連線型態（直連或中繼）
-- [ ] 取消手動備份的 protected 保護（不再需要時，到 PBS 操作）
-- [ ] 評估是否限制 ufw 放行來源（目前不限來源，僅內網與 VPN 可達）
+**結案**（2026-11-06）：本篇是在 PVE 練習架設 RustDesk Server OSS。RustDesk 的典型用途是提供**外部使用者**遠端連線，但本環境沒有這類需求，所以不再投入外部連入的實測，直接結案。
+
+| 項目 | 狀態 |
+| --- | --- |
+| 部署（hbbs／hbbr、Docker Compose） | ✅ 已實測 |
+| Key 驗證（SHA256 前 12 碼） | ✅ 已實測 |
+| 內網兩台 Client 互連 | ✅ 已實測 |
+| ufw 只放行必要 Port | ✅ 已實測 |
+| PBS 備份、還原後 Key 一致 | ✅ 已實測 |
+| HA 與手動遷移 | ✅ 已實測 |
+| VPN 使用者從外部連入 | 未實測（只確認 VPN 的 `AllowedIPs` 涵蓋 Server 所在網段，沒有實際從外部連線） |
+| 映像檔固定版本 tag | 未處理：`compose.yml` 仍用 `latest`（實測為 hbbs 1.1.16） |
+| Client 連線型態（直連或中繼） | 未記錄 |
+| ufw 放行來源限制 | 未處理：目前不限來源，僅內網與 VPN 可達 |
+| 手動備份的 protected 保護 | 未取消：這份備份不會被保留策略自動刪除，不需要時到 PBS 取消保護 |
+
+**日後若要真的對外提供使用**，至少補做：
+
+1. 從 VPN 或外網實際連線測試，並確認連線型態。
+2. 把 `latest` 固定成版本 tag（tag 名稱先到 Docker Hub 確認）。
+3. 評估 ufw 限制來源。
+4. 評估是否需要 Pro 版的管理介面（OSS 沒有裝置清單與權限控管）。
+
+**若要下線這台 Server**：先確認沒有 Client 還在使用，再從 HA 移除（`ha-manager remove ct:115`），然後停機或刪除 CT；刪除前先確認備份是否還要保留。
 
 ## 7. 延伸閱讀
 
