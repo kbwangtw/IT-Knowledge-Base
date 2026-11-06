@@ -448,6 +448,8 @@ ha-manager status | grep ct:115
 
 **下線**（2026-11-06）：依下方「若要下線這台 Server」的順序處理，已從 HA 移除（`ha-manager remove ct:115`，狀態先顯示 `deleting`，等它消失才停機）、停機後以 `pct destroy 115 --purge` 刪除 CT（含 16G rootfs），其他 CT 不受影響。PBS 上的備份不會隨 `pct destroy` 一起刪除，手動備份仍為 protected，每日排程備份依保留策略逐漸清掉。
 
+**Wazuh 與 jt-ipam 的清理**（2026-11-06）：CT 115 在 11-05 已接上 Wazuh Agent（ID 019），下線後要在 Wazuh 移除這筆。CT 刪除後 Manager 仍顯示 `Active`，要等心跳靜止（本案判定 Disconnected 的時間是 15 分鐘）；確認心跳超過 10 分鐘沒更新後用 `manage_agents -r 019` 移除，jt-ipam 的 Wazuh 與 VM 紀錄會在下一次同步自動清除。完整步驟與實測見 [Wazuh（一）9-12](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-sop/)。
+
 **日後若要真的對外提供使用**，至少補做：
 
 1. 從 VPN 或外網實際連線測試，並確認連線型態。

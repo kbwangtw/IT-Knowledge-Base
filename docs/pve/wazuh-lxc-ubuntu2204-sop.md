@@ -4,7 +4,7 @@ title: "在 PVE Cluster 用 LXC 架設 Wazuh（一）：安裝與接上 Agent"
 date: 2026-09-29
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-sop/
-last_modified_at: 2026-11-05
+last_modified_at: 2026-11-06
 ---
 {% raw %}
 
@@ -947,6 +947,8 @@ rm -rf /var/ossec
 /var/ossec/bin/manage_agents -r <ID>
 ```
 
+**主機已經刪除、沒辦法再登入時**，只要做 Manager 端那一步；但要先確認 Agent 真的沒有在回報，再移除。做法與實測見本篇 9-12。
+
 ### 9-5 PVE 節點的告警調校（接上後觀察）
 
 預設的檔案完整性監控（FIM）會掃 `/etc`，其中包含叢集檔案系統 `/etc/pve`。`/etc/pve` 的變更會同步到每台節點，三台都裝 Agent 時同一個變更會產生三份告警。先以預設值觀察一段時間，再決定是否在 Agent 的 `ossec.conf` 加入 `<ignore>/etc/pve</ignore>`，或改由 Manager 端規則處理。FIM 只記錄雜湊值，除非啟用 `report_changes`，不會保存檔案內容。
@@ -1360,6 +1362,8 @@ rm -f /tmp/wazuh-agent_4.14.8-1_amd64.deb
 
 RustDesk Server（hbbs／hbbr，Docker）跑在 [CT 115](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/rustdesk-server-oss-lxc-docker-sop/)，系統是 Ubuntu 22.04.5 LTS。Agent 裝在**容器本身**（不是裝進 Docker 容器裡），這樣才看得到 Docker 主機的系統、套件與檔案。
 
+> **這台 CT 已於 2026-11-06 下線並刪除，Agent 019 也已從 Manager 移除**（見 9-12）。本節保留作為「Ubuntu 22.04 LXC 新增 Agent」的實測範例。
+
 與 9-6 的差異：容器能直接連外下載，所以**在容器內直接 `wget` 與 `dpkg -i`**，不用從 PVE 節點 `pct push`；而且 Agent 版本改用與 Manager 相同的 **4.14.9**。
 
 **1. 確認在 RustDesk 容器內，再做事前檢查**（唯讀）。在 PVE 節點用 `pct enter 115` 進入容器：
@@ -1433,11 +1437,86 @@ rm -f /tmp/wazuh-agent_4.14.9-1_amd64.deb
 - **指令裡的 `<Wazuh IP>` 要換成實際位址，連 `<` `>` 一起換掉**：照貼的話，shell 會把 `<` 當成檔案重導向，出現 `command not found`，連線測試也沒有輸出。
 - **第一次換位址時測成了另一台主機的位址**（Wazuh 轉送日誌的目的地）：兩個連線都沒有輸出，容易誤以為是防火牆問題。連線測試前先確認位址是 Manager 的位址（看其他 Agent 的 `ossec.conf` 裡的 `<address>`）。
 
-**接上後尚待處理**：
+**接上後原本規劃的後續**：用 FIM 監控 RustDesk 金鑰與 `compose.yml`、收集 hbbs／hbbr 日誌、固定容器 IP。這些**沒有執行**：RustDesk 篇在 2026-11-06 結案，CT 115 當天下線。jt-ipam 有帶入這筆（11-06 移除前，Wazuh 同步 `fetched` 為 20）。
 
-- RustDesk 專屬監控：用 FIM 監控 `/opt/rustdesk/data` 下的金鑰（`id_ed25519` 等，**不要貼出私鑰內容**）與 `compose.yml`、收集 hbbs／hbbr 日誌；先觀察預設告警量再加。
-- 確認 jt-ipam 同步後 `fetched` 增加為 20。
-- 這台容器的 IP 要固定（靜態或 DHCP 預留），Manager 與 jt-ipam 用 IP 比對。
+### 9-12 主機已刪除：移除 Agent（RustDesk，CT 115）
+
+**情境**：Agent 所在的主機已經刪除（RustDesk 的 CT 115，2026-11-06 約 09:03），Manager 端還留著這個 Agent。主機沒了，**Agent 端不用做任何事**，只處理 Manager、jt-ipam 與其他關聯項目。
+
+**1. 確認要移除的是哪一筆、而且沒有東西還在回報**（Wazuh 主機，唯讀）：
+
+```bash
+date
+/var/ossec/bin/agent_control -i 019 | grep -iE "name|status|keep alive"
+grep -nE "agents_disconnection" /var/ossec/etc/ossec.conf
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `Last keep alive` | 最後一次心跳的 Unix 時間；用 `date -d @<數字>` 換成本地時間，再跟 `date` 比 |
+| `agents_disconnection_time` | **這個值**才決定多久沒心跳會變成 `Disconnected`；`agents_disconnection_alert_time` 只是告警門檻，兩個不要搞混 |
+
+看到的結果：`Status` 仍是 `Active`，但 `Last keep alive`（09:03:47）停在刪除當時、隔幾分鐘重查**沒有前進**；`agents_disconnection_time` 是 `15m`，所以要到約 09:19 才會變成 `Disconnected`。
+
+> **踩到的雷**：一開始照預設值（10 分鐘）估時間，到點查還是 `Active`，差點誤以為還有第二台機器用同一把金鑰在回報。檢查這個環境的實際設定值，並看心跳是否前進，比看狀態字樣可靠。
+
+**2. 先備份註冊金鑰檔，再用「心跳靜止時間」把關後移除**：
+
+```bash
+cp -a /var/ossec/etc/client.keys /root/client.keys.before-remove-$(date +%Y%m%d)
+ka=$(/var/ossec/bin/agent_control -i 019 | awk '/Last keep alive:/{print $NF}')
+age=$(( $(date +%s) - ka ))
+echo "019 最後心跳距今 ${age} 秒"
+[ "$age" -gt 600 ] && /var/ossec/bin/manage_agents -r 019 || echo "心跳還不夠久（或讀不到），不移除"
+/var/ossec/bin/agent_control -ls | grep -ic rustdesk
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `cp ... client.keys` | 備份註冊金鑰檔；**內含所有 Agent 的金鑰**，確認其他 Agent 正常後要刪除，不要留 |
+| `age=$(( ... ))` | 算出最後心跳距今幾秒 |
+| `-gt 600` | 超過 10 分鐘沒有心跳才移除；心跳還在動時條件不成立，什麼都不會刪 |
+| `grep -ic rustdesk` | 確認清單已經沒有這筆（預期 `0`） |
+
+看到的結果：`019 最後心跳距今 793 秒`、`Agent '019' removed.`、最後一行 `0`（輸出會出現 `manage_agents` 的選單與確認畫面，輸入 ID 與 `y`，結果相同）。**第一次**我們用「狀態必須是 `Disconnected`」當條件，因為當時還是 `Active`，指令正確地沒有移除任何東西。
+
+**3. 確認其他 Agent 沒有被誤傷**：
+
+```bash
+/var/ossec/bin/agent_control -ls | awk -F, '{print $4}' | sort | uniq -c
+/var/ossec/bin/agent_control -l | grep -i disconnected
+/var/ossec/bin/agent_upgrade -l
+```
+
+看到的結果：16 台 `Active`、1 筆 `Active/Local`（Manager 自己）、2 台 `Disconnected`，是 `ubclient`、`WinClient` 兩台用戶端電腦關機；`agent_upgrade -l` 回報 `All agents are updated.`。
+
+**4. jt-ipam 會自動清掉**（PVE 節點，下一次同步約 6 分鐘內）：
+
+```bash
+pct exec 103 -- journalctl -u jt-ipam-sync --since '-10min' --no-pager | grep -iE "wazuh|ERROR"
+```
+
+| 時間 | 項目 | 結果 |
+| --- | --- | --- |
+| 09:12 | Proxmox 同步 | `vms_removed: 1`：CT 刪除後，VM 紀錄自動移除 |
+| 09:12 | Wazuh 同步 | `fetched 20`、`removed 0`（那時 Agent 還沒移除） |
+| 09:18 | Wazuh 同步 | `removed: 1`、`fetched 19`、`ambiguous_ip 0`，沒有 `ERROR` |
+| 兩次 | LibreNMS 同步 | `devices_seen 19` 不變、`errors=[]`；與這台存在前相同，推測沒有加進 LibreNMS |
+
+**所以不需要手動到 jt-ipam 刪 Wazuh 與 VM 那兩筆。** 但 jt-ipam 同步**不會刪 LibreNMS 已移除的設備**，也不一定清得掉原本分配的 IP，要到 jt-ipam 網頁的 IP、Device 視角確認，有殘留就用網頁刪除（不要直接改資料庫，不會留在稽核紀錄）。
+
+**5. 其他容易漏掉的關聯項目**：
+
+| 項目 | 怎麼確認 | 本案狀態 |
+| --- | --- | --- |
+| HA 資源 | `ha-manager status \| grep 115` | ✅ 沒有輸出（已移除） |
+| PBS 備份 | PBS 網頁看該 CT 的備份 | 手動備份仍為 protected，不會被保留策略自動刪，要不要刪由人決定（不可復原） |
+| DNS 名稱解析 | AdGuard rewrite、Pihole 本機 DNS | ⏳ 待確認 |
+| LibreNMS 設備 | 設備清單 | ⏳ 待確認（推測沒有加入） |
+| jt-ipam 網頁的 IP、Device 殘留 | 三個視角看 stale data | ⏳ 待確認 |
+| 歷史告警 | — | 留在 Indexer，ISM 30 天後自動刪除，不用處理 |
+
+**後續**：確認其他 Agent 都正常後，刪除剛才備份的 `client.keys`（含所有 Agent 的金鑰）。升級留下的備份也含金鑰或連線密碼，觀察幾天後再清（Wazuh 主機的 `/root/wazuh-pre-4.14.9/`、各台的 `ossec-etc-pre-4.14.9`、Windows 的 `C:\Temp\ossec-agent-pre-4.14.9`）。
 
 ## 常見問題
 
@@ -1450,6 +1529,7 @@ rm -f /tmp/wazuh-agent_4.14.9-1_amd64.deb
 | 外部連不到 55000 | API 刻意只聽本機與允許的來源，這是預期 | 7-4 |
 | Agent 一直是 Pending | 剛註冊時正常，通常數十秒內轉為 Active | 9-6 |
 | PVE 節點裝 Agent 遇到相依性問題 | 先裝相依套件，再用 .deb 安裝，不新增 Wazuh 套件庫 | 9-2a |
+| 主機已刪除，Manager 上的 Agent 還是 `Active` | 看 `agents_disconnection_time`（本案 15 分鐘）與 `Last keep alive` 是否前進；心跳靜止超過 10 分鐘就可以用 `manage_agents -r` 移除，不必等狀態變成 `Disconnected` | 9-12 |
 | 新增 Agent 前不確定自己在哪台主機 | 先看提示字元與 `hostname`，並確認 `dpkg -l wazuh-manager` 沒有輸出；Wazuh 主機不能再裝 `wazuh-agent` | 9-11 |
 | 照貼指令後 `command not found`、連線測試沒有輸出 | 指令裡的 `<Wazuh IP>` 要換成實際位址，連 `<` `>` 一起換掉；位址要是 Manager 的，不是其他主機的 | 9-11 |
 | 新裝的 Agent 版本比 Manager 舊 | 下載網址的版本號要與 Manager 相同（現在是 4.14.9），本節舊範例寫的是 4.14.8 | 9-1 |
