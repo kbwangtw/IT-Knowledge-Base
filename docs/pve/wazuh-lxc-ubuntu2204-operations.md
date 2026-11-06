@@ -4,7 +4,7 @@ title: "Wazuh 維運（二）：資料保留、告警調校、弱點修補與整
 date: 2026-10-02
 categories: [PVE, LXC, Wazuh, Security]
 permalink: /docs/pve/wazuh-lxc-ubuntu2204-operations/
-last_modified_at: 2026-11-01
+last_modified_at: 2026-11-06
 ---
 {% raw %}
 
@@ -845,6 +845,14 @@ pct exec 102 -- su - librenms -s /bin/bash -c "lnms device:poll 13 -m core" 2>&1
 
 ### 11-11 延伸：未監控的 LXC 加入 LibreNMS（SNMPv3 SHA／AES）
 
+> **⚠️ 2026-11-06 補充：LibreNMS 26.10 之後，本節讀取與修改資料庫的指令已不能用。**
+>
+> - **原因**：LibreNMS 的資料庫 migration（例如 `2026_10_25_005037_drop_device_snmp_fields`）已把 SNMP 設定從 `devices` 資料表移除。在 26.10.0 實測，`select authpass from devices …` 回報 `ERROR 1054 (42S22): Unknown column 'authpass'`，`snmpver`、`authlevel` 也同樣不存在；SNMP 密碼現在存在哪裡，本文**未確認**。
+> - **受影響的段落**：本節的 `snmp-v3-add.sh`、`snmp-v3-lnms.sh`、`snmp-v3-add-host.sh`、`snmp-v3-add-remote.sh`（後兩支依文中說明與前者同樣邏輯，推測同樣受影響，**未逐一實測**）、查詢設備的 `select … snmpver, authlevel …`，以及「Graylog 由 v2c 改為 v3」的 `UPDATE devices`。
+> - **不受影響**：已經在 LibreNMS 內的設備仍正常輪詢（2026-11-06 設備清單中既有主機皆為 Up）。
+> - **怎麼辦**：下面的內容是當時（舊版 LibreNMS）的實測紀錄，**保留不改**。新設備請改用[Nextcloud 監控篇的 5-3](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/nextcloud-monitoring-wazuh-librenms-graylog/)：腳本自己產生隨機 SHA／AES 密碼、用官方的 `lnms device:add -3 -u -a -A -x -X` 加入，不讀資料庫（該篇是 VM 的版本；LXC 要把 SSH 換回 `pct exec`／`pct push`）。
+> - **提醒**：LibreNMS 跟著開發主線更新（2026-11-05 仍有新 commit），資料庫結構隨時可能再變，直接讀寫資料表的腳本很脆弱，優先用 `lnms` 指令或 API。
+
 掃描時發現 ipam、ProxCenter、ai、wazuh 四個容器沒有 snmpd，也不在 LibreNMS。另外發現現有 9 台設備的 SNMPv3 使用 **MD5／DES**（已過時），因此新加入的主機直接改用 **SHA／AES**；帳號與密碼沿用 `snmpuser`，LibreNMS 的演算法以設備為單位設定，可以並存。
 
 **做法重點**：
@@ -942,6 +950,8 @@ WHERE d.device_id = 17;"
 驗證：`lnms device:poll 17 -m core` 出現 `Snmpget[3/0.05s]`；以原 community 執行 `snmpget -v2c` 回 `Timeout: No Response`，確認 v2c 已失效。
 
 ### 11-12 原有主機升級為 SHA／AES 並移除 v2c
+
+> **⚠️ 2026-11-06 補充**：本節的 `snmp-v3-upgrade.sh`（密碼從 LibreNMS 資料庫讀入）、各處 `UPDATE devices SET authalgo=…, cryptoalgo=…` 與還原用的 `authalgo='MD5'`，在 LibreNMS 26.10 之後都不能用，原因同 11-11 開頭的補充（SNMP 欄位已從 `devices` 資料表移除）。以下為當時的實測紀錄，保留不改。26.10 之後要調整**既有設備**的認證演算法，本文**沒有驗證過替代做法**，請改在 LibreNMS 網頁的設備設定（SNMP 分頁）修改，或查官方文件確認。snmpd 端的設定內容（刪除 v2c community、以 SHA／AES 重建 `createUser`）本身沒有變，但原本的密碼是腳本從資料庫讀入的，26.10 之後要另外取得或自行設定新密碼，本文**未驗證**取得既有密碼的方法。
 
 原有 7 台 Linux 主機（3 台節點、AdGuard、Pihole、librenms、wireguard）不能用 11-11 的腳本整份覆蓋設定，因為節點上有 LibreNMS 讀取 VM 資訊用的 `extend proxmox`，librenms 有 `extend distro`。改為**就地修改**。
 
@@ -1106,7 +1116,7 @@ pct exec 102 -- mysql librenms -e "SELECT g.name, d.hostname FROM device_group_d
 
 注意事項：
 
-- 規則依賴 `features`（`extend distro`）。新 LXC 以 `snmp-v3-add.sh` 加入會一併安裝 distro 並自動進入 Virtual_Group；手動設定 SNMP 未裝 distro 時 `features` 為 NULL，不會進任何群組。新 PVE 節點同理，要有 distro 才會進 Physical_Group。
+- 規則依賴 `features`（`extend distro`）。新 LXC 以 `snmp-v3-add.sh` 加入會一併安裝 distro 並自動進入 Virtual_Group（26.10 之後該腳本已失效，見 11-11 開頭的補充；distro 的做法本身不變）；手動設定 SNMP 未裝 distro 時 `features` 為 NULL，不會進任何群組。新 PVE 節點同理，要有 distro 才會進 Physical_Group。
 - ~~日後加入 DC01、DC02 時，Virtual_Group 加上 `OR devices.os equal windows`~~：10/22 實際以 Ping 加入，`os` 是 `ping`、其他欄位全為 NULL，改用 sysName 比對（見下方補充）。Windows Server 內建 SNMP 服務已列為淘汰，要補資源監控時評估改以既有 Wazuh Agent 等方式。
 - 有自己 kernel 的 VM（例如 QEMU 的 Linux VM）不符合 Virtual_Group 規則，若日後納管需另加條件（例如 hostname）。
 - 檢查是否有 LibreNMS 告警規則綁定群組：`SELECT r.name, g.name FROM alert_group_map m JOIN alert_rules r ON r.id=m.rule_id JOIN device_groups g ON g.id=m.group_id;`。2026-10-16 查詢無輸出，沒有告警規則綁定群組，所有告警套用全部設備。
