@@ -507,6 +507,7 @@ pvecm qdevice remove
 - [Proxmox VE：Storage](https://pve.proxmox.com/wiki/Storage)
 - [Proxmox VE：Cluster Manager（含 QDevice）](https://pve.proxmox.com/wiki/Cluster_Manager)
 - [Proxmox VE：Multipath](https://pve.proxmox.com/wiki/Multipath)
+- 本知識庫：[把 ESXi 上的 Windows＋SQL Server 虛擬機搬到獨立 PVE（一）：NFS 中轉、掛上磁碟與開機驗證](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/esxi-vm-to-pve-nfs-relay-sop/)：本文的「實測版」之一（單台 VM、獨立 PVE、700 GB 實測的數字與做法）；[（二）踩雷與效能診斷](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/esxi-vm-to-pve-troubleshooting/)裡有網卡協商成 100 Mbps 的查法，本文第 10 節「匯入速度很慢」可以直接對照
 - 本知識庫：[PVE HA 放置策略](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)：節點變多後，HA 規則怎麼分工
 - 本知識庫：[整個 PVE 叢集安全關機與開機](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-cluster-full-shutdown/)：搬機房、停電維護時使用
 - 本知識庫：[PBS 更新後，怎麼確認備份還能用？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/)：備份與還原驗證

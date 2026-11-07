@@ -56,6 +56,8 @@
 - [啟用 PVE 防火牆（階段 1a）：只收緊 Ceph 與沒用的埠](docs/pve/pve-firewall-stage1a-ceph-hardening.md)：叢集層加主機層、遠端排自動保險；管理埠暫時對服務網開放
 - [Corosync 加第二條 link（備援）：熱載入、不用重啟](docs/pve/corosync-second-link.md)：服務網當備援 link，三台兩條 link 皆 connected
 - [從 VMware ESXi 滾動式轉換到 PVE：新機先上、舊機回收（規劃 SOP）](docs/pve/esxi-to-pve-rolling-migration-sop.md)：Unity 380 走 FC 的 shared LVM、QDevice 隨節點數調整、舊 DL360 回收成節點（規劃，未實測）
+- [把 ESXi 上的 Windows＋SQL Server 虛擬機搬到獨立 PVE（一）：NFS 中轉、掛上磁碟與開機驗證](docs/pve/esxi-vm-to-pve-nfs-relay-sop.md)：700 GB 實測，複製 1 小時 49 分；C 碟轉 qcow2、D 碟空間不夠直接掛 VMDK；兩顆磁碟都掛好才開機；13 個資料庫 ONLINE、`DBCC CHECKDB` 無錯誤
+- [把 ESXi 上的 Windows＋SQL Server 虛擬機搬到獨立 PVE（二）：踩雷與效能診斷](docs/pve/esxi-vm-to-pve-troubleshooting.md)：網卡協商成 100 Mbps、RAID 5 無寫入快取、PVE 掃描 VMDK、VirtIO SCSI 開機失敗、VMware Tools 移除失敗
 - [兩台獨立 PVE 之間搬 VM：用 qm remote-migrate 線上搬移（PBS 虛擬機實測）](docs/pve/pve-standalone-vm-live-migration.md)：沒組叢集也能搬、ZFS 來源要用 `--online`、API token／指紋／`set +H`／pending CPU 的坑、332 GB 耗時 18 分 34 秒
 - [ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？](docs/pve/proxcenter-ceph-rolling-update.md)
 - [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](docs/pve/proxcenter-enterprise-update.md)：重跑安裝腳本帶 token、`up -d` 的陷阱、CT110 擴容、Node 仍是 26.12.0

@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 資訊黑手的 Knowledge Base
-last_modified_at: 2026-10-22
+last_modified_at: 2026-11-07
 ---
 
 # 資訊黑手的 IT 維運筆記
@@ -75,6 +75,8 @@ last_modified_at: 2026-10-22
 | 文章 | 適合什麼時候看 |
 | --- | --- |
 | [從 VMware ESXi 滾動式轉換到 PVE：新機先上、舊機回收（規劃 SOP）](docs/pve/esxi-to-pve-rolling-migration-sop/) | 要把 ESXi 換成 PVE，但硬體不夠多；Unity 走 FC 的 shared LVM、搬 VM、舊機回收成節點（規劃，未實測） |
+| [把 ESXi 上的 Windows＋SQL Server 虛擬機搬到獨立 PVE（一）：NFS 中轉、掛上磁碟與開機驗證](docs/pve/esxi-vm-to-pve-nfs-relay-sop/) | 要把一台 ESXi 上的 Windows＋資料庫 VM 搬到獨立 PVE；700 GB 實測，複製 1 小時 49 分；C 碟轉 qcow2、D 碟空間不夠直接掛 VMDK；兩顆磁碟都掛好才開機、資料庫驗證、IP／DNS 切換與舊機防護 |
+| [把 ESXi 上的 Windows＋SQL Server 虛擬機搬到獨立 PVE（二）：踩雷與效能診斷](docs/pve/esxi-vm-to-pve-troubleshooting/) | 搬 VM 時速度只有 10 MiB/s（網卡協商成 100 Mbps）、寫入 local-lvm 慢到停擺（RAID 5 沒有寫入快取）、PVE 把 VMDK 資料檔當磁碟、VirtIO SCSI 開機失敗、VMware Tools 移除失敗 |
 | [兩台獨立 PVE 之間搬 VM：用 qm remote-migrate 線上搬移（PBS 虛擬機實測）](docs/pve/pve-standalone-vm-live-migration/) | 兩台沒組叢集的 PVE 要搬 VM；來源是 ZFS 時停機搬移為什麼失敗；API token、指紋、CPU 世代與 pending 的坑 |
 | [ProxCenter 逐台更新 PVE：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 想用工具一次一台安全地更新叢集 |
 | [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](docs/pve/proxcenter-enterprise-update/) | 企業版 ProxCenter 自己要怎麼更新；`docker compose up -d` 的陷阱；CT110 擴容 |
