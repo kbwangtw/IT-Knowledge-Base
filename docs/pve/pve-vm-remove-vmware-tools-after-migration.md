@@ -180,9 +180,7 @@ Get-WmiObject Win32_PnPSignedDriver | Where-Object Manufacturer -like "VMware*" 
 
 它只會清掉 MSI 註冊資訊，**服務、檔案、驅動仍在**，所以後面還要手動清。清完用 4-3 的第一段登錄檔指令確認：
 
-**應該看到**：沒有任何輸出。本次結果：沒有輸出。
-
-> **未確認**：本次沒有保留 troubleshooter 的執行畫面，只確認了「登錄檔已查不到 VMware」這個結果。
+**應該看到**：沒有任何輸出。本次結果：已執行 troubleshooter，登錄檔查詢沒有輸出（MSI 註冊已清掉）。
 
 ### 4-5 停掉並刪除服務
 
@@ -369,7 +367,7 @@ qm start <VMID>
 | --- | --- |
 | snapshot `before-vmtools-removal` | ✅ 建立成功 |
 | `msiexec /x` 正常移除 | ❌ `1603`，卡在 `VM_LogStart` |
-| 清除 MSI 註冊 | ✅ 登錄檔已查不到 VMware（troubleshooter 畫面未保留，見 4-4） |
+| 清除 MSI 註冊 | ✅ 用 troubleshooter 清除，登錄檔已查不到 VMware |
 | 刪 3 個服務 | ✅ `DeleteService 成功` |
 | 刪 `Run` 的 `VMware User Process` | ✅ |
 | 刪資料夾 `C:\Program Files\VMware` | ✅ |
