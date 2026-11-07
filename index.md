@@ -75,6 +75,7 @@ last_modified_at: 2026-10-22
 | 文章 | 適合什麼時候看 |
 | --- | --- |
 | [從 VMware ESXi 滾動式轉換到 PVE：新機先上、舊機回收（規劃 SOP）](docs/pve/esxi-to-pve-rolling-migration-sop/) | 要把 ESXi 換成 PVE，但硬體不夠多；Unity 走 FC 的 shared LVM、搬 VM、舊機回收成節點（規劃，未實測） |
+| [VMware 搬到 PVE 後，Windows VM 開機跳出 VMware Tools 錯誤：移除失敗（1603）的處理](docs/pve/pve-vm-remove-vmware-tools-after-migration/) | VM 從 VMware 搬到 PVE 後，登入就跳 `0xc0000096`；`msiexec` 移除回 1603（卡在 `VM_LogStart`）；手動清服務、Run、資料夾、驅動；`qm pending` 讓 Guest Agent 生效 |
 | [兩台獨立 PVE 之間搬 VM：用 qm remote-migrate 線上搬移（PBS 虛擬機實測）](docs/pve/pve-standalone-vm-live-migration/) | 兩台沒組叢集的 PVE 要搬 VM；來源是 ZFS 時停機搬移為什麼失敗；API token、指紋、CPU 世代與 pending 的坑 |
 | [ProxCenter 逐台更新 PVE：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 想用工具一次一台安全地更新叢集 |
 | [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](docs/pve/proxcenter-enterprise-update/) | 企業版 ProxCenter 自己要怎麼更新；`docker compose up -d` 的陷阱；CT110 擴容 |
