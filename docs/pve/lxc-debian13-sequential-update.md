@@ -43,7 +43,7 @@ last_modified_at: 2026-11-08
    │
    ├─ 第 1 階段：對每個節點只「列出」Debian 13 的 CT 與目前狀態（不修改）
    │      ▼
-   │   你看過清單，輸入 yes 才繼續（LIST_ONLY=1 只看清單；YES=1 略過確認）
+   │   你看過清單，輸入 y 或 yes 才繼續（LIST_ONLY=1 只看清單；YES=1 略過確認）
    │
    └─ 第 2 階段：node10 → node11 → node12，一次一個節點、一次一台 CT
         ├─ 每個節點開始前，再做一次前置檢查
@@ -278,8 +278,8 @@ echo ">>> 第 1 階段：只列出各節點會處理的 CT 與目前狀態（不
 run_nodes 1
 [ "${LIST_ONLY:-0}" = 1 ] && exit 0
 if [ "${YES:-0}" != 1 ]; then
-  read -r -p "確定依上面清單開始更新？輸入 yes 繼續：" ans
-  [ "$ans" = yes ] || { echo "已取消"; exit 0; }
+  read -r -p "確定依上面清單開始更新？輸入 y 或 yes 繼續：" ans
+  case "$ans" in y|Y|yes|YES) ;; *) echo "已取消"; exit 0;; esac
 fi
 echo ">>> 第 2 階段：依序更新"
 run_nodes 0
@@ -306,7 +306,7 @@ echo "全部節點完成。觀察服務一天後，請刪除 pre-apt-$(date +%Y%
 | `preflight`（開頭與每個節點前） | 開始前檢查一次，之後每動一個節點前再檢查一次，避免前一個節點更新後叢集變差還繼續 |
 | `\|\| { …; exit 1; }`（`run_nodes` 裡） | 任一節點回傳非 0 就停止，**不會繼續下一個節點** |
 | `LIST_ONLY=1` | 第 1 階段列完清單就結束，不問、不更新 |
-| `read -r -p … yes` | 要輸入 `yes` 才會進第 2 階段；`YES=1` 可略過 |
+| `read -r -p …` ＋ `case … y\|Y\|yes\|YES` | 輸入 `y` 或 `yes`（不分大小寫）才會進第 2 階段，其他輸入或直接按 Enter 都取消；`YES=1` 可略過 |
 | `SKIP_CEPH_CHECK=1`、`SKIP_HA_CHECK=1` | 略過檢查；有已知、可接受的警告時才用，要自己承擔風險 |
 
 **執行方式**：
@@ -339,13 +339,13 @@ ONLY="101" NODES="node12" /root/lxc-debian13-update-all.sh
 ONLY="110" NODES="node11" /root/lxc-debian13-update-all.sh
 ```
 
-**應該看到什麼**：第 1 階段每個節點印「將依序更新的 Debian 13 CT：…」與各 CT 的 `目前狀態：running failed=0`；輸入 `yes` 後，每台依序出現 `===== CT<編號> =====`、（如有）`重開原因：…` 或 `不需要重開`，以及 `OK：CT<編號> 更新完成（重開=0 或 1，state=running，failed=0）`，最後印「全部節點完成」。出現 `STOP：…` 就是停在該台，先處理再重跑（見常見問題）。
+**應該看到什麼**：第 1 階段每個節點印「將依序更新的 Debian 13 CT：…」與各 CT 的 `目前狀態：running failed=0`；輸入 `y` 或 `yes` 後，每台依序出現 `===== CT<編號> =====`、（如有）`重開原因：…` 或 `不需要重開`，以及 `OK：CT<編號> 更新完成（重開=0 或 1，state=running，failed=0）`，最後印「全部節點完成」。出現 `STOP：…` 就是停在該台，先處理再重跑（見常見問題）。
 
 **測試狀況**：用模擬的 `ssh`／`pct`／`ceph`／`ha-manager` 驗證過：
 
 - 篩選：略過非 Debian 13、stopped、`EXCLUDE` 的 CT；`ONLY` 只處理指定的
 - 重開策略：`reboot-required` 時重開、只有 `tzdata` 時不重開、`REBOOT=never`／`always` 如預期
-- 保護：更新前就 `degraded` 的 CT 在拍快照前就停止；Ceph 非 `HEALTH_OK`、HA 有 `error` 時停止；某節點失敗時整個停止（exit 1）；`LIST_ONLY=1` 不需確認；輸入非 yes 會取消
+- 保護：更新前就 `degraded` 的 CT 在拍快照前就停止；Ceph 非 `HEALTH_OK`、HA 有 `error` 時停止；某節點失敗時整個停止（exit 1）；`LIST_ONLY=1` 不需確認；輸入 y／yes 以外的內容會取消
 
 **尚未在實際叢集執行**；`needrestart` 的實際輸出格式、`ha-manager status` 的實際文字也都只用模擬驗證。
 
