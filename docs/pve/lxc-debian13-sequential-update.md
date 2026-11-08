@@ -18,6 +18,60 @@ last_modified_at: 2026-11-08
 | 日期 | 2026-11-08 撰寫；同日由 Lab Ops 做唯讀盤點，並在 node11 實測 |
 | 結論 | ✅ 唯讀盤點：Ceph `HEALTH_OK`、13 個 HA 服務全是 `started`；Debian 13 的 CT 有 6 台 ✅ **2026-11-08 實測：6 台全部更新完成**，更新後驗收 `needrestart` 乾淨、failed 為 0、`running`、HA `started` ✅ 實測發現：`REBOOT=auto` 在本環境實質上等於每台都重開，因為各台都有舊的待重啟服務（`systemd-logind`、`unattended-upgrades`），不是這次的 `tzdata` 造成 ⏳ CT101、CT110 的更新輸出沒有保存，驗收結果見第 7 節的實測紀錄 ⏳ 各服務的網頁功能（IPAM、LibreNMS、WireGuard、ProxCenter）由人工確認，**尚未回報** |
 
+## 最短用法：只要一個指令
+
+**日常更新，在任一節點輸入這一個指令就好：**
+
+```bash
+lxc-update
+```
+
+它會自動做完整流程（前置檢查 → 列清單 → 逐台備份、更新、必要時重開、檢查），看到清單後輸入 `y` 或 `yes` 確認。任何一步異常都會自動停止，不會繼續動下一台。
+
+| 你要做的 | 說明 |
+| --- | --- |
+| 輸入 `lxc-update` | 預設不處理 CT105（Graylog，Debian 12）與 CT113（Lab Ops 所在的容器） |
+| 看清單 | 確認要更新的 CT 沒有錯；有已更新過的 CT 就不要確認（同一天重跑會因同名快照停止，見第 10 節） |
+| 輸入 `y` | 開始更新；其他輸入（含 Enter）都取消 |
+| 隔天刪快照 | 觀察服務一天正常後再刪（見下方） |
+
+**第一次使用前要先裝好（只做一次）**：把第 7 節的腳本存成 `/root/lxc-debian13-update-all.sh`，再建立 `lxc-update`：
+
+```bash
+chmod +x /root/lxc-debian13-update-all.sh
+cat > /usr/local/bin/lxc-update <<'EOF'
+#!/bin/bash
+EXCLUDE="${EXCLUDE:-105 113}" /root/lxc-debian13-update-all.sh "$@"
+EOF
+chmod +x /usr/local/bin/lxc-update
+```
+
+`lxc-update` 只是轉接，真正的邏輯在 `/root/lxc-debian13-update-all.sh`，兩個檔案都不要移動或改名。
+
+**常用變化**（需要時才用，平常不用管）：
+
+```bash
+LIST_ONLY=1 lxc-update            # 只看清單與各 CT 目前狀態，不更新
+ONLY="103" lxc-update             # 只更新指定的 CT（試跑用）
+EXCLUDE="105 110 113" lxc-update  # 改排除清單（例如這次不想動 ProxCenter）
+REBOOT=never lxc-update           # 不重開（舊的待重啟服務會一直留著）
+```
+
+**隔天刪快照**（`<日期>` 換成當天日期，例如 `20261108`；在任一節點執行，會逐台處理三個節點）：
+
+```bash
+for n in node10 node11 node12; do ssh root@$n 'for id in $(pct list | awk "NR>1{print \$1}"); do pct listsnapshot $id 2>/dev/null | grep -q pre-apt-<日期> && pct delsnapshot $id pre-apt-<日期> && echo "deleted CT$id"; done'; done
+```
+
+**要知道的限制**：
+
+- 預設會處理 ProxCenter（CT110），它的 `docker-ce` 升級會讓 docker 容器短暫停止（`restart: unless-stopped` 會自動起來）；更新前先確認沒有人在用、沒有跑到一半的任務。不想動它就用 `EXCLUDE="105 110 113" lxc-update`。
+- 兩台 DNS（AdGuard、Pihole）分在不同節點，節點依序更新，但間隔很短；在意的話把其中一台排除、另外做。
+- 同一天不能跑兩次（同名快照）。
+- 這個一鍵腳本含重開動作，**要由你直接在節點上執行**，不要透過 `rx`。
+
+以下是完整說明與每個環節的細節，一般日常使用不需要看。
+
 ## 1. 先認識幾個名詞
 
 | 名詞 | 白話解釋 |
