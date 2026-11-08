@@ -15,8 +15,8 @@ last_modified_at: 2026-11-08
 | --- | --- |
 | 適合誰看 | 管理多台 Debian 13 LXC、想用一支指令安全地依序更新的人 |
 | 環境 | PVE 9.x 三節點叢集（node10～12）、Ceph、HA；LXC 有 Debian 13、Debian 12、Ubuntu 22.04／24.04 混用 |
-| 日期 | 2026-11-08 撰寫；同日由 Lab Ops 做唯讀盤點 |
-| 結論 | ✅ 唯讀盤點：Ceph `HEALTH_OK`、13 個 HA 服務全是 `started`；**Debian 13 的 CT 只有 6 台**，其中 5 台只有 `tzdata` 要更新 ✅ 因此重開策略改成「必要時才重開」✅ 腳本用模擬的 `ssh`／`pct`／`ceph`／`ha-manager` 驗證過 ⏳ **尚未在實際叢集執行**，第一次請先用 `ONLY` 試跑一台 |
+| 日期 | 2026-11-08 撰寫；同日由 Lab Ops 做唯讀盤點，並在 node11 實測 |
+| 結論 | ✅ 唯讀盤點：Ceph `HEALTH_OK`、13 個 HA 服務全是 `started`；Debian 13 的 CT 有 6 台 ✅ **2026-11-08 實測：6 台全部更新完成**，更新後驗收 `needrestart` 乾淨、failed 為 0、`running`、HA `started` ✅ 實測發現：`REBOOT=auto` 在本環境實質上等於每台都重開，因為各台都有舊的待重啟服務（`systemd-logind`、`unattended-upgrades`），不是這次的 `tzdata` 造成 ⏳ CT101、CT110 的更新輸出沒有保存，驗收結果見第 7 節的實測紀錄 ⏳ 各服務的網頁功能（IPAM、LibreNMS、WireGuard、ProxCenter）由人工確認，**尚未回報** |
 
 ## 1. 先認識幾個名詞
 
@@ -116,7 +116,8 @@ done
 
 **判讀**：
 
-- 腳本會處理 6 台：CT103、100、110、101、102、109。其中 5 台只有 `tzdata`，**不需要重開容器**；CT110 有 `docker-ce`，風險最高。
+- 腳本會處理 6 台：CT103、100、110、101、102、109。其中 5 台待更新的只有 `tzdata`；CT110 有 `docker-ce`，風險最高。
+- 盤點當時我們**推測**只有 `tzdata` 就不用重開；實測證明這個推測**不成立**（見第 6 節）。
 - CT105 Graylog 是 Debian 12，版本篩選本來就會略過；放進 `EXCLUDE` 只是多一層保險。
 - 盤點時沒有查各 CT 更新前的 `systemctl --failed` 基準線，所以腳本加了「更新前先確認正常」的檢查（見第 7 節）。
 
@@ -132,7 +133,11 @@ done
 
 重開的理由沿用 [LXC 自動更新後的待重啟檢查](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/lxc-needrestart-service-restart/)的結論：`dbus`、`systemd-logind` 這類底層服務待重啟時，**整個容器重開**，不要逐一重啟。
 
-**注意**：`auto` 的判斷依賴 `needrestart`；`docker-ce` 這類套件的安裝腳本本來就會自己重啟 `dockerd`，所以 CT110 即使判斷為「不需要重開」，`dockerd` 還是會重啟（**依套件行為推測，未實測**），這是它建議單獨處理的原因。
+**實測發現（2026-11-08）**：CT103、100、102、109 都只更新 `tzdata`，但 `needrestart` 都列出同樣兩個待重啟的服務 `systemd-logind.service`、`unattended-upgrades.service`，所以 `auto` 都判定要重開。這兩個服務**不是這次更新造成的**，而是先前自動更新留下的舊待辦（apt 輸出的 `Service restarts being deferred`）。重開後 `needrestart` 只剩 `NEEDRESTART-VER`，舊待辦就清掉了。
+
+**所以**：舊待辦清掉以後，下一次才可能真的出現「不需要重開」；若不想重開，用 `REBOOT=never`，但舊待辦會一直留著。
+
+**注意**：`docker-ce` 這類套件的安裝腳本本來就會自己重啟 `dockerd`，CT110 沒開 `live-restore`，容器會跟著停止；它的 4 個容器都是 `restart: unless-stopped`，所以會自動起來。這是它建議單獨處理的原因。
 
 ## 7. 一鍵更新整個叢集
 
@@ -347,7 +352,26 @@ ONLY="110" NODES="node11" /root/lxc-debian13-update-all.sh
 - 重開策略：`reboot-required` 時重開、只有 `tzdata` 時不重開、`REBOOT=never`／`always` 如預期
 - 保護：更新前就 `degraded` 的 CT 在拍快照前就停止；Ceph 非 `HEALTH_OK`、HA 有 `error` 時停止；某節點失敗時整個停止（exit 1）；`LIST_ONLY=1` 不需確認；輸入 y／yes 以外的內容會取消
 
-**尚未在實際叢集執行**；`needrestart` 的實際輸出格式、`ha-manager status` 的實際文字也都只用模擬驗證。
+2026-11-08 已在實際叢集執行（見下方實測紀錄）。`ha-manager status` 的 `service` 行格式（`service ct:103 (node10, started)`）與 `needrestart -b` 的輸出，實測與腳本的解析一致。
+
+### 實測紀錄（2026-11-08，node11 執行）
+
+| CT | 名稱 | 更新內容 | 重開 | 驗收結果 |
+| --- | --- | --- | --- | --- |
+| 103 | IPAM | `tzdata`（`2026c` → `2026f`） | 是（待重啟：`systemd-logind`、`unattended-upgrades`） | ✅ `needrestart` 乾淨、failed 0、HA `started`、有快照 |
+| 100 | AdGuard | 同上 | 是（同上） | ✅ 同上 |
+| 102 | librenms | 同上 | 是（同上） | ✅ 同上；快照未在驗收時列出 |
+| 109 | wireguard | 同上 | 是（同上） | ✅ 同上；快照未在驗收時列出 |
+| 101 | Pihole | `tzdata` 已是 `2026f` | 更新輸出未保存；快照時間 10:33:58，驗收時 `uptime` 約 1 小時 58 分，**推算**更新後有重開（未直接觀察） | ✅ `needrestart` 乾淨、failed 0、`running`、HA `started` |
+| 110 | ProxCenter | `docker-ce` 系列＋`tzdata` | 更新輸出未保存 | ✅ 4 個容器 `Up`＋`healthy`、`needrestart` 乾淨、failed 0、`running`、HA `started`、有快照 |
+
+實測過程遇到的事：
+
+- **確認提示**：輸入 `y` 原本不被接受（只認 `yes`），連續被取消兩次，之後改成 `y`／`yes` 都可。打錯字（例如 `yws`）會取消，不會誤動作。
+- **同日快照衝突**：CT101 重跑時出現 `snapshot name 'pre-apt-20261108' already used`，腳本在拍快照這步就停止，沒動容器。查證後確認該 CT 其實已更新完成（`tzdata` 為 `2026f`、沒有待更新套件），不需要再更新，也沒有刪快照。
+- **第一次清單誤含已完成的 CT**：忘了把 103 加進 `EXCLUDE`，被確認提示攔下（取消）而沒有誤動。
+- **CT110（ProxCenter）**：更新前檢查 `Live Restore Enabled: false`，4 個容器 restart policy 都是 `unless-stopped`；更新後 4 個都 `Up`、`healthy`。
+- **DNS 驗證**：用 `dig +short <網域> @<DNS 位址>` 測；從聊天視窗複製指令會把網址變成 `[…](https://…)` 的連結格式，要手動打字或貼上後檢查。
 
 ## 8. 步驟 3：更新後的驗收
 
@@ -405,15 +429,19 @@ pct rollback <CTID> pre-apt-<日期>
 | `STOP：HA 有異常的資源` | `ha-manager status` 看是哪個資源，處理後再跑。已知可接受才用 `SKIP_HA_CHECK=1` |
 | 某節點出現 `STOP`，前面的節點已更新完 | 正常，前面的不用重做；修好後用 `NODES` 只列還沒做的節點重跑，例如 `NODES="node11 node12"` |
 | `STOP：節點 <名稱> 異常` 沒有其他訊息 | 多半是 SSH 連不上（`BatchMode=yes` 不問密碼）；先手動 `ssh root@<名稱> true` 確認 |
-| 重跑時說快照已存在 | 同一天重跑會撞到同名快照；先 `pct delsnapshot <CTID> pre-apt-<日期>`，或改日期再跑 |
+| 重跑時說快照已存在（`snapshot name … already used`） | 同一天重跑會撞到同名快照，腳本會在拍快照這步停止，**沒有動容器**。**先不要刪快照**：用 `pct listsnapshot <CTID>`、`dpkg -l <套件>`、`apt list --upgradable` 確認這台是不是其實已經更新完（2026-11-08 的 CT101 就是）；確定還沒更新過，才 `pct delsnapshot <CTID> pre-apt-<日期>` 再跑，或改天再跑 |
+| 確認提示輸入後直接「已取消」 | 只有 `y`、`Y`、`yes`、`YES` 會繼續，其他（包含打錯字、直接按 Enter）都取消；看清單時也要確認有沒有已更新過的 CT，避免同日快照衝突 |
 | 有套件被 `apt-mark hold` 鎖住沒更新 | 這是預期行為；用 `apt-mark showhold` 確認，需要升級時再有控制地處理 |
 | 透過 `rx` 執行被擋 | `rx` 會擋含 `reboot` 的指令（連名稱含這個字也擋），更新要由你直接在節點上執行 |
 | 重開後一直等不到 `running`（150 秒逾時） | 可能是服務啟動慢；進容器 `systemctl is-system-running` 再看，必要時調大 `seq 1 30` 的 30 |
 
 ## 11. 待辦
 
-- [ ] 在實際叢集用 `LIST_ONLY=1` 確認清單，再用 `ONLY="103"` 試跑，把實測結果（含 `needrestart` 與 `ha-manager status` 的實際輸出）補回本文
-- [ ] 實測後確認 `REBOOT=auto` 對 CT110（`docker-ce`）的行為：`dockerd` 是否重啟、容器是否跟著重啟、有沒有開 `live-restore`
+- [x] 在實際叢集用 `LIST_ONLY=1` 確認清單，再用 `ONLY="103"` 試跑，把實測結果補回本文（2026-11-08 已完成，見第 7 節實測紀錄）
+- [ ] 確認 CT110 更新時 `dockerd`／容器重啟花了多久、ProxCenter 網頁中斷多久（目前只有更新前後的檢查，沒有保存更新輸出）
+- [ ] 人工確認 IPAM、LibreNMS、WireGuard、ProxCenter 的網頁或連線功能正常
+- [ ] 觀察一天後，刪除六台 CT 的 `pre-apt-20261108` 快照，並把刪除結果補回本文
+- [ ] 下一次更新時，確認舊待重啟服務清掉後，`REBOOT=auto` 是否真的會在「只有小更新」時跳過重開
 - [ ] 確認 `LIST_ONLY=1` 能否透過 `rx` 執行（`rx` 是否只比對指令列字串，**未確認**）
 - [ ] 評估更新前檢查 Ceph 剩餘空間
 - [ ] 評估是否把 `EXCLUDE`／`ONLY` 設定改成設定檔，避免每次手打
