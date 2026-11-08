@@ -208,12 +208,14 @@ OK：CT100 更新並重開完成（state=running，failed=0）
 ```text
 ./lxc-debian13-update-all.sh
    │
+   ├─ 先檢查 Ceph 是 HEALTH_OK（不是就直接停止）
+   │
    ├─ 第 1 階段：對每個節點只「列出」會處理的 CT（不修改）
    │      ▼
    │   你看過清單，輸入 yes 才繼續（YES=1 可略過）
    │
    └─ 第 2 階段：node10 → node11 → node12，一次一個節點、一次一台 CT
-          任一台異常 → 整個停止，後面的節點不處理
+          每個節點開始前再檢查一次 Ceph；任一台異常 → 整個停止，後面的節點不處理
 ```
 
 **事前條件**：執行的那個節點要能用 SSH 金鑰免密碼登入 `root@<各節點>`（PVE 叢集預設已互通；沒有的話，`ssh-copy-id` 或確認 `/etc/pve/priv/authorized_keys`）。節點名稱預設 `node10 node11 node12`，用 `NODES` 改。
@@ -228,6 +230,7 @@ OK：CT100 更新並重開完成（state=running，failed=0）
 #   EXCLUDE="105 113"             不更新的 CTID（空白分隔）
 #   ONLY="100"                    只更新指定 CTID（試跑用）
 #   YES=1                         略過確認提示
+#   SKIP_CEPH_CHECK=1             略過 Ceph 健康檢查（不建議）
 set -u
 NODES="${NODES:-node10 node11 node12}"
 
@@ -273,10 +276,20 @@ update_local() {
   done
 }
 
+ceph_ok() {   # Ceph 必須是 HEALTH_OK 才繼續
+  [ "${SKIP_CEPH_CHECK:-0}" = 1 ] && return 0
+  local h
+  h=$(ceph health 2>/dev/null | awk '{print $1}')
+  [ "$h" = HEALTH_OK ] && return 0
+  echo "STOP：Ceph 狀態是 ${h:-無法取得}，不是 HEALTH_OK，先處理再重跑（ceph -s、ceph health detail）"
+  return 1
+}
+
 run_nodes() {   # $1 = DRYRUN(1/0)
   local b64 n
   b64=$(declare -f update_local | base64 -w0)
   for n in $NODES; do
+    [ "$1" = 0 ] && { ceph_ok || exit 1; }   # 動每個節點之前都再檢查一次
     echo "######## 節點 $n ########"
     ssh -n -o BatchMode=yes "root@$n" \
       "EXCLUDE='${EXCLUDE:-}' ONLY='${ONLY:-}' DRYRUN=$1 bash -c \"\$(echo $b64 | base64 -d); update_local\"" \
@@ -284,6 +297,7 @@ run_nodes() {   # $1 = DRYRUN(1/0)
   done
 }
 
+ceph_ok || exit 1
 echo ">>> 第 1 階段：只列出各節點會處理的 CT（不修改）"
 run_nodes 1
 if [ "${YES:-0}" != 1 ]; then
@@ -303,6 +317,9 @@ echo "全部節點完成。觀察服務一天後，請刪除 pre-apt-$(date +%Y%
 | `bash -c "$(echo … \| base64 -d); update_local"` | 在遠端還原函式並執行；腳本以參數傳入，所以容器內的 `pct exec` 不會誤讀到它 |
 | `</dev/null` | 每個 `pct exec` 都不讀標準輸入，避免卡住 |
 | `\|\| { …; exit 1; }`（`run_nodes` 裡） | 任一節點回傳非 0 就停止，**不會繼續下一個節點** |
+| `ceph_ok` | 用 `ceph health` 取第一個字，必須是 `HEALTH_OK`；`HEALTH_WARN`、`HEALTH_ERR` 或指令失敗都會停止。**在執行腳本的那個節點上檢查**，所以該節點要有 `ceph` 指令 |
+| `ceph_ok \|\| exit 1`（開頭與每個節點前） | 開始前檢查一次，之後每動一個節點前再檢查一次，避免前一個節點重開容器後 Ceph 變差還繼續 |
+| `SKIP_CEPH_CHECK=1` | 略過檢查；Ceph 本來就有已知、可接受的警告時才用，要自己承擔風險 |
 | 第 1 階段 `run_nodes 1` | 傳 `DRYRUN=1`，只列清單 |
 | `read -r -p … yes` | 要輸入 `yes` 才會進第 2 階段；`YES=1` 可略過（排程或確定要自動跑時才用） |
 
@@ -320,12 +337,12 @@ ONLY="<CTID>" /root/lxc-debian13-update-all.sh
 
 **應該看到什麼**：第 1 階段每個節點印一行「將依序更新的 Debian 13 CT：…」；輸入 `yes` 後，每台依序出現 `===== CT<編號> =====` 與 `OK：CT<編號> 更新並重開完成`，最後印「全部節點完成」。出現 `STOP：…` 就是停在該台，先處理再重跑（見常見問題）。
 
-**測試狀況**：用模擬的 `ssh`／`pct` 驗證過「全流程完成」「輸入非 yes 會取消」「某節點失敗時整個停止且 exit 1」；**尚未在實際叢集執行**。
+**測試狀況**：用模擬的 `ssh`／`pct`／`ceph` 驗證過「全流程完成」「輸入非 yes 會取消」「某節點失敗時整個停止且 exit 1」「Ceph 為 HEALTH_WARN 時一開始就停止」「Ceph 在第一個節點完成後轉為 HEALTH_WARN 時，不會動第二個節點」「`SKIP_CEPH_CHECK=1` 可略過」；**尚未在實際叢集執行**。
 
 **一鍵的風險**：
 
 - 一鍵會**連續重開多台容器**；DNS 兩台（AdGuard、Pihole）分在不同節點，節點是依序跑，不會同時，但中間的間隔只有「單台驗證完成」那麼短，若在意 DNS 空窗，請把其中一台放進 `EXCLUDE` 另外手動做。
-- 沒有檢查 HA 或 Ceph 狀態；Ceph 不是 `HEALTH_OK` 時請不要執行（先 `ceph -s`）。
+- 有檢查 Ceph 必須是 `HEALTH_OK`，但**沒有檢查 HA 狀態**（`ha-manager status`）；Ceph 有已知可接受的警告時，要用 `SKIP_CEPH_CHECK=1` 才能繼續。
 - 有啟動順序或不可中斷的容器（Graylog、執行 Claude Code 的容器）用 `EXCLUDE` 排除。
 - 同一天重跑會撞到同名快照（見常見問題）。
 
@@ -380,6 +397,7 @@ pct rollback <CTID> pre-apt-<日期>
 | `STOP：CT<編號> 拍快照失敗` | 容器可能有不支援快照的掛載點（bind mount），或儲存空間不足；先解決再重跑，**不要跳過快照直接更新** |
 | `STOP：… apt 失敗` | 進容器手動 `apt-get update` 看錯誤（常見是 DNS 或來源不通）；快照保留，修好後重跑腳本即可（已更新的 CT 會變成「無待更新」，很快跑完） |
 | `state=degraded`、`failed=1` | 腳本已停止在該台；用 `systemctl --failed` 找是哪個服務，修好或確認可忽略後，再用 `EXCLUDE` 排除已完成的 CT 重跑 |
+| `STOP：Ceph 狀態是 HEALTH_WARN…` | 先 `ceph -s`、`ceph health detail` 看原因（例如 OSD down、scrub 中、時間不同步）；恢復 `HEALTH_OK` 再重跑。若是已知可接受的警告，才用 `SKIP_CEPH_CHECK=1` |
 | 一鍵腳本在某節點出現 `STOP`，前面的節點已經更新完 | 正常，前面的不用重做；修好後用 `NODES` 只列還沒做的節點重跑，例如 `NODES="node11 node12"` |
 | `STOP：節點 <名稱> 異常` 但沒有其他訊息 | 多半是 SSH 連不上（`BatchMode=yes` 不問密碼）；先手動 `ssh root@<名稱> true` 確認 |
 | 重跑時說快照已存在 | 同一天重跑會撞到同名快照；先 `pct delsnapshot <CTID> pre-apt-<日期>`，或改日期再跑 |
@@ -392,7 +410,8 @@ pct rollback <CTID> pre-apt-<日期>
 - [ ] 在實際節點上先用 `DRYRUN=1` 確認清單，再用 `ONLY` 對一台影響最小的容器試跑，把實測結果補回本文
 - [ ] 確認各節點每台 Debian 13 容器是否需要放進 `EXCLUDE`（有啟動順序或不可中斷的服務）
 - [ ] 評估是否把 `EXCLUDE`／`ONLY` 設定改成設定檔，避免每次手打
-- [ ] 在實際叢集用 `ONLY` 試跑一鍵腳本，並評估是否加入 `ceph -s` 為 `HEALTH_OK` 的前置檢查
+- [ ] 在實際叢集用 `ONLY` 試跑一鍵腳本，確認 `ceph health` 在執行節點上可用
+- [ ] 評估是否也加入 `ha-manager status` 的前置檢查
 
 ## 11. 延伸閱讀
 
