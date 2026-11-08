@@ -16,7 +16,7 @@ last_modified_at: 2026-11-08
 | 適合誰看 | 管理多台 Debian 13 LXC、想用一支指令安全地依序更新的人 |
 | 環境 | PVE 9.x 叢集（`pct` 只管**本節點**的容器，所以每個節點各執行一次）；LXC 為 Debian 13（trixie） |
 | 日期 | 2026-11-08 撰寫 |
-| 結論 | ✅ 腳本語法檢查（`bash -n`）通過 ✅ 用模擬的 `pct` 驗證過篩選邏輯：略過非 Debian 13 與 stopped 的 CT，`EXCLUDE`、`ONLY`、`DRYRUN` 都如預期 ✅ 流程沿用 [LXC 自動更新後的待重啟檢查](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/lxc-needrestart-service-restart/)的結論：底層服務待重啟就整個容器重開 ⏳ **尚未在實際 PVE 節點上實測**，第一次請先用 `ONLY` 指定一台影響最小的容器試跑 |
+| 結論 | ✅ 腳本語法檢查（`bash -n`）通過 ✅ 用模擬的 `pct` 驗證過篩選邏輯：略過非 Debian 13 與 stopped 的 CT，`EXCLUDE`、`ONLY`、`DRYRUN` 都如預期 ✅ 流程沿用 [LXC 自動更新後的待重啟檢查](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/lxc-needrestart-service-restart/)的結論：底層服務待重啟就整個容器重開 ✅ 新增一鍵更新整個叢集的總控腳本（第 6 節）⏳ **尚未在實際 PVE 節點上實測**，第一次請先用 `ONLY` 指定一台影響最小的容器試跑 |
 
 ## 1. 先認識幾個名詞
 
@@ -199,7 +199,137 @@ OK：CT100 更新並重開完成（state=running，failed=0）
 
 以上是預期輸出的格式示意，**不是實測結果**。
 
-## 6. 步驟 3：更新後的驗收
+## 6. 一鍵更新整個叢集
+
+**做什麼**：步驟 2 的腳本一次只管一個節點。這支「總控腳本」在**任一節點**執行，用 SSH 依序對每個節點跑同樣的更新流程，不用自己逐台登入。
+
+**運作方式**：
+
+```text
+./lxc-debian13-update-all.sh
+   │
+   ├─ 第 1 階段：對每個節點只「列出」會處理的 CT（不修改）
+   │      ▼
+   │   你看過清單，輸入 yes 才繼續（YES=1 可略過）
+   │
+   └─ 第 2 階段：node10 → node11 → node12，一次一個節點、一次一台 CT
+          任一台異常 → 整個停止，後面的節點不處理
+```
+
+**事前條件**：執行的那個節點要能用 SSH 金鑰免密碼登入 `root@<各節點>`（PVE 叢集預設已互通；沒有的話，`ssh-copy-id` 或確認 `/etc/pve/priv/authorized_keys`）。節點名稱預設 `node10 node11 node12`，用 `NODES` 改。
+
+**怎麼做**：存成 `/root/lxc-debian13-update-all.sh`。
+
+```bash
+#!/usr/bin/env bash
+# 一鍵更新：在任一 PVE 節點執行，依序更新每個節點上 running 的 Debian 13 LXC
+# 環境變數：
+#   NODES="node10 node11 node12"  要處理的節點（依序）
+#   EXCLUDE="105 113"             不更新的 CTID（空白分隔）
+#   ONLY="100"                    只更新指定 CTID（試跑用）
+#   YES=1                         略過確認提示
+set -u
+NODES="${NODES:-node10 node11 node12}"
+
+update_local() {
+  SNAP="pre-apt-$(date +%Y%m%d)"
+  EXCLUDE=" ${EXCLUDE:-} "
+  ONLY=" ${ONLY:-} "
+  targets=()
+  for id in $(pct list | awk 'NR>1 && $2=="running"{print $1}' | sort -n); do
+    case "$EXCLUDE" in *" $id "*) echo "略過 CT$id（EXCLUDE）"; continue;; esac
+    if [ "$ONLY" != "  " ]; then
+      case "$ONLY" in *" $id "*) ;; *) continue;; esac
+    fi
+    if pct exec "$id" -- sh -c '. /etc/os-release; [ "$ID" = debian ] && [ "$VERSION_ID" = 13 ]' </dev/null 2>/dev/null; then
+      targets+=("$id")
+    fi
+  done
+  echo "將依序更新的 Debian 13 CT：${targets[*]:-（無）}"
+  [ "${DRYRUN:-0}" = 1 ] && exit 0
+  for id in "${targets[@]}"; do
+    echo "===== CT$id ====="
+    pct snapshot "$id" "$SNAP" --description "Before apt upgrade" \
+      || { echo "STOP：CT$id 拍快照失敗"; exit 1; }
+    pct exec "$id" -- env DEBIAN_FRONTEND=noninteractive bash -c '
+      apt-get update -qq &&
+      apt-get -y -o Dpkg::Options::=--force-confold full-upgrade &&
+      apt-get -y autoremove' </dev/null \
+      || { echo "STOP：CT$id apt 失敗，快照 $SNAP 保留"; exit 1; }
+    pct reboot "$id" || { echo "STOP：CT$id 重開失敗"; exit 1; }
+    state=""
+    for i in $(seq 1 30); do
+      sleep 5
+      state=$(pct exec "$id" -- systemctl is-system-running </dev/null 2>/dev/null)
+      [ "$state" = running ] && break
+    done
+    failed=$(pct exec "$id" -- systemctl --failed --no-legend </dev/null 2>/dev/null | wc -l)
+    if [ "$state" != running ] || [ "$failed" != 0 ]; then
+      echo "STOP：CT$id state=${state:-無回應} failed=$failed"
+      pct exec "$id" -- systemctl --failed --no-pager </dev/null 2>/dev/null
+      exit 1
+    fi
+    echo "OK：CT$id 更新並重開完成"
+  done
+}
+
+run_nodes() {   # $1 = DRYRUN(1/0)
+  local b64 n
+  b64=$(declare -f update_local | base64 -w0)
+  for n in $NODES; do
+    echo "######## 節點 $n ########"
+    ssh -n -o BatchMode=yes "root@$n" \
+      "EXCLUDE='${EXCLUDE:-}' ONLY='${ONLY:-}' DRYRUN=$1 bash -c \"\$(echo $b64 | base64 -d); update_local\"" \
+      || { echo "STOP：節點 $n 異常，後面的節點不處理"; exit 1; }
+  done
+}
+
+echo ">>> 第 1 階段：只列出各節點會處理的 CT（不修改）"
+run_nodes 1
+if [ "${YES:-0}" != 1 ]; then
+  read -r -p "確定依上面清單開始更新並重開？輸入 yes 繼續：" ans
+  [ "$ans" = yes ] || { echo "已取消"; exit 0; }
+fi
+echo ">>> 第 2 階段：依序更新"
+run_nodes 0
+echo "全部節點完成。觀察服務一天後，請刪除 pre-apt-$(date +%Y%m%d) 快照"
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `update_local()` | 就是步驟 2 的邏輯（拍快照→apt→重開→驗證），包成函式 |
+| `declare -f update_local \| base64 -w0` | 把函式內容編成一行文字，帶到遠端節點執行，**不用先把腳本複製過去** |
+| `ssh -n -o BatchMode=yes` | `-n` 不讓 ssh 吃掉標準輸入；`BatchMode=yes` 不能免密碼登入就直接失敗，不會卡在問密碼 |
+| `bash -c "$(echo … \| base64 -d); update_local"` | 在遠端還原函式並執行；腳本以參數傳入，所以容器內的 `pct exec` 不會誤讀到它 |
+| `</dev/null` | 每個 `pct exec` 都不讀標準輸入，避免卡住 |
+| `\|\| { …; exit 1; }`（`run_nodes` 裡） | 任一節點回傳非 0 就停止，**不會繼續下一個節點** |
+| 第 1 階段 `run_nodes 1` | 傳 `DRYRUN=1`，只列清單 |
+| `read -r -p … yes` | 要輸入 `yes` 才會進第 2 階段；`YES=1` 可略過（排程或確定要自動跑時才用） |
+
+**執行方式**：
+
+```bash
+chmod +x /root/lxc-debian13-update-all.sh
+
+# 一鍵：先看清單、輸入 yes 後依序更新全叢集
+EXCLUDE="<CTID> <CTID>" /root/lxc-debian13-update-all.sh
+
+# 第一次建議：只試跑一台
+ONLY="<CTID>" /root/lxc-debian13-update-all.sh
+```
+
+**應該看到什麼**：第 1 階段每個節點印一行「將依序更新的 Debian 13 CT：…」；輸入 `yes` 後，每台依序出現 `===== CT<編號> =====` 與 `OK：CT<編號> 更新並重開完成`，最後印「全部節點完成」。出現 `STOP：…` 就是停在該台，先處理再重跑（見常見問題）。
+
+**測試狀況**：用模擬的 `ssh`／`pct` 驗證過「全流程完成」「輸入非 yes 會取消」「某節點失敗時整個停止且 exit 1」；**尚未在實際叢集執行**。
+
+**一鍵的風險**：
+
+- 一鍵會**連續重開多台容器**；DNS 兩台（AdGuard、Pihole）分在不同節點，節點是依序跑，不會同時，但中間的間隔只有「單台驗證完成」那麼短，若在意 DNS 空窗，請把其中一台放進 `EXCLUDE` 另外手動做。
+- 沒有檢查 HA 或 Ceph 狀態；Ceph 不是 `HEALTH_OK` 時請不要執行（先 `ceph -s`）。
+- 有啟動順序或不可中斷的容器（Graylog、執行 Claude Code 的容器）用 `EXCLUDE` 排除。
+- 同一天重跑會撞到同名快照（見常見問題）。
+
+## 7. 步驟 3：更新後的驗收
 
 **做什麼**：腳本只確認「systemd 正常、failed 為 0」，**服務本身是否健康**要另外確認。
 
@@ -221,7 +351,7 @@ ha-manager status | grep ct:<CTID>
 
 **應該看到什麼**：`needrestart` 沒有 `NEEDRESTART-SVC` 行（重開後待重啟的服務會被清掉）、failed 是 0、HA 是 `started`。再依容器用途確認服務本身（例如 DNS 能解析、Grafana `/api/health` 回 200、WireGuard 的 `wg0` 還在）。
 
-## 7. 步驟 4：觀察一天後刪除快照
+## 8. 步驟 4：觀察一天後刪除快照
 
 **做什麼**：快照會持續佔用 Ceph 空間，確認正常後刪除。
 
@@ -242,7 +372,7 @@ done
 pct rollback <CTID> pre-apt-<日期>
 ```
 
-## 8. 常見問題
+## 9. 常見問題
 
 | 現象 | 怎麼辦 |
 | --- | --- |
@@ -250,18 +380,21 @@ pct rollback <CTID> pre-apt-<日期>
 | `STOP：CT<編號> 拍快照失敗` | 容器可能有不支援快照的掛載點（bind mount），或儲存空間不足；先解決再重跑，**不要跳過快照直接更新** |
 | `STOP：… apt 失敗` | 進容器手動 `apt-get update` 看錯誤（常見是 DNS 或來源不通）；快照保留，修好後重跑腳本即可（已更新的 CT 會變成「無待更新」，很快跑完） |
 | `state=degraded`、`failed=1` | 腳本已停止在該台；用 `systemctl --failed` 找是哪個服務，修好或確認可忽略後，再用 `EXCLUDE` 排除已完成的 CT 重跑 |
+| 一鍵腳本在某節點出現 `STOP`，前面的節點已經更新完 | 正常，前面的不用重做；修好後用 `NODES` 只列還沒做的節點重跑，例如 `NODES="node11 node12"` |
+| `STOP：節點 <名稱> 異常` 但沒有其他訊息 | 多半是 SSH 連不上（`BatchMode=yes` 不問密碼）；先手動 `ssh root@<名稱> true` 確認 |
 | 重跑時說快照已存在 | 同一天重跑會撞到同名快照；先 `pct delsnapshot <CTID> pre-apt-<日期>`，或改日期再跑 |
 | 有套件被 `apt-mark hold` 鎖住沒更新 | 這是預期行為；用 `apt-mark showhold` 確認，需要升級時再有控制地處理 |
 | 透過 `rx` 執行被擋 | `rx` 會擋含 `reboot` 的指令（連名稱含這個字也擋），這支腳本要由你直接在節點上執行 |
 | 重開後一直等不到 `running`（150 秒逾時） | 可能是服務啟動慢（例如 Wazuh indexer 要一兩分鐘）；進容器 `systemctl is-system-running` 再看，必要時調大 `seq 1 30` 的 30 |
 
-## 9. 待辦
+## 10. 待辦
 
 - [ ] 在實際節點上先用 `DRYRUN=1` 確認清單，再用 `ONLY` 對一台影響最小的容器試跑，把實測結果補回本文
 - [ ] 確認各節點每台 Debian 13 容器是否需要放進 `EXCLUDE`（有啟動順序或不可中斷的服務）
 - [ ] 評估是否把 `EXCLUDE`／`ONLY` 設定改成設定檔，避免每次手打
+- [ ] 在實際叢集用 `ONLY` 試跑一鍵腳本，並評估是否加入 `ceph -s` 為 `HEALTH_OK` 的前置檢查
 
-## 10. 延伸閱讀
+## 11. 延伸閱讀
 
 - [LXC 自動更新後，怎麼檢查「待重啟的服務」](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/lxc-needrestart-service-restart/)：為什麼底層服務要整個容器重開，而不是逐一重啟
 - [PVE 更新後的滾動重開機](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-rolling-reboot-after-update/)：節點本身的更新與重開順序
