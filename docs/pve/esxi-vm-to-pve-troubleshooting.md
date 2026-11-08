@@ -464,6 +464,8 @@ qm set 102 --boot order=sata0
 
 ## 8. 坑六：VMware Tools 在 KVM 上報錯，而且移除不掉
 
+> 這個問題另外有一篇專門的 SOP：[VMware 搬到 PVE 後，Windows VM 開機跳出 VMware Tools 錯誤：移除失敗（1603）的處理](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-vm-remove-vmware-tools-after-migration/)，包含從 log 找失敗點、清到檔案與驅動的完整步驟。本節是這趟遷移當下的做法與結果，兩篇的取捨差異見 8-5。
+
 ### 8-1 現象
 
 每次登入都跳出視窗：
@@ -537,7 +539,17 @@ Get-Service -DisplayName '*VMware*' -ErrorAction SilentlyContinue | Format-Table
 
 ### 8-5 殘留的驅動：先不要動
 
-`vmci`、`vsock` 是**開機啟動**的驅動，在 KVM 上沒有對應的硬體，載入了也沒有作用（推測，沒有逐一驗證）。**不要手動刪檔或登錄檔**，有些是開機啟動，清不乾淨可能留下開機問題。要清也要選在不上班時間，用 `pnputil /enum-drivers` 找出 VMware 的驅動套件，再用 `pnputil /delete-driver <oemNN.inf> /uninstall` 處理，並先確認可以回復。`C:\Program Files\VMware` 建議改名成 `VMware.old` 觀察一陣子再刪。
+`vmci`、`vsock` 是**開機啟動**的驅動，在 KVM 上沒有對應的硬體，載入了也沒有作用（推測，沒有逐一驗證）。
+
+**要不要連資料夾與驅動一起清掉，是取捨：**
+
+| 做法 | 說明 |
+| --- | --- |
+| 本次的做法（保守） | 服務登錄清掉、驅動與 `C:\Program Files\VMware` 先留著，穩定一兩週再處理；`C:\Program Files\VMware` 建議先改名成 `VMware.old` 觀察，不要直接刪 |
+| 更徹底的做法 | 另一篇 SOP [VMware 搬到 PVE 後，Windows VM 開機跳出 VMware Tools 錯誤：移除失敗（1603）的處理](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-vm-remove-vmware-tools-after-migration/)在另一台 VM 上連安裝資料夾與 `vmmouse` 驅動都刪掉，並驗證重開機後正常。它動手前先做 snapshot，我們這台的磁碟是 VMDK，**PVE 不支援快照**，所以沒有採用 |
+| 兩者的差別 | 那台 VM 只殘留一個滑鼠驅動；這台還多了 `vmci`、`vsock` 這兩個**開機啟動**的驅動，清不乾淨可能留下開機問題，所以先不動 |
+
+真的要清驅動時，選在不上班時間，用 `pnputil /enum-drivers` 找出 VMware 的驅動套件，再用 `pnputil /delete-driver <oemNN.inf> /uninstall` 處理，並先確認可以還原（例如先備份整台 VM）。
 
 ## 9. 其他小坑
 
@@ -567,6 +579,7 @@ Get-Service -DisplayName '*VMware*' -ErrorAction SilentlyContinue | Format-Table
 
 - 本知識庫：[把 ESXi 上的 Windows＋SQL Server 虛擬機搬到獨立 PVE（一）：NFS 中轉、掛上磁碟與開機驗證](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/esxi-vm-to-pve-nfs-relay-sop/)
 - 本知識庫：[Ceph 出現 BlueStore 慢操作告警：硬碟壞了嗎？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/ceph-bluestore-slow-op-backup-schedule/)：另一個「慢」的案例，含 SMART、碟溫、寫入量的看法
+- 本知識庫：[VMware 搬到 PVE 後，Windows VM 開機跳出 VMware Tools 錯誤：移除失敗（1603）的處理](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-vm-remove-vmware-tools-after-migration/)：第 8 節的完整版（含 log 分析、刪檔與刪驅動）
 - [Linux PSI（Pressure Stall Information）文件](https://docs.kernel.org/accounting/psi.html)：`/proc/pressure/io` 各欄位的意思
 - [Proxmox VE：Windows VirtIO Drivers](https://pve.proxmox.com/wiki/Windows_VirtIO_Drivers)
 - [Proxmox VE：Qcow2／VMDK 與儲存格式](https://pve.proxmox.com/wiki/Storage)
