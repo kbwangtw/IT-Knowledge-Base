@@ -4,7 +4,7 @@ title: "一鍵依序更新所有 Debian 13 的 LXC：拍快照、apt 更新、�
 date: 2026-11-08
 categories: [PVE, LXC]
 permalink: /docs/pve/lxc-debian13-sequential-update/
-last_modified_at: 2026-11-08
+last_modified_at: 2026-11-09
 ---
 
 # 一鍵依序更新所有 Debian 13 的 LXC：拍快照、apt 更新、必要時才重開、異常就停止
@@ -16,7 +16,7 @@ last_modified_at: 2026-11-08
 | 適合誰看 | 管理多台 Debian 13 LXC、想用一支指令安全地依序更新的人 |
 | 環境 | PVE 9.x 三節點叢集（node10～12）、Ceph、HA；LXC 有 Debian 13、Debian 12、Ubuntu 22.04／24.04 混用 |
 | 日期 | 2026-11-08 撰寫；同日由 Lab Ops 做唯讀盤點，並在 node11 實測 |
-| 結論 | ✅ 唯讀盤點：Ceph `HEALTH_OK`、13 個 HA 服務全是 `started`；Debian 13 的 CT 有 6 台 ✅ **2026-11-08 實測：6 台全部更新完成**，更新後驗收 `needrestart` 乾淨、failed 為 0、`running`、HA `started` ✅ 實測發現：`REBOOT=auto` 在本環境實質上等於每台都重開，因為各台都有舊的待重啟服務（`systemd-logind`、`unattended-upgrades`），不是這次的 `tzdata` 造成 ⏳ CT101、CT110 的更新輸出沒有保存，驗收結果見第 7 節的實測紀錄 ⏳ 各服務的網頁功能（IPAM、LibreNMS、WireGuard、ProxCenter）由人工確認，**尚未回報** |
+| 結論 | ✅ 唯讀盤點：Ceph `HEALTH_OK`、13 個 HA 服務全是 `started`；Debian 13 的 CT 有 6 台 ✅ **2026-11-08 實測：6 台全部更新完成**，更新後驗收 `needrestart` 乾淨、failed 為 0、`running`、HA `started` ✅ 實測發現：`REBOOT=auto` 在本環境實質上等於每台都重開，因為各台都有舊的待重啟服務（`systemd-logind`、`unattended-upgrades`），不是這次的 `tzdata` 造成 ⏳ CT101、CT110 的更新輸出沒有保存，驗收結果見第 7 節的實測紀錄 ✅ 各服務的網頁功能（IPAM、LibreNMS、WireGuard、ProxCenter）由人工確認，**2026-11-09 已確認正常**（快照刪除前確認） |
 
 ## 最短用法：只要一個指令
 
@@ -425,6 +425,7 @@ ONLY="110" NODES="node11" /root/lxc-debian13-update-all.sh
 - **同日快照衝突**：CT101 重跑時出現 `snapshot name 'pre-apt-20261108' already used`，腳本在拍快照這步就停止，沒動容器。查證後確認該 CT 其實已更新完成（`tzdata` 為 `2026f`、沒有待更新套件），不需要再更新，也沒有刪快照。
 - **第一次清單誤含已完成的 CT**：忘了把 103 加進 `EXCLUDE`，被確認提示攔下（取消）而沒有誤動。
 - **CT110（ProxCenter）**：更新前檢查 `Live Restore Enabled: false`，4 個容器 restart policy 都是 `unless-stopped`；更新後 4 個都 `Up`、`healthy`。
+- **刪快照（2026-11-09）**：隔天用第一節的刪快照指令，從 node10 一次處理三個節點，六台都印出 `Removing snap: 100% complete...done.` 與 `deleted CT…`（103、100、110、101、102、109）。
 - **DNS 驗證**：用 `dig +short <網域> @<DNS 位址>` 測；從聊天視窗複製指令會把網址變成 `[…](https://…)` 的連結格式，要手動打字或貼上後檢查。
 
 ## 8. 步驟 3：更新後的驗收
@@ -493,8 +494,8 @@ pct rollback <CTID> pre-apt-<日期>
 
 - [x] 在實際叢集用 `LIST_ONLY=1` 確認清單，再用 `ONLY="103"` 試跑，把實測結果補回本文（2026-11-08 已完成，見第 7 節實測紀錄）
 - [ ] 確認 CT110 更新時 `dockerd`／容器重啟花了多久、ProxCenter 網頁中斷多久（目前只有更新前後的檢查，沒有保存更新輸出）
-- [ ] 人工確認 IPAM、LibreNMS、WireGuard、ProxCenter 的網頁或連線功能正常
-- [ ] 觀察一天後，刪除六台 CT 的 `pre-apt-20261108` 快照，並把刪除結果補回本文
+- [x] 人工確認 IPAM、LibreNMS、WireGuard、ProxCenter 的網頁或連線功能正常（2026-11-09 已確認，四個服務都正常）
+- [x] 觀察一天後，刪除六台 CT 的 `pre-apt-20261108` 快照（2026-11-09 已刪除：CT103、100、110、101、102、109 各印出 `deleted CT…`，三個節點的刪快照指令實測可用）
 - [ ] 下一次更新時，確認舊待重啟服務清掉後，`REBOOT=auto` 是否真的會在「只有小更新」時跳過重開
 - [ ] 確認 `LIST_ONLY=1` 能否透過 `rx` 執行（`rx` 是否只比對指令列字串，**未確認**）
 - [ ] 評估更新前檢查 Ceph 剩餘空間
