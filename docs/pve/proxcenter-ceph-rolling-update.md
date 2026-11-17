@@ -3,7 +3,7 @@ layout: default
 title: "ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？"
 date: 2026-08-26
 categories: [PVE, ProxCenter, Ceph]
-last_modified_at: 2026-10-29
+last_modified_at: 2026-11-17
 ---
 
 # ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？
@@ -14,8 +14,8 @@ last_modified_at: 2026-10-29
 | --- | --- |
 | 適合誰看 | 第一次用 ProxCenter 做 PVE 滾動更新的人 |
 | 環境 | 三台 PVE（node10～12）＋ Ceph；ProxCenter 是 ct:110 |
-| 實測 | 2026-08-26（排除三個卡關點，node12 進入更新階段）；2026-10-12（ProxCenter 完成 node11、node12，node10 手動）；2026-10-24（**三台都由 ProxCenter 完成**，分兩輪）；2026-10-29（再次三台，ProxCenter 在 node10，kernel -25 → -26） |
-| 結論 | ✅ 三個卡關點已排除；✅ 10/24 三台都由 ProxCenter 更新並重開（kernel 7.0.14-23 → -25），HA 服務沒有中斷、Ceph 回到 HEALTH_OK（第 12 節）；✅ 10/29 再做一次三台更新，已是最新的節點會被自動略過，不需要「陪跑」（第 13 節）；⏳ 把 ProxCenter 移到叢集外、縮小 sudo 權限 |
+| 實測 | 2026-08-26（排除三個卡關點，node12 進入更新階段）；2026-10-12（ProxCenter 完成 node11、node12，node10 手動）；2026-10-24（**三台都由 ProxCenter 完成**，分兩輪）；2026-10-29（再次三台，ProxCenter 在 node10，kernel -25 → -26）；2026-11-17（**人不在現場、沒有 BMC**，node10 → node12 → node11，kernel -28 → -29，第 14 節） |
+| 結論 | ✅ 三個卡關點已排除；✅ 10/24 三台都由 ProxCenter 更新並重開（kernel 7.0.14-23 → -25），HA 服務沒有中斷、Ceph 回到 HEALTH_OK（第 12 節）；✅ 10/29 再做一次三台更新，已是最新的節點會被自動略過，不需要「陪跑」（第 13 節）；✅ 11/17 人不在現場，一次一台更新三台到 kernel `7.0.14-29`、pve-manager 9.2.28：13 個 HA 服務 `started`、Ceph `HEALTH_OK`、`noout` 已清除；**不在 HA 的執行中 VM（nextcloud）要先線上搬走**（第 14 節）；⏳ 把 ProxCenter 移到叢集外、縮小 sudo 權限 |
 
 > 文中 IP 都是文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24）；IP、帳號、VMID 是案例值。
 
@@ -510,7 +510,173 @@ DC01（vm:106，node10）與 DC02（vm:107，node11）在不同節點；AdGuard�
 
 **未確認**：CT110（ProxCenter）驗收時 uptime 只有約 8 分鐘，比同節點其他 CT 短很多，原因不確定。
 
-## 14. 下次可以直接照做的檢查順序
+## 14. 2026-11-17：人不在現場、沒有 BMC，一次一台更新三台（node10 → node12 → node11）
+
+**做什麼**：三台各有 24 個可更新套件（ProxCenter 畫面顯示 25，**推測**多的 1 個是 signed kernel image，和 10/29 相同），要在**人不在現場、三台都沒有 IPMI／BMC**（使用者確認）的情況下更新並重開。重開後若有一台沒起來，**只能到現場處理**，所以做法是「一次一台、每台驗收通過才批准下一台、嚴格停損」。
+
+### 14-1 更新內容與風險
+
+ProxCenter 的 Rolling Update 畫面：三台都是 9.2.26、每台 25 個更新、預估每台約 29 分鐘、共約 1 小時 27 分、需重開 3 次。以下只列出符合篩選（`ceph`、`proxmox-kernel`、`grub`、`ifupdown2`、`pve-firewall`、`pve-manager`、`qemu`）的套件名稱，**24 個的完整清單沒有記錄**：
+
+| 套件 | 影響 |
+| --- | --- |
+| `proxmox-kernel-7.0` | 要重開才生效（node11 更新前是 `7.0.14-28`，另兩台沒有看到輸出，推測相同） |
+| `ifupdown2` | 網路設定工具；11/05 也更新過，三台重開正常（見[更新後逐台重開](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-rolling-reboot-after-update/)） |
+| `pve-manager` | 套件升級時服務自動重啟；更新前 9.2.26（ProxCenter 畫面），更新後 9.2.28 |
+| `pve-qemu-kvm` | 已在跑的 VM 要遷移或重啟才會用新版 QEMU；維護模式的線上遷移剛好達成 |
+| 沒有 `ceph-*`、`grub`、`pve-firewall` | 依上面的篩選結果；比 11/05 單純 |
+
+| 選項 | 內容 | 評估 |
+| --- | --- | --- |
+| **A. 全部一次一台、嚴格停損（本次採用）** | node10 驗收通過才批准 node12，再做 node11；任何一台 10 分鐘沒回來就全部停下 | 有 11/05 同一組套件的先例；一台出事時另外兩台仍有 quorum 與 Ceph（2/3） |
+| B. 只做 node10 | 觀察一天，其餘等人在現場 | 風險最小，要多花一輪 |
+| C. 等到人在現場 | 最保險 | 沒有時間壓力時最好 |
+
+**重開沒回來時**：不要碰別台、確認 `pvecm status`／`ceph -s`／`ha-manager status`（服務應都在剩下兩台且 `started`）、不要 `ceph osd out`（`noout` 還在）；到現場接螢幕，若是新核心的問題就在開機選單選舊核心。Wake-on-LAN 只對「已關機」有用，對「卡住」沒用，不能當退路。
+
+### 14-2 更新前檢查（唯讀，08:16）
+
+```bash
+tmux new -s update
+date
+pvecm status | grep -E 'Quorate|Nodes:'
+ceph -s | grep -E 'health|osd:|pgs:'
+ceph health detail
+ha-manager status | grep -E '^(quorum|master)|ct:|vm:'
+for n in node10 node11 node12; do echo "== $n"; ssh root@$n 'apt list --upgradable 2>/dev/null | grep -c upgradable; apt list --upgradable 2>/dev/null | grep -iE "ceph|proxmox-kernel|grub|ifupdown2|pve-firewall|pve-manager|qemu" | cut -d/ -f1 | tr "\n" " "; echo'; done
+for n in node10 node11 node12; do echo -n "$n 備份程序數："; ssh root@$n 'ps aux | grep -c "[v]zdump"' < /dev/null; done
+for n in node10 node11 node12; do echo "== $n 最近備份"; ssh root@$n 'pvenode task list --typefilter vzdump --limit 1' < /dev/null; done
+pvesh get /cluster/resources --type vm --output-format json | python3 -c "import json,sys;[print(r['vmid'],r.get('name'),r['node'],r['status']) for r in sorted(json.load(sys.stdin),key=lambda r:r['vmid'])]"
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `tmux new -s update` | 斷線（例如 VPN 中斷）後用 `tmux attach -t update` 接回 |
+| `apt list --upgradable \| grep -c upgradable` | 每台可更新的套件數；三台應相同 |
+| `grep -iE "ceph\|proxmox-kernel\|grub…"` | 挑出「出錯會讓節點連不上或影響 Ceph」的套件名稱 |
+| `ps aux \| grep -c "[v]zdump"` | 有沒有備份正在跑，應為 0 |
+| `pvenode task list --typefilter vzdump --limit 1` | 昨晚備份的結果 |
+| `pvesh get /cluster/resources --type vm …` | 列出所有 VM／CT 與所在節點，用來對照 HA（見 14-3） |
+
+**看到的結果**：
+
+| 檢查 | 結果 |
+| --- | --- |
+| 叢集 | `Quorate: Yes`、3 節點 |
+| Ceph | `HEALTH_OK`、3 up（since 11d）、3 in、`volumes 1/1 healthy`、97 個 PG `active+clean` |
+| HA | `quorum OK`、master 在 node10；13 個服務都 `started` |
+| 可更新套件 | 三台都是 24 個；符合篩選的：`ifupdown2`、`proxmox-kernel-7.0`、`pve-manager`、`pve-qemu-kvm` |
+| 備份程序數 | 三台都是 0 |
+| 昨晚（11/16）備份 | node10 21:00～21:12 `OK`；node11 21:30～21:38 `WARNINGS: 2`；node12 22:00～22:12 `OK`。node11 的警告**依 KB 是 VM 108 關機的已知現象，但這次沒有看日誌確認** |
+
+更新前的位置：
+
+| 節點 | HA 資源 | 非 HA |
+| --- | --- | --- |
+| node10 | ct:103、105、113、114、vm:106 | VM 104（stopped） |
+| node11 | ct:100、**110（ProxCenter）**、112 | VM 108（stopped，VGA 直通）、**VM 115 nextcloud（running）** |
+| node12 | ct:101、102、109、vm:107、111 | — |
+
+### 14-3 不在 HA 的執行中 VM：VM 115（nextcloud）
+
+`pvesh` 列出 16 個 VM／CT，HA 只有 13 個，多的是 VM 104、108（都是 stopped）和 **VM 115（running）**。
+
+| 事實 | 影響 |
+| --- | --- |
+| VM 115 不在 HA | 節點進維護模式時，HA **不會**搬它；node11 重開時它會被關機再開機，Nextcloud 停機數分鐘 |
+| 依[Nextcloud SOP](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/nextcloud-vm-docker-compose-sop/)，磁碟在 Ceph `VM_Pool`、`onboot=1`、建立時沒有設 `hostpci` | **可以線上搬**；實際的 `qm config 115` 輸出這次**沒有記錄** |
+
+做法：在 node11 那一輪**之前**，用 `qm migrate 115 <已更新的節點> --online` 線上搬走。**結果**：使用者回報第 2 輪前 VM 115 已在 node10；用什麼方式搬、搬了多久沒有記錄。
+
+### 14-4 流程與第 1 輪（node10 → node12）結果
+
+```text
+第 1 輪：精靈勾選 node10（排第一）、node12（排第二），Manual approval 開
+        node10 驗收通過 → Approve node12
+中場：  ProxCenter（ct:110）搬離 node11、VM 115 線上搬走
+第 2 輪：精靈只勾 node11（另兩台已是最新，會自動略過），Approve
+```
+
+| 設定 | 建議值 |
+| --- | --- |
+| SSH Addresses | 管理網（`vmbr0 (gw)`），不是 `Cluster` |
+| Manual approval between each node | 開 |
+| Reboot timeout | 600 |
+| Minimum healthy nodes | 1（只算勾選的節點） |
+
+以上是計畫與建議值，**精靈實際設定沒有截圖記錄**。node11 放最後，是因為 ProxCenter 在 node11；node12 放第 1 輪最後，是因為 WireGuard（ct:109）在 node12，VPN 只會在那一段中斷。
+
+第 1 輪完成後驗收（唯讀）：
+
+```bash
+for n in node10 node12; do echo "== $n"; ssh root@$n 'uname -r; pveversion | head -1; pve-firewall status; systemctl is-active pve-cluster corosync pveproxy pve-ha-lrm'; done
+pvecm status | grep -E 'Quorate|Nodes:'
+corosync-cfgtool -s | grep -E 'LINK ID|nodeid'
+ceph -s | grep -E 'health|osd:|pgs:'
+ceph osd dump | grep '^flags'
+ha-manager status | grep -E 'ct:|vm:'
+for n in node10 node11 node12; do echo -n "$n 核心："; ssh root@$n 'uname -r'; done
+```
+
+| 檢查 | 結果 |
+| --- | --- |
+| node10、node12 | 核心 `7.0.14-29-pve`、`pve-manager 9.2.28`；`enabled/running`、四個服務都 `active` |
+| node11 | 核心還是 `7.0.14-28-pve`（預期，還沒更新） |
+| 叢集 | `Quorate: Yes`、3 節點；LINK 0、LINK 1 對另兩台都 `connected` |
+| Ceph | `HEALTH_OK`、3 up（since 7m）、97 個 PG `active+clean`；`flags` 沒有 `noout`（ProxCenter 結束時自動清除） |
+| HA | 13 個服務都 `started` |
+| **ProxCenter（ct:110）** | **已經在 node12**，不在 node11；中場有沒有執行 `ha-manager migrate ct:110`、或是別的原因，**沒有記錄（未確認）** |
+
+### 14-5 第 2 輪（node11）與最後驗收（08:52）
+
+最後驗收用的指令和上面相同（三台都查）；另外 `qm status 115`、`ceph -s`：
+
+| 檢查 | 結果 |
+| --- | --- |
+| 三台版本 | 核心都是 `7.0.14-29-pve`、`pve-manager 9.2.28`；`enabled/running`、四個服務都 `active` |
+| 叢集 | `Nodes: 3`、`Quorate: Yes`；LINK 0、LINK 1 都 `connected` |
+| Ceph | `HEALTH_OK`、3 up（since 91s）、3 in、`volumes 1/1 healthy`；`flags` 沒有 `noout` |
+| PG | `ceph -s \| grep pgs` 只看到 **96** 個 `active+clean`；**第 97 個沒有看到（見下）** |
+| HA | `quorum OK`、master 在 node12；三台 `lrm` 都是 `active`（沒有 `maintenance`）；13 個服務都 `started` |
+| `qm status 115` | 在 node12 執行，回報 `Configuration file 'nodes/node12/qemu-server/115.conf' does not exist` |
+
+- **96 個 PG**：`grep pgs` 只印含 `pgs` 的那一行，第二行（例如 `1 active+clean+scrubbing+deep`）被切掉，OSD 剛回來時常見（見第 16 節）；**這次沒有用 `ceph pg stat` 確認第 97 個的狀態**，所以是「未確認」。
+- **`qm status 115` 的錯誤**：`qm` 只查**本機**的 VM，VM 115 在 node10，在 node12 查不到，**不代表 nextcloud 有問題**；要看位置用 `pvesh get /cluster/resources --type vm`。這次**沒有用正確的方式確認 VM 115 是 `running`**。
+
+最後的位置：
+
+| 節點 | HA 資源 | 非 HA |
+| --- | --- | --- |
+| node10 | ct:101、103、105、113、114、vm:106（6 個） | VM 104（stopped）、VM 115（使用者回報在此） |
+| node11 | ct:100、112（2 個） | VM 108（stopped） |
+| node12 | ct:102、109、110（ProxCenter）、vm:107、111（5 個） | — |
+
+| 規則 | 結果 |
+| --- | --- |
+| DC01（node10）與 DC02（node12）不同節點 | ✅ **這條只存在 ProxCenter，PVE HA 沒有**，是剛好沒落在同一台 |
+| AdGuard（node11）與 Pihole（node10）不同節點 | ✅ PVE 規則 |
+| 三套監控分開：Graylog node10、Wazuh node11、LibreNMS node12 | ✅ |
+
+分布是 6／2／5，node11 只有 2 個；CRS 是 static，HA 不會自動搬回平均，**這不是錯誤**，要再分散見[HA 放置策略](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)第 13 節。
+
+### 14-6 沒有記錄到的
+
+| 項目 | 狀態 |
+| --- | --- |
+| 各輪實際開始與完成時間 | 沒有記錄（08:16 開始檢查、08:52 看到最後驗收；ProxCenter 預估 1 小時 27 分，實際明顯較短，但沒有逐台時間） |
+| 精靈實際設定、Verify 結果 | 沒有記錄 |
+| 中場做了什麼（ct:110 為何在 node12、VM 115 怎麼搬） | 沒有記錄 |
+| 過程異常：VPN 中斷多久、告警信（Graylog／Wazuh／LibreNMS）、ProxCenter 網頁、Lab Ops `Session creation failed` | 沒有記錄 |
+| 第 97 個 PG、VM 115 的實際狀態 | 未確認（見 14-5） |
+| 當晚（11/17）三台備份 | 尚未看到 |
+
+### 14-7 這次學到的
+
+- ProxCenter 的維護模式只搬 HA 資源；**不在 HA 的執行中 VM 要自己先線上搬走**。更新前用 `pvesh get /cluster/resources --type vm` 對照 `ha-manager status` 找出它們。
+- `qm` 指令只查本機；驗收時 VM 在哪台要用 `pvesh` 查，不要在任一台直接 `qm status`。
+- 人不在現場時，停損規則要事先寫好：一台 10 分鐘沒回來就停，不碰別台。
+
+## 15. 下次可以直接照做的檢查順序
 
 1. 確認 quorum、Ceph、HA 與工作負載容量
 2. 看套件來源的實際設定，區分出備份檔
@@ -525,8 +691,10 @@ DC01（vm:106，node10）與 DC02（vm:107，node11）在不同節點；AdGuard�
 11. Minimum healthy nodes 只算勾選的節點；只更新一台時用「陪跑」節點加 Manual approval，等待批准時按 Cancel
 12. 精靈每次開啟都會回到預設值（Manual approval 關、Reboot timeout 300），要逐項重新檢查，不要沿用上次的印象
 13. 沒有更新的節點會被自動略過，不需要陪跑；ProxCenter 所在的節點仍然要放最後一輪，中場先搬走 ProxCenter（第 13 節）
+14. 更新前用 `pvesh get /cluster/resources --type vm` 對照 `ha-manager status`，找出**不在 HA 的執行中 VM／CT**；維護模式不會搬它，要先 `qm migrate <VMID> <已更新的節點> --online` 或排停機（第 14 節）
+15. 人不在現場、沒有 BMC 時：一次一台，每台驗收通過才批准下一台；任何一台 10 分鐘沒回來就停，不碰別台（第 14 節）
 
-## 15. 常見問題
+## 16. 常見問題
 
 | 現象 | 原因與處理 |
 | --- | --- |
@@ -544,16 +712,25 @@ DC01（vm:106，node10）與 DC02（vm:107，node11）在不同節點；AdGuard�
 | `Node is already up-to-date, skipping` | 這個節點沒有可更新的套件，ProxCenter 自動略過，不是錯誤（第 13-4 節） |
 | 節點被略過了，仍出現 `Waiting for manual approval` | 批准是加在「第一個要更新的節點」前面；Manual approval 開著就要按 Approve（第 13-4 節） |
 | 取消後擔心 `noout` 留著 | `ceph osd dump \| grep '^flags'` 確認；10/24 實測取消時會自動清除 |
+| `qm status <VMID>` 回報 `Configuration file 'nodes/<節點>/qemu-server/<VMID>.conf' does not exist` | `qm` 只查本機的 VM；VM 在別台時用 `pvesh get /cluster/resources --type vm` 看位置，或到那台執行（第 14-5 節） |
+| 更新前 `pvesh` 列出的 VM／CT 比 HA 資源多 | 多出來的是不在 HA 的（關機的 104、108，執行中的 115）；執行中的要先線上搬走，維護模式不會搬它（第 14-3 節） |
+| 人不在現場，有一台重開後沒回來 | 不要碰別台；另外兩台有 quorum 與 Ceph，服務都在它們上面；到現場處理（第 14-1 節） |
 
-## 16. 待辦
+## 17. 待辦
 
 - [x] 三台都由 ProxCenter 完成一次更新的完整紀錄（2026-10-24，第 12 節；2026-10-29 再做一次，第 13 節）
+- [x] 2026-11-17 人不在現場、一次一台再更新三台（第 14 節）
+- [ ] 確認 11/17 最後驗收只看到 96 個 `active+clean` 行，第 97 個 PG 的狀態（`ceph pg stat`）
+- [ ] 用 `pvesh get /cluster/resources --type vm` 確認 VM 115 的位置與 `running` 狀態
+- [ ] 確認 11/17 當晚（21:00、21:30、22:00）三台備份都 `OK`
+- [ ] 補記 11/17 各輪實際時間、精靈實際設定、中場做法（ct:110 為何在 node12）與異常（VPN／Lab Ops／告警），使用者尚未提供
 - [ ] 評估把 ProxCenter 移到叢集外
 - [ ] 評估縮小 proxcenter 帳號的 sudo 權限（目前清單最後有 `NOPASSWD: ALL`，前面的細項清單等於沒有作用）
 - [ ] 回報或追蹤 ProxCenter 把 Ceph 上的 LXC 判斷成 `has local storage` 的問題
 
-## 17. 延伸閱讀
+## 18. 延伸閱讀
 
 - [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-enterprise-update/)：同日更新 ProxCenter 本身與 CT110 擴容
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)
 - [PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)
+- [PVE 更新後逐台重開（人不在現場）：維護模式加 noout，一次一台](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-rolling-reboot-after-update/)：11/05 不用 ProxCenter、手動做的版本
