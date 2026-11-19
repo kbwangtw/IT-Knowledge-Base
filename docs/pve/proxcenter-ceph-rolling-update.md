@@ -719,11 +719,56 @@ HA 服務是 14 個，比 11/17 的 13 個多 1 個。**推測**是 VM 115（nex
 | node11 | 21:30:01～21:38:21 | `WARNINGS: 2` | 全部來自 VM 108，備份最後 `Finished`（2 分 55 秒） |
 | node12 | 22:00:01～22:05:37 | `OK` | |
 
-- **VM 104**：它是 stopped 的 VM，備份時 PVE 會暫時起一個 QEMU 讀磁碟，失敗的是這個程序查詢 PBS dirty-bitmap 時逾時。原因**不確定**（推測是 PBS 或網路當下較慢）；104 過去幾天是不是一直失敗，**沒有查**。
+- **VM 104**：它是 stopped 的 VM，備份時 PVE 會暫時起一個 QEMU 讀磁碟，失敗的是這個程序查詢 PBS dirty-bitmap 時逾時。原因**不確定**（推測是 PBS 或網路當下較慢）。後來查證：**只有 11/18 這一次失敗**，最近 7 晚都有備份，失敗那次只留下一個空的 snapshot，見下方「15-2 補充」。
 - **VM 108**：log 裡的三類訊息是 `no efidisk configured! Using temporary efivars disk.`、`iothread is only valid with virtio disk or virtio-scsi-single controller, ignoring`（`scsi0` 設了 `iothread=1`，控制器是 `virtio-scsi-pci`，這個設定不會生效）、`failed to reset PCI device`（備份 stopped 的 VM 時會碰到直通裝置）。都是 108 的設定造成，和更新無關。
 - **備份有沒有在跑**：`ps aux | grep -c "[v]zdump"` 的計數不可靠（node11、node12 回 1，node10 回 5；**推測**是遠端指令列本身含 `vzdump` 字樣）。要確認用 `pgrep -x vzdump`（精確比對程序名稱，沒輸出代表沒有）。
 
 **判斷**：兩台的問題都不擋更新，各台 running 的資源昨晚都有備份。更新是節點層，風險在重開，不在 guest 資料，所以沒有再額外做一次備份。
+
+#### 15-2 補充（11/19 下午）：VM 104 備份失敗，只留下一個空的 snapshot
+
+當天下午查了 PBS 昨晚 22:45 的 verify job log、PBS 上的 datastore 目錄，以及 PBS 網頁（PBS 4.2.11）。
+
+| 檢查 | 結果 |
+| --- | --- |
+| verify job（22:45 排程，22:45～23:44，約 59 分鐘，17 個 group） | `TASK ERROR: verification failed`，**只有一個 snapshot 失敗**：`vm/104/2026-11-18T13:01:59Z`，錯誤是 `manifest load error: unable to load blob '…/index.json.blob' - No such file or directory`（沒有 manifest） |
+| 其他 group 昨晚的新備份 | 都是 `0 errors`：CT 100、101、102、103、105、109、110、112、113、114，vm 106、107、108、111、115。較舊的 snapshot 都是 `SKIPPED (recently verified)`，這次沒有重驗 |
+| VM 108 | 昨晚的 snapshot 驗證 `0 errors`（實際驗證約 39 GiB／51 GiB），PCI reset 等警告沒有影響備份資料 |
+| 失敗 snapshot 的目錄 | **空的**（`ls -la` 顯示 `total 0`），建立時間 11/18 21:02 |
+| VM 104 的完整備份 | 11/01、08、11、12、13、14、15、16、17，共 9 筆；最新可用的是 11/17 21:01 |
+
+**判斷**：
+
+- 備份在 21:02 建好 snapshot 目錄後，還沒寫入任何資料就失敗了（和 `query-pbs-bitmap-info` 逾時一致）。**沒有殘缺資料**，也沒有傷到舊備份。
+- VM 104 **不是一直失敗**：最近 7 晚（11/11～11/17）每晚都有備份，只有 11/18 失敗。11/09、11/10 不在清單裡，**推測**是被保留政策清掉，保留設定沒有查證。
+- 逾時的**根本原因仍然不確定**。
+- 這個空 snapshot 沒有 manifest，之後每次 verify 都可能報同樣的錯並寄通知信，所以要清掉。
+
+**唯讀確認**（在 PBS 上執行，`<datastore>` 是 datastore 的代稱）：
+
+```bash
+ls -la /mnt/<datastore>/vm/104/
+ls -la "/mnt/<datastore>/vm/104/2026-11-18T13:01:59Z/"
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| 第一行 | 列出 VM 104 所有 snapshot 目錄，確認 11/17 的完整備份還在 |
+| 第二行 | 看失敗那一筆裡面有什麼；`total 0`、只有 `.` 和 `..` 就是空的 |
+
+**清理**（改狀態，在 PBS 網頁操作）：
+
+| 步驟 | 做法 | 應該看到 |
+| --- | --- | --- |
+| 1 | Datastore → **Content** → 展開 `vm/104` | 10 筆 snapshot，群組 Count 是 10、Verify State 是 `9 OK` |
+| 2 | 找到 `2026-11-18 21:01:59` 那一列（Size、Comment 空白，Verify State 是 `None`），按右鍵 | 選單有 `Copy name to clipboard`、`Verify`、`Change Protection`、`Remove` |
+| 3 | 選 **Remove**，確認視窗的名稱要是 `vm/104/2026-11-18T13:01:59Z` 才確認 | 該列消失 |
+
+> ⚠️ **不要按 `vm/104` 群組那一列、Actions 欄的垃圾桶**：那是刪除整個群組，9 筆好的備份會一起消失。也不要在檔案系統直接 `rmdir`，要用 PBS 的 Remove，內部狀態才會一致。
+
+**結果**：11/19 15:52 移除後，再執行第一行 `ls`，只剩 9 個目錄（11/01～11/17），11/17 的完整備份（`13:01:54Z`）還在。PBS 網頁上的 `vm/104` 群組預期是 Count 9、`All OK`，但**這次只看到檔案系統，沒有看到網頁，未確認**。
+
+**還沒確認**：今晚（11/19）21:00 node10 的備份，VM 104 是否又逾時；若又失敗才是重複發生，才要查原因（PBS 負載、網路、104 的磁碟設定，目前沒有證據指向任何一項）。
 
 ### 15-3 第 1 輪（node10、node12）的精靈與 Verify
 
@@ -853,8 +898,8 @@ ceph -s
 | `norebalance`、`norecover` 是誰設的、旗標為什麼沒被清除 | 未確認 |
 | 過程異常：VPN 中斷多久、Lab Ops 斷線、告警信（Graylog／Wazuh／LibreNMS） | 沒有記錄 |
 | 更新前三台 `pve-firewall status`、VM 115 是否已加入 HA（`ha-manager config`） | 未確認 |
-| VM 104 過去幾天的備份是否一直失敗 | 沒有查 |
-| 當晚（11/19）三台備份 | 尚未看到 |
+| VM 104 過去幾天的備份是否一直失敗 | ✅ 已查證（11/19 下午）：只有 11/18 一次失敗，最近 7 晚都有備份（見 15-2 補充）；逾時的根本原因仍未確認 |
+| 當晚（11/19）三台備份與 22:45 的 PBS verify | 尚未看到 |
 
 ### 15-9 這次學到的
 
@@ -863,6 +908,7 @@ ceph -s
 - `norecover` 開著時，PG 停在 `recovery_wait` 不是故障，但副本數會一直少一份。
 - 判斷備份是否在跑用 `pgrep -x vzdump`，不要用 `ps aux | grep -c`（會算到指令列自己）。
 - `grep` 只印含關鍵字的那一行，多行輸出（例如 `io:` 底下）會被切掉；判讀前先看完整的 `ceph -s`。
+- 備份失敗後，到 PBS 看那個 snapshot 目錄是不是空的：空的會讓 verify 一直報 `manifest load error`。用 PBS 的 **Remove** 清掉那一筆，**不要**按群組的垃圾桶（整個群組會被刪）。
 
 ## 16. 下次可以直接照做的檢查順序
 
@@ -884,6 +930,7 @@ ceph -s
 16. 兩輪都做完後，用 `ceph osd dump | grep '^flags'` 確認 `noout`、`norebalance`、`norecover` 都已清除；ProxCenter 不一定會清（第 15 節）
 17. 旗標沒清時：先確認三台版本、PG 沒有 `inactive`、HA 沒有節點在 `maintenance`，再依序 `ceph osd unset norecover` → 等全部 `active+clean` → `ceph osd unset norebalance`、`ceph osd unset noout`（第 15-6 節）
 18. 第 2 輪前記得先把 ProxCenter（ct:110）搬離要更新的節點；沒搬時它會被 HA 搬走又回來，旗標可能沒清（第 15-4 節，**推測**）
+19. 更新前看昨晚的備份與 PBS verify：備份失敗的 VM 要看 PBS 上那個 snapshot 是不是空的、最近幾晚有沒有備份，再決定要不要先處理（第 15-2 節與補充）
 
 ## 17. 常見問題
 
@@ -910,7 +957,8 @@ ceph -s
 | PG 一直停在 `recovery_wait`、有 PG undersized | `norecover` 開著造成的，不是壞掉；先 `ceph osd unset norecover`，這段期間不要再動節點（第 15-5 節） |
 | `ps aux \| grep -c "[v]zdump"` 回非 0，但沒有備份在跑 | 計數會算到遠端指令列自己；改用 `pgrep -x vzdump`（第 15-2 節） |
 | 備份 stopped 的 VM 108 出現 `failed to reset PCI device`、`no efidisk configured` | 108 有 PCI 直通、沒有 EFI 磁碟造成，備份仍會完成，和更新無關（第 15-2 節） |
-| 備份 VM 104 出現 `query-pbs-bitmap-info failed - got timeout` | 11/18 單次失敗，原因未確認；先看過去幾天是否一直失敗（第 15-2 節） |
+| 備份 VM 104 出現 `query-pbs-bitmap-info failed - got timeout` | 11/18 單次失敗，最近 7 晚都有備份，根本原因未確認；失敗會留下一個空的 snapshot，見下一列（第 15-2 節與補充） |
+| PBS verify 報 `manifest load error … index.json.blob - No such file or directory` | 那個 snapshot 是上一次失敗的備份留下的空目錄（`ls -la` 是 `total 0`）。在 PBS 網頁該 snapshot 那一列右鍵 **Remove**；不要按群組的垃圾桶（第 15-2 補充） |
 
 ## 18. 待辦
 
@@ -920,8 +968,10 @@ ceph -s
 - [x] 用 `pvesh get /cluster/resources --type vm` 確認 VM 115 的位置與 `running` 狀態（2026-11-19 查詢：VM 115 在 node11、running，第 15 節）
 - [ ] 確認 11/17 當晚（21:00、21:30、22:00）三台備份都 `OK`（沒有看到；11/18 當晚的結果見第 15-2 節）
 - [x] 2026-11-19 白天再更新三台（kernel -29 → -30），並手動解除更新後遺留的 Ceph 旗標（第 15 節）
-- [ ] 確認 11/19 當晚（21:00、21:30、22:00）三台備份，這是更新後的第一次排程備份
-- [ ] 查 VM 104 近幾天的備份是否一直 `query-pbs-bitmap-info` 逾時（`pvesh get /nodes/node10/storage/PBS31/content --vmid 104` 看最近幾筆的時間）
+- [ ] 確認 11/19 當晚（21:00、21:30、22:00）三台備份，以及 22:45 的 PBS verify 是否乾淨，這是更新後的第一次排程備份
+- [x] 查 VM 104 近幾天的備份是否一直逾時（2026-11-19 查證：只有 11/18 一次失敗，最近 7 晚都有備份，空 snapshot 已用 PBS Remove 清掉，第 15-2 補充）
+- [ ] 看今晚 21:00 node10 的備份，VM 104 是否又 `query-pbs-bitmap-info` 逾時；若重複發生再查根本原因
+- [ ] 在 PBS 網頁確認 `vm/104` 群組已是 Count 9、`All OK`（11/19 只用檔案系統確認過）
 - [ ] 查清楚 `norebalance`、`norecover` 是 ProxCenter 設的還是手動設的，以及兩輪做完旗標為什麼沒被清除；若是 ProxCenter 新版行為，要更新第 12～14 節「只設 `noout`」的說法
 - [ ] 補記 11/19 兩輪實際時間、精靈實際設定、中場有沒有搬 ct:110、有哪些指令沒執行，與異常（VPN／Lab Ops／告警），使用者尚未提供
 - [ ] 用 `ha-manager config` 確認 VM 115 是否已加入 HA（11/17 時不在 HA）
