@@ -3,19 +3,19 @@ layout: default
 title: "ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？"
 date: 2026-08-26
 categories: [PVE, ProxCenter, Ceph]
-last_modified_at: 2026-11-17
+last_modified_at: 2026-11-19
 ---
 
 # ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？
 
-> **一句話**：用 ProxCenter 自動「一台一台」更新 PVE 叢集時，被三件事擋住：套件來源檢查讀到備份檔、SSH 連錯網段、sudo 權限不足；分開處理後就能往下走。也記錄了 10/12 實際更新的結果、「ProxCenter 不能更新自己所在那台」的問題，10/24 分兩輪讓 ProxCenter 更新完三台的做法，以及 10/29 ProxCenter 在 node10 時的第二次三台更新。
+> **一句話**：用 ProxCenter 自動「一台一台」更新 PVE 叢集時，被三件事擋住：套件來源檢查讀到備份檔、SSH 連錯網段、sudo 權限不足；分開處理後就能往下走。也記錄了 10/12 實際更新的結果、「ProxCenter 不能更新自己所在那台」的問題，10/24 分兩輪讓 ProxCenter 更新完三台的做法，以及 10/29 ProxCenter 在 node10 時的第二次三台更新。11/19 白天再更新一次三台（kernel -29 → -30），兩輪做完後 Ceph 的三個維護旗標沒有被清掉，要手動解除。
 
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 第一次用 ProxCenter 做 PVE 滾動更新的人 |
 | 環境 | 三台 PVE（node10～12）＋ Ceph；ProxCenter 是 ct:110 |
-| 實測 | 2026-08-26（排除三個卡關點，node12 進入更新階段）；2026-10-12（ProxCenter 完成 node11、node12，node10 手動）；2026-10-24（**三台都由 ProxCenter 完成**，分兩輪）；2026-10-29（再次三台，ProxCenter 在 node10，kernel -25 → -26）；2026-11-17（**人不在現場、沒有 BMC**，node10 → node12 → node11，kernel -28 → -29，第 14 節） |
-| 結論 | ✅ 三個卡關點已排除；✅ 10/24 三台都由 ProxCenter 更新並重開（kernel 7.0.14-23 → -25），HA 服務沒有中斷、Ceph 回到 HEALTH_OK（第 12 節）；✅ 10/29 再做一次三台更新，已是最新的節點會被自動略過，不需要「陪跑」（第 13 節）；✅ 11/17 人不在現場，一次一台更新三台到 kernel `7.0.14-29`、pve-manager 9.2.28：13 個 HA 服務 `started`、Ceph `HEALTH_OK`、`noout` 已清除；**不在 HA 的執行中 VM（nextcloud）要先線上搬走**（第 14 節）；⏳ 把 ProxCenter 移到叢集外、縮小 sudo 權限 |
+| 實測 | 2026-08-26（排除三個卡關點，node12 進入更新階段）；2026-10-12（ProxCenter 完成 node11、node12，node10 手動）；2026-10-24（**三台都由 ProxCenter 完成**，分兩輪）；2026-10-29（再次三台，ProxCenter 在 node10，kernel -25 → -26）；2026-11-17（**人不在現場、沒有 BMC**，node10 → node12 → node11，kernel -28 → -29，第 14 節）；2026-11-19（白天、分兩輪，kernel -29 → -30，**更新後旗標沒清**，第 15 節） |
+| 結論 | ✅ 三個卡關點已排除；✅ 10/24 三台都由 ProxCenter 更新並重開（kernel 7.0.14-23 → -25），HA 服務沒有中斷、Ceph 回到 HEALTH_OK（第 12 節）；✅ 10/29 再做一次三台更新，已是最新的節點會被自動略過，不需要「陪跑」（第 13 節）；✅ 11/17 人不在現場，一次一台更新三台到 kernel `7.0.14-29`、pve-manager 9.2.28：13 個 HA 服務 `started`、Ceph `HEALTH_OK`、`noout` 已清除；**不在 HA 的執行中 VM（nextcloud）要先線上搬走**（第 14 節）；✅ 11/19 三台更新到 kernel `7.0.14-30`、pve-manager 9.2.31，但**更新結束後 `noout`、`norebalance`、`norecover` 都還在、25 個 PG degraded**，手動解除後回到 `HEALTH_OK`、97 個 PG `active+clean`（第 15 節）；⏳ 把 ProxCenter 移到叢集外、縮小 sudo 權限、查清楚旗標沒被清除的原因 |
 
 > 文中 IP 都是文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24）；IP、帳號、VMID 是案例值。
 
@@ -640,7 +640,7 @@ for n in node10 node11 node12; do echo -n "$n 核心："; ssh root@$n 'uname -r'
 | HA | `quorum OK`、master 在 node12；三台 `lrm` 都是 `active`（沒有 `maintenance`）；13 個服務都 `started` |
 | `qm status 115` | 在 node12 執行，回報 `Configuration file 'nodes/node12/qemu-server/115.conf' does not exist` |
 
-- **96 個 PG**：`grep pgs` 只印含 `pgs` 的那一行，第二行（例如 `1 active+clean+scrubbing+deep`）被切掉，OSD 剛回來時常見（見第 16 節）；**這次沒有用 `ceph pg stat` 確認第 97 個的狀態**，所以是「未確認」。
+- **96 個 PG**：`grep pgs` 只印含 `pgs` 的那一行，第二行（例如 `1 active+clean+scrubbing+deep`）被切掉，OSD 剛回來時常見（見第 17 節）；**這次沒有用 `ceph pg stat` 確認第 97 個的狀態**，所以是「未確認」。
 - **`qm status 115` 的錯誤**：`qm` 只查**本機**的 VM，VM 115 在 node10，在 node12 查不到，**不代表 nextcloud 有問題**；要看位置用 `pvesh get /cluster/resources --type vm`。這次**沒有用正確的方式確認 VM 115 是 `running`**。
 
 最後的位置：
@@ -676,7 +676,195 @@ for n in node10 node11 node12; do echo -n "$n 核心："; ssh root@$n 'uname -r'
 - `qm` 指令只查本機；驗收時 VM 在哪台要用 `pvesh` 查，不要在任一台直接 `qm status`。
 - 人不在現場時，停損規則要事先寫好：一台 10 分鐘沒回來就停，不碰別台。
 
-## 15. 下次可以直接照做的檢查順序
+## 15. 2026-11-19：白天更新，兩輪做完後 Ceph 旗標沒清（node10、node12 → node11）
+
+**做什麼**：三台各有 14 個可更新套件（ProxCenter 畫面顯示 15，**推測**多的 1 個是 signed kernel image，和 10/29、11/17 相同），要更新到 kernel `7.0.14-30`、pve-manager 9.2.31。這次是白天、人在線上操作，分兩輪：第 1 輪 node10、node12，第 2 輪 node11（ProxCenter 在 node11）。重點是**兩輪結束後，Ceph 的三個維護旗標沒有被清掉**，要手動解除。
+
+### 15-1 更新前檢查（唯讀，08:20）
+
+| 檢查 | 結果 |
+| --- | --- |
+| 版本 | 三台都是 kernel `7.0.14-29-pve`、pve-manager 9.2.28，uptime 約 1 天 23 小時（和 11/17 更新時間吻合） |
+| 可更新套件 | 三台都是 14 個；符合篩選的只有 `proxmox-kernel-7.0`、`pve-manager`、`qemu-server`；**沒有** `ceph-*`、`grub`、`ifupdown2`、`pve-firewall`、`corosync`、`libknet`。這是 apt 快取，更新前沒有另外跑 `apt update`，清單以 ProxCenter 的 `Check for updates` 為準 |
+| 套件狀態、來源 | `dpkg --audit` 三台都沒輸出；`/etc/apt/sources.list.d/` 三台一致（`ceph.sources`、`debian.sources`、`proxmox.sources`），沒有 `.BAK` 備份檔 |
+| 叢集 | `Quorate: Yes`、3 節點；Corosync LINK 0、LINK 1 都 `connected` |
+| Ceph | `HEALTH_OK`、3 MON quorum（leader node10）、OSD 3 up／3 in、97 個 PG `active+clean`、沒有任何旗標；用量 1.3 TiB／5.5 TiB（約 24%） |
+| HA | `quorum OK`、master 在 node12、fencing armed、三台 `lrm` 都是 `active`；14 個服務（10 個 CT、4 個 VM）都 `started`；`shutdown_policy=migrate` |
+| 儲存與副本 | `VM_Pool` 是 Ceph RBD；4 個 pool 都是 size 3、min_size 2；10 個 CT 都沒有 `mp*`、`dev*`（沒有 bind mount 和直通） |
+
+HA 服務是 14 個，比 11/17 的 13 個多 1 個。**推測**是 VM 115（nextcloud）已加入 HA（查詢結果顯示它在 HA 內、`onboot=1`）；這次沒有用 `ha-manager config` 單獨確認。
+
+不在 HA 的 VM 只剩兩台，**都是 `stopped`**：
+
+| VM | 節點 | 磁碟 | 特殊項目 | `onboot` | 影響 |
+| --- | --- | --- | --- | --- | --- |
+| 104 UBClient | node10 | `scsi0` 60G（`VM_Pool`） | 無 | 未設定 | 關機中，不需處理 |
+| 108 WinClient | node11 | `scsi0` 60G（`VM_Pool`） | `hostpci0`（PCI 直通） | 0 | 有直通不能線上遷移；關機中不需處理，**更新期間不要開機** |
+
+> 更新前原本以為 VM 108 是開機的（10/29 是關機），查詢結果是 `stopped`。所以不需要先正常關機。若它是開機的，ProxCenter 的「Migrate non-HA VMs」會嘗試遷移它並失敗，`Abort on failure` 會讓流程在節點已進維護模式後中止（**推測**，這次沒有發生）。
+
+更新前的位置（running）：
+
+| 節點 | 資源 |
+| --- | --- |
+| node10 | ct:101、103、105、113（Lab Ops 所在）、114、vm:106 |
+| node11 | ct:100、110（ProxCenter）、112、VM 115 |
+| node12 | ct:102、109（WireGuard）、vm:107、111 |
+
+### 15-2 更新前發現：昨晚（11/18）備份的異常
+
+| 節點 | 排程 | 結果 | 內容 |
+| --- | --- | --- | --- |
+| node10 | 21:00:01～21:07:59 | `ERROR` | **只有 VM 104 失敗**：`qmp command 'query-pbs-bitmap-info' failed - got timeout`；CT 101、103、105、113、114 與 vm:106 都成功 |
+| node11 | 21:30:01～21:38:21 | `WARNINGS: 2` | 全部來自 VM 108，備份最後 `Finished`（2 分 55 秒） |
+| node12 | 22:00:01～22:05:37 | `OK` | |
+
+- **VM 104**：它是 stopped 的 VM，備份時 PVE 會暫時起一個 QEMU 讀磁碟，失敗的是這個程序查詢 PBS dirty-bitmap 時逾時。原因**不確定**（推測是 PBS 或網路當下較慢）；104 過去幾天是不是一直失敗，**沒有查**。
+- **VM 108**：log 裡的三類訊息是 `no efidisk configured! Using temporary efivars disk.`、`iothread is only valid with virtio disk or virtio-scsi-single controller, ignoring`（`scsi0` 設了 `iothread=1`，控制器是 `virtio-scsi-pci`，這個設定不會生效）、`failed to reset PCI device`（備份 stopped 的 VM 時會碰到直通裝置）。都是 108 的設定造成，和更新無關。
+- **備份有沒有在跑**：`ps aux | grep -c "[v]zdump"` 的計數不可靠（node11、node12 回 1，node10 回 5；**推測**是遠端指令列本身含 `vzdump` 字樣）。要確認用 `pgrep -x vzdump`（精確比對程序名稱，沒輸出代表沒有）。
+
+**判斷**：兩台的問題都不擋更新，各台 running 的資源昨晚都有備份。更新是節點層，風險在重開，不在 guest 資料，所以沒有再額外做一次備份。
+
+### 15-3 第 1 輪（node10、node12）的精靈與 Verify
+
+精靈每次都會回到預設值，要逐項重新確認（SSH Addresses 管理網、Manual approval 開、Reboot timeout 600、Minimum healthy nodes 1、不勾 node11）。使用者回報「設定都確認了」，**實際值沒有逐項記錄**。
+
+Verify 畫面：
+
+| 項目 | 看到 |
+| --- | --- |
+| 總結 | `All checks passed`，預估約 47 分鐘 |
+| 叢集 | Quorum OK、3/3 票（quorum 2）、3/3 節點在線 |
+| 可更新 | node10、node12 各 15 個套件 |
+| 重開 | `2/2 nodes will likely require a reboot (kernel updates detected)` |
+| 遷移 | `10 VMs will be migrated`，對得上 node10 的 6 個加 node12 的 4 個 running 資源 |
+
+起跑前先確認：
+
+```bash
+for n in node10 node12; do echo "== $n"; ssh root@$n 'apt list --upgradable 2>/dev/null | grep -vc "^Listing"; apt list --upgradable 2>/dev/null | grep -iE "ceph|proxmox-kernel|grub|ifupdown2|pve-firewall|pve-manager|qemu|corosync|libknet" | cut -d/ -f1 | tr "\n" " "; echo'; done
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `grep -vc "^Listing"` | 可更新套件數；ProxCenter 的 15 比快取的 14 多 1 |
+| `grep -iE "ceph\|…\|corosync\|libknet"` | 挑出「出事會讓節點連不上、影響 Ceph 或叢集通訊」的套件；有的話先停下來看 |
+
+監看視窗開在這一輪不會重開的 node11（用 tmux），內容和第 11 節相同。
+
+### 15-4 兩輪做完之後
+
+使用者回報：三台分兩次更新完之後「有些指令沒執行」，**沒有說是哪些**。ct:110（ProxCenter）的行為是：**node11 進維護模式時被 HA 搬走，解除後自己回來**。中場有沒有手動 `ha-manager migrate ct:110`，**沒有記錄**（依上述回報，**推測**沒做）。
+
+ProxCenter 的 Rolling Update 頁面最後顯示：
+
+| 節點 | Version | Available Updates | VMs | Status |
+| --- | --- | --- | --- | --- |
+| node10 | 9.2.31 | 0 | 7 | Online |
+| node12 | 9.2.31 | 0 | 4 | Online |
+| node11 | 9.2.31 | 0 | 5 | Online |
+
+下方是 `0 update(s) available on 0 node(s)`。
+
+### 15-5 發現旗標沒清：Ceph 是 `HEALTH_WARN`
+
+ProxCenter 叢集頁的 OSD Flags 顯示 **`noout`、`norebalance`、`norecover`** 都還在，Ceph 是 Warning。唯讀檢查：
+
+| 檢查 | 結果 |
+| --- | --- |
+| 版本 | 三台都是 kernel `7.0.14-30-pve`（也是執行中的核心）、pve-manager 9.2.31；可更新 0 |
+| 旗標 | `noout,norebalance,norecover` |
+| Ceph health | `HEALTH_WARN`：157／366300 個物件 degraded（0.043%）、25 個 PG degraded、9 個 PG undersized |
+| PG | 97 個裡 64 個 `active+clean`，其餘是 `recovery_wait` 或 `recovering` |
+| undersized 的 PG | 超過 44 分鐘只有 2 份副本（`[0,2]` 或 `[2,0]`，少 osd.1 那份）；osd.1 已經回來，因為其他 PG 的 acting set 有它 |
+| HA | quorum OK，三台 `lrm` 都是 `active`，14 個服務都 `started` |
+| 用量與 IO | 約 5.2 MiB/s 讀、812 KiB/s 寫 |
+
+**原因不確定。** 推測：ProxCenter 在第 2 輪（node11）被 HA 搬走時，流程被中斷，來不及清旗標（第 10 節的風險）。`norebalance`、`norecover` 是誰設的**也未確認**：這份文章過去只記錄 ProxCenter 設與清 `noout`，這兩個旗標可能是 ProxCenter 新版的行為，也可能是手動設的，沒有查執行紀錄。
+
+**`norecover` 開著時 PG 停在 `recovery_wait` 是旗標造成的，不是壞掉。** 但 9 個 PG 只有 2 份副本，而 `min_size` 是 2，等於**沒有容錯餘裕**；這段期間不要再動任何節點、OSD 或網路。
+
+### 15-6 解除旗標的步驟
+
+先確認三台都更新完、HA 沒有節點在維護模式、PG 沒有 `inactive`，再依序解除（改狀態的指令，自己在 shell 貼）：
+
+```bash
+ceph osd unset norecover
+watch -n 5 'ceph -s | grep -E "health|pgs|degraded|recovering|io:"'
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `ceph osd unset norecover` | 先讓 recovery 開始，把缺的第三份副本補回來 |
+| `watch … grep -E …` | 每 5 秒看 degraded 與 PG 狀態；`io:` 底下的縮排行會被 `grep` 切掉，畫面上 `io:` 空白不是異常 |
+
+**應該看到**：degraded 的數字下降，最後 `97 active+clean`。這次量很小（0.043%），很快就完成。
+
+PG 全部 `active+clean` 後，先確認警告只剩旗標：
+
+```bash
+ceph health detail
+```
+
+```text
+HEALTH_WARN noout,norebalance flag(s) set
+[WRN] OSDMAP_FLAGS: noout,norebalance flag(s) set
+```
+
+再解除另外兩個：
+
+```bash
+ceph osd unset norebalance
+ceph osd unset noout
+ceph osd dump | grep '^flags'
+ceph -s
+```
+
+**看到的結果**：
+
+| 項目 | 結果 |
+| --- | --- |
+| `flags` | `sortbitwise,recovery_deletes,purged_snapdirs,pglog_hardlimit`，沒有任何維護旗標 |
+| health | `HEALTH_OK` |
+| MON／MGR／MDS | 3 個 MON 都在 quorum（leader node10）；MGR active 在 node12；MDS 1／1 up、2 standby |
+| OSD | 3 up（since 49m）、3 in |
+| 資料 | `volumes: 1/1 healthy`、4 pools、97 pgs、122.10k objects、465 GiB；1.3 TiB 已用、4.2 TiB 可用 |
+| PG | 97 `active+clean` |
+| IO | 約 3.4 KiB/s 讀、528 KiB/s 寫 |
+
+### 15-7 最後驗收
+
+| 檢查 | 結果 |
+| --- | --- |
+| HA | quorum OK、master 在 node12；三台 `lrm` 都是 `active`、watchdog active；14 個服務都 `started`；沒有 `error`、`maintenance`、`migrate`、`relocate` |
+| VM／CT | 共 16 個，14 個 running；VM 104（node10）、108（node11）`stopped`，和更新前一致 |
+| 分布 | node10 有 7 個（含 stopped 的 104）、node11 有 5 個（含 stopped 的 108）、node12 有 4 個；ct:110 在 node11 |
+| 版本 | 三台 `7.0.14-30-pve`、9.2.31（kernel 版本來自 Lab Ops 回報的 `uname -r`，ProxCenter 頁面只顯示 9.2.31） |
+
+分布是 7／5／4，CRS 是 static，HA 不會自動搬回平均，**這不是錯誤**（見[HA 放置策略](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)）。
+
+### 15-8 沒有記錄到的
+
+| 項目 | 狀態 |
+| --- | --- |
+| 精靈實際設定（兩輪） | 沒有逐項記錄 |
+| 兩輪各自的開始與完成時間、node10 驗收後才批准 node12 的紀錄 | 沒有記錄 |
+| 「有些指令沒執行」是哪些；中場有沒有手動搬 ct:110 | 沒有記錄 |
+| `norebalance`、`norecover` 是誰設的、旗標為什麼沒被清除 | 未確認 |
+| 過程異常：VPN 中斷多久、Lab Ops 斷線、告警信（Graylog／Wazuh／LibreNMS） | 沒有記錄 |
+| 更新前三台 `pve-firewall status`、VM 115 是否已加入 HA（`ha-manager config`） | 未確認 |
+| VM 104 過去幾天的備份是否一直失敗 | 沒有查 |
+| 當晚（11/19）三台備份 | 尚未看到 |
+
+### 15-9 這次學到的
+
+- **兩輪更新結束後，一定要查 `ceph osd dump | grep '^flags'`**，不要假設 ProxCenter 一定會清掉。旗標沒清，日後 OSD 真的故障時 Ceph 不會自動處理。
+- 清旗標前先確認 PG 沒有 `inactive`、HA 沒有節點在維護模式；順序是 `norecover` → 等 recovery 完成 → `norebalance`、`noout`。
+- `norecover` 開著時，PG 停在 `recovery_wait` 不是故障，但副本數會一直少一份。
+- 判斷備份是否在跑用 `pgrep -x vzdump`，不要用 `ps aux | grep -c`（會算到指令列自己）。
+- `grep` 只印含關鍵字的那一行，多行輸出（例如 `io:` 底下）會被切掉；判讀前先看完整的 `ceph -s`。
+
+## 16. 下次可以直接照做的檢查順序
 
 1. 確認 quorum、Ceph、HA 與工作負載容量
 2. 看套件來源的實際設定，區分出備份檔
@@ -693,8 +881,11 @@ for n in node10 node11 node12; do echo -n "$n 核心："; ssh root@$n 'uname -r'
 13. 沒有更新的節點會被自動略過，不需要陪跑；ProxCenter 所在的節點仍然要放最後一輪，中場先搬走 ProxCenter（第 13 節）
 14. 更新前用 `pvesh get /cluster/resources --type vm` 對照 `ha-manager status`，找出**不在 HA 的執行中 VM／CT**；維護模式不會搬它，要先 `qm migrate <VMID> <已更新的節點> --online` 或排停機（第 14 節）
 15. 人不在現場、沒有 BMC 時：一次一台，每台驗收通過才批准下一台；任何一台 10 分鐘沒回來就停，不碰別台（第 14 節）
+16. 兩輪都做完後，用 `ceph osd dump | grep '^flags'` 確認 `noout`、`norebalance`、`norecover` 都已清除；ProxCenter 不一定會清（第 15 節）
+17. 旗標沒清時：先確認三台版本、PG 沒有 `inactive`、HA 沒有節點在 `maintenance`，再依序 `ceph osd unset norecover` → 等全部 `active+clean` → `ceph osd unset norebalance`、`ceph osd unset noout`（第 15-6 節）
+18. 第 2 輪前記得先把 ProxCenter（ct:110）搬離要更新的節點；沒搬時它會被 HA 搬走又回來，旗標可能沒清（第 15-4 節，**推測**）
 
-## 16. 常見問題
+## 17. 常見問題
 
 | 現象 | 原因與處理 |
 | --- | --- |
@@ -715,20 +906,31 @@ for n in node10 node11 node12; do echo -n "$n 核心："; ssh root@$n 'uname -r'
 | `qm status <VMID>` 回報 `Configuration file 'nodes/<節點>/qemu-server/<VMID>.conf' does not exist` | `qm` 只查本機的 VM；VM 在別台時用 `pvesh get /cluster/resources --type vm` 看位置，或到那台執行（第 14-5 節） |
 | 更新前 `pvesh` 列出的 VM／CT 比 HA 資源多 | 多出來的是不在 HA 的（關機的 104、108，執行中的 115）；執行中的要先線上搬走，維護模式不會搬它（第 14-3 節） |
 | 人不在現場，有一台重開後沒回來 | 不要碰別台；另外兩台有 quorum 與 Ceph，服務都在它們上面；到現場處理（第 14-1 節） |
+| 更新後 Ceph 是 `HEALTH_WARN`，`noout`、`norebalance`、`norecover` 還在 | ProxCenter 沒清掉；先確認 PG、HA，再依序手動 `ceph osd unset`（第 15-5、15-6 節） |
+| PG 一直停在 `recovery_wait`、有 PG undersized | `norecover` 開著造成的，不是壞掉；先 `ceph osd unset norecover`，這段期間不要再動節點（第 15-5 節） |
+| `ps aux \| grep -c "[v]zdump"` 回非 0，但沒有備份在跑 | 計數會算到遠端指令列自己；改用 `pgrep -x vzdump`（第 15-2 節） |
+| 備份 stopped 的 VM 108 出現 `failed to reset PCI device`、`no efidisk configured` | 108 有 PCI 直通、沒有 EFI 磁碟造成，備份仍會完成，和更新無關（第 15-2 節） |
+| 備份 VM 104 出現 `query-pbs-bitmap-info failed - got timeout` | 11/18 單次失敗，原因未確認；先看過去幾天是否一直失敗（第 15-2 節） |
 
-## 17. 待辦
+## 18. 待辦
 
 - [x] 三台都由 ProxCenter 完成一次更新的完整紀錄（2026-10-24，第 12 節；2026-10-29 再做一次，第 13 節）
 - [x] 2026-11-17 人不在現場、一次一台再更新三台（第 14 節）
 - [ ] 確認 11/17 最後驗收只看到 96 個 `active+clean` 行，第 97 個 PG 的狀態（`ceph pg stat`）
-- [ ] 用 `pvesh get /cluster/resources --type vm` 確認 VM 115 的位置與 `running` 狀態
-- [ ] 確認 11/17 當晚（21:00、21:30、22:00）三台備份都 `OK`
+- [x] 用 `pvesh get /cluster/resources --type vm` 確認 VM 115 的位置與 `running` 狀態（2026-11-19 查詢：VM 115 在 node11、running，第 15 節）
+- [ ] 確認 11/17 當晚（21:00、21:30、22:00）三台備份都 `OK`（沒有看到；11/18 當晚的結果見第 15-2 節）
+- [x] 2026-11-19 白天再更新三台（kernel -29 → -30），並手動解除更新後遺留的 Ceph 旗標（第 15 節）
+- [ ] 確認 11/19 當晚（21:00、21:30、22:00）三台備份，這是更新後的第一次排程備份
+- [ ] 查 VM 104 近幾天的備份是否一直 `query-pbs-bitmap-info` 逾時（`pvesh get /nodes/node10/storage/PBS31/content --vmid 104` 看最近幾筆的時間）
+- [ ] 查清楚 `norebalance`、`norecover` 是 ProxCenter 設的還是手動設的，以及兩輪做完旗標為什麼沒被清除；若是 ProxCenter 新版行為，要更新第 12～14 節「只設 `noout`」的說法
+- [ ] 補記 11/19 兩輪實際時間、精靈實際設定、中場有沒有搬 ct:110、有哪些指令沒執行，與異常（VPN／Lab Ops／告警），使用者尚未提供
+- [ ] 用 `ha-manager config` 確認 VM 115 是否已加入 HA（11/17 時不在 HA）
 - [ ] 補記 11/17 各輪實際時間、精靈實際設定、中場做法（ct:110 為何在 node12）與異常（VPN／Lab Ops／告警），使用者尚未提供
 - [ ] 評估把 ProxCenter 移到叢集外
 - [ ] 評估縮小 proxcenter 帳號的 sudo 權限（目前清單最後有 `NOPASSWD: ALL`，前面的細項清單等於沒有作用）
 - [ ] 回報或追蹤 ProxCenter 把 Ceph 上的 LXC 判斷成 `has local storage` 的問題
 
-## 18. 延伸閱讀
+## 19. 延伸閱讀
 
 - [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-enterprise-update/)：同日更新 ProxCenter 本身與 CT110 擴容
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)

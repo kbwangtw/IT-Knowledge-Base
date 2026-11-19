@@ -79,7 +79,7 @@ last_modified_at: 2026-11-07
 | [把 ESXi 上的 Windows＋SQL Server 虛擬機搬到獨立 PVE（二）：踩雷與效能診斷](docs/pve/esxi-vm-to-pve-troubleshooting/) | 搬 VM 時速度只有 10 MiB/s（網卡協商成 100 Mbps）、寫入 local-lvm 慢到停擺（RAID 5 沒有寫入快取）、PVE 把 VMDK 資料檔當磁碟、VirtIO SCSI 開機失敗、VMware Tools 移除失敗 |
 | [VMware 搬到 PVE 後，Windows VM 開機跳出 VMware Tools 錯誤：移除失敗（1603）的處理](docs/pve/pve-vm-remove-vmware-tools-after-migration/) | VM 從 VMware 搬到 PVE 後，登入就跳 `0xc0000096`；`msiexec` 移除回 1603（卡在 `VM_LogStart`）；手動清服務、Run、資料夾、驅動；`qm pending` 讓 Guest Agent 生效 |
 | [兩台獨立 PVE 之間搬 VM：用 qm remote-migrate 線上搬移（PBS 虛擬機實測）](docs/pve/pve-standalone-vm-live-migration/) | 兩台沒組叢集的 PVE 要搬 VM；來源是 ZFS 時停機搬移為什麼失敗；API token、指紋、CPU 世代與 pending 的坑 |
-| [ProxCenter 逐台更新 PVE：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 想用工具一次一台安全地更新叢集（含人不在現場、非 HA VM 的處理，11/17） |
+| [ProxCenter 逐台更新 PVE：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 想用工具一次一台安全地更新叢集（含人不在現場、非 HA VM 的處理，11/17；更新後 Ceph 旗標沒清的處理，11/19） |
 | [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](docs/pve/proxcenter-enterprise-update/) | 企業版 ProxCenter 自己要怎麼更新；`docker compose up -d` 的陷阱；CT110 擴容 |
 | [PVE 更新重開後 HA 服務卡在 error](docs/pve/pve-ha-service-error-after-reboot/) | HA 服務顯示 error；要手動重開節點 |
 | [PVE 更新後逐台重開（人不在現場）：維護模式加 noout，一次一台](docs/pve/pve-rolling-reboot-after-update/) | 套件更新完裝了新核心要重開，又不在現場、沒有主控台 |
