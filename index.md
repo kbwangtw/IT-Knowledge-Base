@@ -1,7 +1,7 @@
 ---
 layout: default
 title: 資訊黑手的 Knowledge Base
-last_modified_at: 2026-11-07
+last_modified_at: 2026-11-22
 ---
 
 # 資訊黑手的 IT 維運筆記
@@ -11,7 +11,7 @@ last_modified_at: 2026-11-07
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 剛接觸虛擬化、備份、監控的 IT 新鮮人；想找實際案例對照的維運人員 |
-| 文章數 | 40 篇，分 6 類 |
+| 文章數 | 41 篇，分 6 類 |
 | 最近更新 | 2026-10-17：全站改寫為新手版 |
 
 ## 1. 這裡記錄的是什麼環境
@@ -144,6 +144,7 @@ last_modified_at: 2026-11-07
 | [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05/) | 雲端主機磁碟滿了，不知道從哪裡查 |
 | [Nutanix 收到高風險安全警示：要等歲修嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide/) | 收到廠商安全公告，判斷要多急（規劃參考，未實測） |
 | [ML30 Gen11 擴充紀錄](docs/hardware/hpe/ml30-gen11/) | 伺服器加裝光碟機、M.2、設定 iLO |
+| [Dell R770 + PERC H965i：安裝 Windows Server 2025 看不到硬碟怎麼辦](docs/hardware/dell/dell-r770-h965i-windows-server-2025-driver/) | RAID 1 做好了，Windows 安裝畫面卻是空的；用 iDRAC Virtual Media 載入 driver（待確認安裝完成） |
 
 ### 4-7 Blogger 舊文（2011–2025）
 
