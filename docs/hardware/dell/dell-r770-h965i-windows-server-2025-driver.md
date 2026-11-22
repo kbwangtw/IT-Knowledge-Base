@@ -18,7 +18,7 @@ last_modified_at: 2026-11-22
 | 日期 | 2026-11-22 |
 | 需要準備 | 在 Dell 支援網站下載的 PERC H965i Windows driver、能執行 ImDisk 的 Windows 電腦 |
 | 風險 | 低：全新空碟；但 `clean` 會清掉磁碟分割表，下指令前要確認選對磁碟 |
-| 結論 | ✅ RAID 1 狀態正常（Virtual Disk Ready、約 446 GiB）<br>✅ UEFI 開機模式確認<br>✅ driver 映像檔掛載成功，Setup 認得 PERC H965i<br>✅ `diskpart` 看到 446 GB 的 DELL RAID 磁碟，並成功轉成 GPT<br>⏳ 轉成 GPT 後完成安裝，尚未回報結果（見待辦） |
+| 結論 | ✅ RAID 1 狀態正常（Virtual Disk Ready、約 446 GiB）<br>✅ UEFI 開機模式確認<br>✅ driver 映像檔掛載成功，Setup 認得 PERC H965i<br>✅ `diskpart` 看到 446 GB 的 DELL RAID 磁碟，並成功轉成 GPT<br>✅ 轉成 GPT 後，Windows Server 2025 安裝成功（2026-11-22 回報） |
 
 ## 1. 先認識幾個名詞
 
@@ -183,7 +183,7 @@ exit
 
 1. `exit` 離開 diskpart，關閉命令提示字元。
 2. 在選擇安裝位置的畫面按 `重新整理`。
-3. 磁碟 0 應變成約 446 GB 的未配置空間，選它按「下一步」。
+3. 磁碟 0 應變成約 446 GB 的未配置空間，選它按「下一步」。這次照此步驟後，安裝成功。
 
 安裝中：
 
@@ -205,7 +205,6 @@ exit
 
 ## 待辦
 
-- [ ] 轉成 GPT 後完成 Windows Server 2025 安裝，確認「重新整理」後磁碟 0 可選取（**目前尚未回報結果**）
 - [ ] 安裝後確認裝置管理員內 PERC H965i 無黃色驚嘆號
 - [ ] 更新 iDRAC、BIOS、PERC 韌體
 - [ ] 查證 Dell 是否有 Windows Server 2025 專用 driver 版本（這次載入的版本號未記錄）

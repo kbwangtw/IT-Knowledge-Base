@@ -144,7 +144,7 @@ last_modified_at: 2026-11-22
 | [GCP 網站主機磁碟 100%：清 log 之後，又查出四個問題](docs/gcp/gce-disk-full-log-cleanup-2026-10-05/) | 雲端主機磁碟滿了，不知道從哪裡查 |
 | [Nutanix 收到高風險安全警示：要等歲修嗎？](docs/nutanix/nutanix-security-advisory-upgrade-guide/) | 收到廠商安全公告，判斷要多急（規劃參考，未實測） |
 | [ML30 Gen11 擴充紀錄](docs/hardware/hpe/ml30-gen11/) | 伺服器加裝光碟機、M.2、設定 iLO |
-| [Dell R770 + PERC H965i：安裝 Windows Server 2025 看不到硬碟怎麼辦](docs/hardware/dell/dell-r770-h965i-windows-server-2025-driver/) | RAID 1 做好了，Windows 安裝畫面卻是空的；用 iDRAC Virtual Media 載入 driver（待確認安裝完成） |
+| [Dell R770 + PERC H965i：安裝 Windows Server 2025 看不到硬碟怎麼辦](docs/hardware/dell/dell-r770-h965i-windows-server-2025-driver/) | RAID 1 做好了，Windows 安裝畫面卻是空的；用 iDRAC Virtual Media 載入 driver，再用 diskpart 轉 GPT（已安裝成功） |
 
 ### 4-7 Blogger 舊文（2011–2025）
 
