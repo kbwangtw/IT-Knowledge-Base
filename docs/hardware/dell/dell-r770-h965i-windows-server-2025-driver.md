@@ -128,7 +128,7 @@ driver 映像檔（.img）  ──(iDRAC Virtual Media：Removable)──┤
 
 | 看到的 | 實際情況 |
 | --- | --- |
-| 「磁碟 0 磁碟分割 1」顯示 **16.0 TB**、類型「未知」，並警告「Windows Server 無法安裝在磁碟 0 磁碟分割 1 上」 | 畫面誤判；實際是 446 GB 的 RAID 磁碟（見下一步）。**原因未確認**，推測是磁碟還沒有分割表 |
+| 「磁碟 0 磁碟分割 1」顯示 **16.0 TB**、類型「未知」，並警告「Windows Server 無法安裝在磁碟 0 磁碟分割 1 上」 | 畫面顯示異常；實際是 446 GB 的 RAID 磁碟（見下一步）。最初發現時，重開機幾次都一直是 16 TB，driver 版本沒有換，`diskpart` 一開始就顯示 446 GB，轉成 GPT 後恢復正常。**原因未確認**，推測是 Setup 圖形畫面對尚未初始化的磁碟顯示不正確 |
 | 「磁碟 1 磁碟分割 1」200.0 MB，類型「主要」 | 這是我們掛的 driver 映像檔，不是安裝目標 |
 
 ## 7. 步驟 5：用 diskpart 確認並轉成 GPT
@@ -197,7 +197,7 @@ exit
 | --- | --- |
 | 安裝畫面磁碟清單完全是空的 | 沒載入 driver；先確認 RAID 的 Virtual Disk 為 Ready，再照步驟 4 載入 |
 | `載入驅動程式` 瀏覽不到 driver | 確認 iDRAC 的 Removable Disk 已掛載；資料夾要選到含 `.inf` 的那一層 |
-| 磁碟顯示 16.0 TB、未知，不能安裝 | 用 `diskpart` 確認真實大小，再 `clean` + `convert gpt`（步驟 5） |
+| 磁碟顯示 16.0 TB、未知，不能安裝（重開機也不會變） | 先用 `diskpart` 確認真實大小；若是 446 GB，再 `clean` + `convert gpt`（步驟 5），之後畫面恢復正常 |
 | ImDisk 存檔時 `Cannot lock the drive` | 檔案總管開著該磁碟；關掉視窗後重存 |
 | iDRAC 讀不到 `.img` | 本機 ImDisk 磁碟還沒 `Remove`，檔案被占用 |
 | Virtual Media 只有一個 CD/DVD 位置 | driver 改用 Removable Disk 掛載，不要再掛第二個 ISO |
@@ -208,7 +208,7 @@ exit
 - [ ] 安裝後確認裝置管理員內 PERC H965i 無黃色驚嘆號
 - [ ] 更新 iDRAC、BIOS、PERC 韌體
 - [ ] 查證 Dell 是否有 Windows Server 2025 專用 driver 版本（這次載入的版本號未記錄）
-- [ ] 確認 16 TB 誤判的原因（目前只是推測：磁碟尚無分割表）
+- [ ] 確認 16 TB 顯示異常的原因（目前只是推測：Setup 圖形畫面對未初始化磁碟顯示不正確；尚未用磁區大小等資料驗證）
 
 ## 延伸閱讀
 
