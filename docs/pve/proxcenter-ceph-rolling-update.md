@@ -3,19 +3,19 @@ layout: default
 title: "ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？"
 date: 2026-08-26
 categories: [PVE, ProxCenter, Ceph]
-last_modified_at: 2026-11-19
+last_modified_at: 2026-11-23
 ---
 
 # ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？
 
-> **一句話**：用 ProxCenter 自動「一台一台」更新 PVE 叢集時，被三件事擋住：套件來源檢查讀到備份檔、SSH 連錯網段、sudo 權限不足；分開處理後就能往下走。也記錄了 10/12 實際更新的結果、「ProxCenter 不能更新自己所在那台」的問題，10/24 分兩輪讓 ProxCenter 更新完三台的做法，以及 10/29 ProxCenter 在 node10 時的第二次三台更新。11/19 白天再更新一次三台（kernel -29 → -30），兩輪做完後 Ceph 的三個維護旗標沒有被清掉，要手動解除。
+> **一句話**：用 ProxCenter 自動「一台一台」更新 PVE 叢集時，被三件事擋住：套件來源檢查讀到備份檔、SSH 連錯網段、sudo 權限不足；分開處理後就能往下走。也記錄了 10/12 實際更新的結果、「ProxCenter 不能更新自己所在那台」的問題，10/24 分兩輪讓 ProxCenter 更新完三台的做法，以及 10/29 ProxCenter 在 node10 時的第二次三台更新。11/19 白天再更新一次三台（kernel -29 → -30），兩輪做完後 Ceph 的三個維護旗標沒有被清掉，要手動解除。11/23 改用手動更新（先把 Guest 搬走再 `apt upgrade`、重開），並記錄 VM 104 備份連續五晚失敗的調查。
 
 | 項目 | 內容 |
 | --- | --- |
 | 適合誰看 | 第一次用 ProxCenter 做 PVE 滾動更新的人 |
 | 環境 | 三台 PVE（node10～12）＋ Ceph；ProxCenter 是 ct:110 |
-| 實測 | 2026-08-26（排除三個卡關點，node12 進入更新階段）；2026-10-12（ProxCenter 完成 node11、node12，node10 手動）；2026-10-24（**三台都由 ProxCenter 完成**，分兩輪）；2026-10-29（再次三台，ProxCenter 在 node10，kernel -25 → -26）；2026-11-17（**人不在現場、沒有 BMC**，node10 → node12 → node11，kernel -28 → -29，第 14 節）；2026-11-19（白天、分兩輪，kernel -29 → -30，**更新後旗標沒清**，第 15 節） |
-| 結論 | ✅ 三個卡關點已排除；✅ 10/24 三台都由 ProxCenter 更新並重開（kernel 7.0.14-23 → -25），HA 服務沒有中斷、Ceph 回到 HEALTH_OK（第 12 節）；✅ 10/29 再做一次三台更新，已是最新的節點會被自動略過，不需要「陪跑」（第 13 節）；✅ 11/17 人不在現場，一次一台更新三台到 kernel `7.0.14-29`、pve-manager 9.2.28：13 個 HA 服務 `started`、Ceph `HEALTH_OK`、`noout` 已清除；**不在 HA 的執行中 VM（nextcloud）要先線上搬走**（第 14 節）；✅ 11/19 三台更新到 kernel `7.0.14-30`、pve-manager 9.2.31，但**更新結束後 `noout`、`norebalance`、`norecover` 都還在、25 個 PG degraded**，手動解除後回到 `HEALTH_OK`、97 個 PG `active+clean`（第 15 節）；⏳ 把 ProxCenter 移到叢集外、縮小 sudo 權限、查清楚旗標沒被清除的原因 |
+| 實測 | 2026-08-26（排除三個卡關點，node12 進入更新階段）；2026-10-12（ProxCenter 完成 node11、node12，node10 手動）；2026-10-24（**三台都由 ProxCenter 完成**，分兩輪）；2026-10-29（再次三台，ProxCenter 在 node10，kernel -25 → -26）；2026-11-17（**人不在現場、沒有 BMC**，node10 → node12 → node11，kernel -28 → -29，第 14 節）；2026-11-19（白天、分兩輪，kernel -29 → -30，**更新後旗標沒清**，第 15 節）；2026-11-23（**手動**：先搬走 Guest、`apt upgrade`、重開，node11 → node12 → node10，pve-manager 9.2.32，核心不變，第 16 節） |
+| 結論 | ✅ 三個卡關點已排除；✅ 10/24 三台都由 ProxCenter 更新並重開（kernel 7.0.14-23 → -25），HA 服務沒有中斷、Ceph 回到 HEALTH_OK（第 12 節）；✅ 10/29 再做一次三台更新，已是最新的節點會被自動略過，不需要「陪跑」（第 13 節）；✅ 11/17 人不在現場，一次一台更新三台到 kernel `7.0.14-29`、pve-manager 9.2.28：13 個 HA 服務 `started`、Ceph `HEALTH_OK`、`noout` 已清除；**不在 HA 的執行中 VM（nextcloud）要先線上搬走**（第 14 節）；✅ 11/19 三台更新到 kernel `7.0.14-30`、pve-manager 9.2.31，但**更新結束後 `noout`、`norebalance`、`norecover` 都還在、25 個 PG degraded**，手動解除後回到 `HEALTH_OK`、97 個 PG `active+clean`（第 15 節）；✅ 11/23 手動更新三台（pve-manager 9.2.32、核心 `-30` 不變），三台 `HEALTH_OK`、沒有旗標、14 個 HA 服務 `started`；之後把 Guest 位置整理回「三套監控各在一台」（HA 資源 5／4／5），並清掉 CT 102、112 的舊快照（邏輯空間釋放約 52 GiB）（第 16 節）；⚠️ **VM 104 的備份連續五晚（11/18～11/22）失敗、白天手動卻成功，根本原因未確認**（第 15-2 補充二）；⏳ 把 ProxCenter 移到叢集外、縮小 sudo 權限、查清楚旗標沒被清除的原因 |
 
 > 文中 IP 都是文件示範位址（管理網 192.0.2.0/24、內部網段 198.51.100.0/24）；IP、帳號、VMID 是案例值。
 
@@ -506,7 +506,7 @@ ha-manager migrate ct:110 node11
 | node11 | ct:102、109、112、vm:107、111；非 HA：vm:104（running）、vm:108（stopped） |
 | node12 | ct:101、105、110、114 |
 
-DC01（vm:106，node10）與 DC02（vm:107，node11）在不同節點；AdGuard（node10）與 Pihole（node12）在不同節點。**DC 的分開規則只存在 ProxCenter，PVE HA 沒有**（見 [HA 放置策略](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)），這次是剛好沒落在同一台，不是規則保證。
+DC01（vm:106，node10）與 DC02（vm:107，node11）在不同節點；AdGuard（node10）與 Pihole（node12）在不同節點。兩組都各有一條 PVE HA 互斥規則（`resource-affinity`、`affinity: negative`：`ct:100,ct:101` 與 `vm:106,vm:107`，11/23 用 `pvesh get /cluster/ha/rules` 確認），HA 搬移時會遵守（見 [HA 放置策略](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)）。**更正**：這裡原本寫成「DC 的分開規則只存在 ProxCenter，PVE HA 沒有」，和 HA 放置策略文章與 11/23 的實際輸出不符；DC 規則是什麼時候建立的，未確認。
 
 **未確認**：CT110（ProxCenter）驗收時 uptime 只有約 8 分鐘，比同節點其他 CT 短很多，原因不確定。
 
@@ -640,7 +640,7 @@ for n in node10 node11 node12; do echo -n "$n 核心："; ssh root@$n 'uname -r'
 | HA | `quorum OK`、master 在 node12；三台 `lrm` 都是 `active`（沒有 `maintenance`）；13 個服務都 `started` |
 | `qm status 115` | 在 node12 執行，回報 `Configuration file 'nodes/node12/qemu-server/115.conf' does not exist` |
 
-- **96 個 PG**：`grep pgs` 只印含 `pgs` 的那一行，第二行（例如 `1 active+clean+scrubbing+deep`）被切掉，OSD 剛回來時常見（見第 17 節）；**這次沒有用 `ceph pg stat` 確認第 97 個的狀態**，所以是「未確認」。
+- **96 個 PG**：`grep pgs` 只印含 `pgs` 的那一行，第二行（例如 `1 active+clean+scrubbing+deep`）被切掉，OSD 剛回來時常見（見第 18 節）；**這次沒有用 `ceph pg stat` 確認第 97 個的狀態**，所以是「未確認」。
 - **`qm status 115` 的錯誤**：`qm` 只查**本機**的 VM，VM 115 在 node10，在 node12 查不到，**不代表 nextcloud 有問題**；要看位置用 `pvesh get /cluster/resources --type vm`。這次**沒有用正確的方式確認 VM 115 是 `running`**。
 
 最後的位置：
@@ -653,7 +653,7 @@ for n in node10 node11 node12; do echo -n "$n 核心："; ssh root@$n 'uname -r'
 
 | 規則 | 結果 |
 | --- | --- |
-| DC01（node10）與 DC02（node12）不同節點 | ✅ **這條只存在 ProxCenter，PVE HA 沒有**，是剛好沒落在同一台 |
+| DC01（node10）與 DC02（node12）不同節點 | ✅ PVE HA 有 `vm:106,vm:107` 的互斥規則（11/23 確認；**更正**：原本寫成「只存在 ProxCenter」，見 13-5） |
 | AdGuard（node11）與 Pihole（node10）不同節點 | ✅ PVE 規則 |
 | 三套監控分開：Graylog node10、Wazuh node11、LibreNMS node12 | ✅ |
 
@@ -719,7 +719,7 @@ HA 服務是 14 個，比 11/17 的 13 個多 1 個。**推測**是 VM 115（nex
 | node11 | 21:30:01～21:38:21 | `WARNINGS: 2` | 全部來自 VM 108，備份最後 `Finished`（2 分 55 秒） |
 | node12 | 22:00:01～22:05:37 | `OK` | |
 
-- **VM 104**：它是 stopped 的 VM，備份時 PVE 會暫時起一個 QEMU 讀磁碟，失敗的是這個程序查詢 PBS dirty-bitmap 時逾時。原因**不確定**（推測是 PBS 或網路當下較慢）。後來查證：**只有 11/18 這一次失敗**，最近 7 晚都有備份，失敗那次只留下一個空的 snapshot，見下方「15-2 補充」。
+- **VM 104**：它是 stopped 的 VM，備份時 PVE 會暫時起一個 QEMU 讀磁碟，失敗的是這個程序查詢 PBS dirty-bitmap 時逾時。原因**不確定**（推測是 PBS 或網路當下較慢）。後來查證（11/19 下午）：當時只有 11/18 這一次失敗，最近 7 晚都有備份，失敗那次只留下一個空的 snapshot，見下方「15-2 補充」；**之後 11/19～11/22 又連續失敗，共五晚，見「15-2 補充二」**。
 - **VM 108**：log 裡的三類訊息是 `no efidisk configured! Using temporary efivars disk.`、`iothread is only valid with virtio disk or virtio-scsi-single controller, ignoring`（`scsi0` 設了 `iothread=1`，控制器是 `virtio-scsi-pci`，這個設定不會生效）、`failed to reset PCI device`（備份 stopped 的 VM 時會碰到直通裝置）。都是 108 的設定造成，和更新無關。
 - **備份有沒有在跑**：`ps aux | grep -c "[v]zdump"` 的計數不可靠（node11、node12 回 1，node10 回 5；**推測**是遠端指令列本身含 `vzdump` 字樣）。要確認用 `pgrep -x vzdump`（精確比對程序名稱，沒輸出代表沒有）。
 
@@ -740,7 +740,7 @@ HA 服務是 14 個，比 11/17 的 13 個多 1 個。**推測**是 VM 115（nex
 **判斷**：
 
 - 備份在 21:02 建好 snapshot 目錄後，還沒寫入任何資料就失敗了（和 `query-pbs-bitmap-info` 逾時一致）。**沒有殘缺資料**，也沒有傷到舊備份。
-- VM 104 **不是一直失敗**：最近 7 晚（11/11～11/17）每晚都有備份，只有 11/18 失敗。11/09、11/10 不在清單裡，**推測**是被保留政策清掉，保留設定沒有查證。
+- 11/19 下午當時，VM 104 **不是一直失敗**：最近 7 晚（11/11～11/17）每晚都有備份，只有 11/18 失敗。11/09、11/10 不在清單裡，後來確認是被保留政策清掉：node10 的備份工作帶 `--prune-backups keep-daily=7,keep-weekly=4,keep-monthly=3`，11/17 成功那次的 log 有 `pruned 1 backup(s) not covered by keep-retention policy`。PBS 上沒有任何 prune job，保留規則完全由 PVE 的備份工作帶。（這個「不是一直失敗」只適用到 11/18，**之後又連續失敗，見補充二**。）
 - 逾時的**根本原因仍然不確定**。
 - 這個空 snapshot 沒有 manifest，之後每次 verify 都可能報同樣的錯並寄通知信，所以要清掉。
 
@@ -768,7 +768,103 @@ ls -la "/mnt/<datastore>/vm/104/2026-11-18T13:01:59Z/"
 
 **結果**：11/19 15:52 移除後，再執行第一行 `ls`，只剩 9 個目錄（11/01～11/17），11/17 的完整備份（`13:01:54Z`）還在。PBS 網頁上的 `vm/104` 群組預期是 Count 9、`All OK`，但**這次只看到檔案系統，沒有看到網頁，未確認**。
 
-**還沒確認**：今晚（11/19）21:00 node10 的備份，VM 104 是否又逾時；若又失敗才是重複發生，才要查原因（PBS 負載、網路、104 的磁碟設定，目前沒有證據指向任何一項）。
+**後續**：當晚（11/19）21:00 又失敗了，不是單次事件，見下方補充二。
+
+#### 15-2 補充二（11/23）：連續五晚失敗，白天手動卻成功，根本原因仍未確認
+
+VM 104 的備份從 11/18 起**連續五個晚上失敗**；11/20 上午手動備份成功，當晚排程照樣失敗。
+
+| 時間 | 來源 | 結果 |
+| --- | --- | --- |
+| 11/17 21:00 | 排程（node10） | OK（123 秒、`reused 60.00 GiB (100%)`） |
+| 11/18 21:00 | 排程 | **ERROR** |
+| 11/19 21:00 | 排程 | **ERROR** |
+| 11/20 08:36 | **手動** | **OK**（約 2 分、`reused 59.75 GiB (99%)`） |
+| 11/20 21:00 | 排程 | **ERROR** |
+| 11/21 21:00 | 排程 | **ERROR** |
+| 11/22 21:00 | 排程 | **ERROR** |
+
+手動指令（在 node10）：
+
+```bash
+vzdump 104 --storage PBS31 --prune-backups keep-all=1
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `--storage PBS31` | 備份到 PBS（PVE 裡的儲存名稱） |
+| `--prune-backups keep-all=1` | 這次手動備份**不清理**舊備份，避免套用到儲存層的保留規則 |
+
+**怎麼讀 log**（node10；先取得 UPID，再讀那一筆）：
+
+```bash
+pvenode task list --typefilter vzdump --limit 6 --output-format json | python3 -c "import json,sys,time;[print(time.strftime('%F %T',time.localtime(t['starttime'])),t.get('status'),t['upid']) for t in json.load(sys.stdin)]"
+pvenode task log '<UPID>' | grep -n -A14 'Starting Backup of VM 104'
+```
+
+> `pvenode task log` 印出的原始紀錄**行首沒有 VMID**（是 `INFO: Starting Backup of VM 104 (qemu)`），用 `grep '^104:'` 什麼都找不到；備份通知信裡每行開頭的 `104:` 是信件自己的格式。
+
+| 步驟 | 失敗的夜晚（11/18、11/19、11/21、11/22；11/20 的畫面只截到 QMP 這一步） | 11/17 成功 |
+| --- | --- | --- |
+| 狀態與模式 | `status = stopped`、`backup mode: stop` | 相同 |
+| 啟動 | `starting kvm to execute backup task` → `starting backup via QMP command` → `started backup task` | 相同 |
+| 下一行 | **`ERROR: VM 104 qmp command 'query-pbs-bitmap-info' failed - got timeout`**，接著 `aborting backup job`、`stopping kvm after backup task` | `scsi0: dirty-bitmap status: created new`，開始讀資料 |
+| 花的時間 | 約 20～26 秒就失敗（11/18 21:01:59 → 21:02:19、11/19 21:01:42 → 21:02:08） | 讀完 60 GiB 約 123 秒 |
+
+stopped 的 VM 每次備份都是「重新讀整顆磁碟，再和 PBS 上已有的區塊比對」（`dirty-bitmap status: created new`、`reused … (100%)`），不是靠 bitmap 做增量。
+
+**已排除**：
+
+| 假設 | 依據 |
+| --- | --- |
+| 殘留鎖、QEMU 程序、RBD watcher | VM 104 `status: stopped`、`lock` 是 None、沒有 104 的 QEMU 程序、`rbd status` 是 `Watchers: none` |
+| Ceph 不健康 | 11/18、11/19 兩次 21:00 失敗時 Ceph 都是 `HEALTH_OK`（旗標是 11/19 上午更新才出現，下午已清除） |
+| PBS 上有其他工作撞到 | PBS 的排程：GC 每天 00:30、verify 每天 22:45，**沒有 prune job、沒有 sync job**；21:00～21:05 沒有重疊 |
+| PBS 更新 | PBS 4.2.8 → 4.2.11 是 11/16 09:01（`dpkg.log`），11/16、11/17 備份成功；11/18 失敗時仍是 4.2.11。4.2.11 → 4.2.12 是 11/19 15:47、主機 15:59:36 重開，11/19 21:01 在 4.2.12 上仍失敗 |
+| node10 記憶體吃緊 | 總共 62 GiB、available 約 46 GiB、swap 只用 133 MiB、記憶體 PSI 全是 0.00（**11/20 上午的快照，不是失敗當下**） |
+| node10 IO 壓力 | IO PSI（`some`，300 秒平均）：node10 5.4%、node11 8.0%、node12 0.8%；node11 更高，但 node11 上 stopped 的 VM 108 一直備份成功，所以不是區分原因 |
+| VM 104 被人使用或改動 | 使用者回報 11/17 之後沒有開機（11/20 上午那一次除外）；log 顯示 11/20～11/22 三晚仍是 `stopped` |
+| 「開機再正常關機」會恢復 | 11/20 上午手動備份前，使用者把 104 開機再正常關機，手動備份成功；**當晚排程仍失敗** |
+
+**設定比對**（`qm config`，VM 104 與備份成功的 VM 108）：
+
+| 項目 | VM 104（node10） | VM 108（node11） |
+| --- | --- | --- |
+| CPU | `host` | `x86-64-v2-AES` |
+| `machine` | 沒有固定 | `pc-i440fx-11.0+pve1` |
+| BIOS | 預設（SeaBIOS） | `ovmf` |
+| 記憶體 | 16000 MB | 8192 MB（balloon 2048） |
+| 磁碟 | `scsi0` 60G、`cache=writeback,discard=on` | `scsi0` 60G、`cache=writeback,iothread=1` |
+| 建立時的 QEMU | 10.1.2 | 11.0.2 |
+| 其他 | `freeze: 0`、`numa: 0`、`agent: 1` | PCI 直通、`agent: 1`、`onboot: 0` |
+
+這些差異**都沒有證據指向備份逾時**。
+
+**白天手動成功、夜裡排程失敗，差在哪**（都沒有驗證）：
+
+| 差別 | 手動 | 排程 |
+| --- | --- | --- |
+| 指令 | 單一 VM、預設參數 | `--all 1 --node node10 --fleecing 0 --quiet 1 --mode snapshot …` |
+| 前面有沒有別的備份 | 沒有 | 104 排第三，前面剛備份完 CT 101、103 |
+| 時間 | 08:36 | 21:01 |
+
+**清理**：每次失敗都會在 PBS 留下一個空的 snapshot 目錄（`ls -la` 是 `total 0`），而且沒有 manifest，會讓 verify 每晚報錯：
+
+| 空目錄 | 處理 |
+| --- | --- |
+| 11/18（`13:01:59Z`） | 11/19 15:52 在 PBS 網頁 Remove |
+| 11/19（`13:01:42Z`） | 11/20 上午手動備份成功後就不見了；**是 PBS 自動清掉，還是使用者手動 Remove，未確認** |
+| 11/20、11/21、11/22（`13:01:25Z`、`13:01:33Z`、`13:01:55Z`） | `ls -la` 確認都是 `total 0`，11/23 14:28 前用 PBS 的 Remove 清掉 |
+
+清完後 `ls -la /mnt/<datastore>/vm/104/` 剩 **10 個目錄**：11/01、11/08、11/11～11/17、11/20T00:36:30Z（手動備份那筆）。
+
+**現況（11/23）**：
+
+- 11/20～11/22 三晚 VM 104 都是 stopped；**11/23 11:24 起是 running**，開機日期未確認（只知道是 11/22 21:02 之後）。注意 `uptime` 只代表目前這個 QEMU 程序的時間，線上遷移後會重算，不能當成開機時間。
+- 11/23 上午的手動更新同時升級了 `pve-qemu-kvm`（11.1.3-2 → 11.1.3-4）與 `proxmox-backup-client`（4.2.12-1 → 4.2.14-1）（第 16 節）。所以 11/23 晚上的排程是「running 路徑＋新版 QEMU＋新版備份客戶端」，**結果沒辦法歸因到單一因素**。
+- **VM 104 從 11/17 之後沒有排程備份成功過**，最新可用的備份是 11/20 08:36 的手動備份；之後 104 的任何變動都沒有備份。
+
+**未確認**：根本原因（夜間時段，還是排程的參數？）、11/23 晚上起的結果、PBS 會不會在下一次成功備份後自動清掉失敗留下的空目錄。
 
 ### 15-3 第 1 輪（node10、node12）的精靈與 Verify
 
@@ -898,8 +994,8 @@ ceph -s
 | `norebalance`、`norecover` 是誰設的、旗標為什麼沒被清除 | 未確認 |
 | 過程異常：VPN 中斷多久、Lab Ops 斷線、告警信（Graylog／Wazuh／LibreNMS） | 沒有記錄 |
 | 更新前三台 `pve-firewall status`、VM 115 是否已加入 HA（`ha-manager config`） | 未確認 |
-| VM 104 過去幾天的備份是否一直失敗 | ✅ 已查證（11/19 下午）：只有 11/18 一次失敗，最近 7 晚都有備份（見 15-2 補充）；逾時的根本原因仍未確認 |
-| 當晚（11/19）三台備份與 22:45 的 PBS verify | 尚未看到 |
+| VM 104 過去幾天的備份是否一直失敗 | ✅ 已查證：11/19 下午當時只有 11/18 一次失敗；**之後又連續失敗到 11/22，共五晚**（見 15-2 補充二）；逾時的根本原因仍未確認 |
+| 當晚（11/19）三台備份與 22:45 的 PBS verify | ✅ 已看到：node11、node12 全部 `ok`；node10 只有 VM 104 `err`；PBS verify 因為那個空 snapshot 失敗 |
 
 ### 15-9 這次學到的
 
@@ -910,7 +1006,125 @@ ceph -s
 - `grep` 只印含關鍵字的那一行，多行輸出（例如 `io:` 底下）會被切掉；判讀前先看完整的 `ceph -s`。
 - 備份失敗後，到 PBS 看那個 snapshot 目錄是不是空的：空的會讓 verify 一直報 `manifest load error`。用 PBS 的 **Remove** 清掉那一筆，**不要**按群組的垃圾桶（整個群組會被刪）。
 
-## 16. 下次可以直接照做的檢查順序
+## 16. 2026-11-23：手動更新（先搬走 Guest、`apt upgrade`、重開），事後整理位置
+
+**做什麼**：這次沒有用 ProxCenter，三台都是手動更新。每台的做法：在 PVE 網頁對 Guest 按右鍵 **Migrate** 搬走，再 `apt update && apt upgrade -y`，然後重開。核心沒變（`7.0.14-30-pve`），只有 PVE 相關套件更新。
+
+### 16-1 流程與結果
+
+| 項目 | 紀錄 |
+| --- | --- |
+| 方式 | 手動；搬 Guest 用 PVE 網頁右鍵 Migrate，**沒有用維護模式** |
+| 順序與開機時間（`uptime -s`） | node11 11:06:43 → node12 11:15:06 → node10 11:27:36（間隔約 8 分、12 分半） |
+| Ceph `noout` | **沒有設**（使用者回報）。每台重開約 1～2 分鐘，沒到 Ceph 預設的 10 分鐘 out 門檻（**這個預設值是一般說明，沒有在這個叢集查證**）；結果 `HEALTH_OK`、沒有旗標 |
+| 異常 | VPN 斷線約 15 秒（WireGuard 在搬移時重啟）；其他沒有回報 |
+| ProxCenter（ct:110） | 手動更新，Guest（包含 ct:110）本來就先搬走，不會有「ProxCenter 把自己停掉」的問題，所以 node11 排第一沒事 |
+
+更新的套件（三台相同，取自 `/var/log/dpkg.log` 11/23 的升級紀錄，只篩選關鍵套件）：
+
+| 套件 | 版本 |
+| --- | --- |
+| `pve-manager` | 9.2.31 → 9.2.32 |
+| `qemu-server` | 9.2.19 → 9.2.20 |
+| `pve-qemu-kvm` | 11.1.3-2 → 11.1.3-4 |
+| `proxmox-backup-client` | 4.2.12-1 → 4.2.14-1 |
+| `libpve-common-perl` | 9.2.11 → 9.2.12 |
+| `libpve-cluster-perl`、`libpve-cluster-api-perl`、`libpve-notify-perl` | 9.1.11 → 9.1.12 |
+| `libpve-guest-common-perl` | 6.0.10 → 6.0.11 |
+| `libpve-rs-perl` | 0.16.2 → 0.16.3 |
+
+沒有核心、`ceph-*`、`corosync`、`grub`。
+
+驗收（13:24，唯讀）：
+
+```bash
+for n in node10 node11 node12; do echo "== $n"; ssh root@$n 'uname -r; pveversion | head -1; uptime -s; apt list --upgradable 2>/dev/null | grep -vc "^Listing"'; done
+ceph osd dump | grep '^flags'
+ha-manager status | grep -E '^(quorum|master|lrm)'
+```
+
+| 檢查 | 結果 |
+| --- | --- |
+| 核心、PVE 版本 | 三台都是 `7.0.14-30-pve`（也是執行中的核心）、pve-manager 9.2.32 |
+| 可更新套件 | 三台都是 0 |
+| Ceph 旗標 | `sortbitwise,recovery_deletes,purged_snapdirs,pglog_hardlimit`，沒有 `noout` 等維護旗標 |
+| HA | `quorum OK`、master 在 node11（static load CRS）、三台 `lrm` 都是 `active`、watchdog active |
+| `ceph -s` 的 `osd: 3 up (since 109m)` | 最後一次重開是 node10（11:27），OSD 約 11:30 上線，往後 109 分鐘就是當時看的時間 |
+
+兩點說明：
+
+- **`apt upgrade` 與 `apt full-upgrade`**：PVE 官方建議用 `apt full-upgrade`，`upgrade` 不會安裝新的相依套件，遇到需要的會被「保留」不升級。這次三台 `apt list --upgradable` 都是 0，沒有被保留的套件，所以沒有影響。
+- **核心沒變，節點其實不一定要重開**：`pve-qemu-kvm` 只要讓已在跑的 VM 重啟或線上遷移就會用新版 QEMU（見[更新後逐台重開](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-rolling-reboot-after-update/)）。先搬走 Guest 再重開也合理，只是多花時間。
+
+### 16-2 更新後整理 Guest 位置
+
+手動搬移沒用維護模式，Guest 不會自動搬回原位（CRS 是 static），位置和更新前不一樣。11/23 11:24 的位置裡，Graylog（ct:105）與 LibreNMS（ct:102）都在 node10，違反「三套監控各在一台」；之後把 LibreNMS 搬到 node12、Grafana 搬到 node10，最後（13:24）：
+
+| 節點 | HA 資源 | 非 HA |
+| --- | --- | --- |
+| node10（5） | AdGuard(100)、IPAM(103)、Graylog(105)、Grafana(114)、DC01(vm:106) | UBClient（vm 104，running） |
+| node11（4） | WireGuard(109)、ProxCenter(110)、Wazuh(112)、CA(vm:111) | WinClient（vm 108，stopped） |
+| node12（5） | Pihole(101)、LibreNMS(102)、ai(113)、DC02(vm:107)、nextcloud(vm:115) | — |
+
+14 個 HA 資源都 `started`。詳細的原則對照、HA rules 確認與搬移指令見 [HA 放置策略第 13-2 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-placement-policy/)。
+
+### 16-3 順手清掉兩個舊快照
+
+整理位置時，下面這個指令的輸出裡，CT 102、CT 112 的 `onboot` 各出現兩次：
+
+```bash
+grep -HE '^(onboot|startup):' /etc/pve/nodes/*/qemu-server/*.conf /etc/pve/nodes/*/lxc/*.conf
+```
+
+第二行是**快照段落**裡的舊設定，代表這兩個 CT 還留著快照。（同一個指令也確認了：16 個 Guest 都沒有設 `startup` 順序。）
+
+| CT | 快照 | 時間 | `rbd du` 看到的占用 |
+| --- | --- | --- | --- |
+| 102 LibreNMS | `before-switch`（沒有說明） | 2026-11-06 16:57:50 | 快照 11 GiB ＋ 目前 5.2 GiB ＝ `TOTAL` 17 GiB（磁碟 20 GiB） |
+| 112 Wazuh | `S202611021453`（說明「更新前」） | 2026-11-02 14:53:43 | 快照 53 GiB ＋ 目前 55 GiB ＝ `TOTAL` **108 GiB**（磁碟 80 GiB） |
+
+```bash
+pct listsnapshot 102
+rbd du VM_Pool/vm-102-disk-0
+rbd du VM_Pool/vm-112-disk-0
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `pct listsnapshot <CT>` | 列出快照；`pct` 只查本機，要在 CT **目前所在的節點**執行 |
+| `rbd du VM_Pool/vm-<CT>-disk-0` | 看磁碟與各快照占多少；快照列是「為了保留那個時間點多占的空間」，`TOTAL` 可以比磁碟大小還大（Wazuh 一直改寫資料，舊區塊釋放不掉） |
+
+Wazuh 的快照已經 21 天、中間更新過多次，真要還原等於倒回三週前，所以刪除；LibreNMS 那個也由使用者決定刪除。這兩個應該是 11/09 清理六台 `pre-apt-…` 快照時漏掉的（**推測**）。
+
+```bash
+pct delsnapshot 112 S202611021453
+pct delsnapshot 102 before-switch
+```
+
+（各在 CT 所在的節點執行；改狀態。）
+
+**結果**：
+
+| 項目 | 刪除前 | 刪除後 |
+| --- | --- | --- |
+| `rbd du` 102 的 `TOTAL` | 17 GiB | 12 GiB（只剩 `vm-102-disk-0` 一行） |
+| `rbd du` 112 的 `TOTAL` | 108 GiB | 61 GiB（只剩 `vm-112-disk-0` 一行） |
+| `ceph pg stat` | — | 回收空間時一度是 6 個 `active+clean+snaptrim`、16 個 `snaptrim_wait`、75 個 `active+clean`；之後 97 個 `active+clean`（`snaptrim` 是正常的回收，不是故障） |
+| 資料量 | 465 GiB（11/19） | 442 → **419 GiB**；已用 1.3 → 1.2 TiB（22.66%） |
+
+邏輯空間釋放約 52 GiB（125 → 73 GiB）；pool 是 size 3，實體空間約三倍（**推算**）。畫面上的 `Wide character in printf` 是中文快照說明造成的 Perl 警告，不是錯誤。
+
+### 16-4 沒有記錄到的
+
+| 項目 | 狀態 |
+| --- | --- |
+| 手動搬移每個 Guest 的實際時間與順序 | 沒有記錄 |
+| VM 104（非 HA、running）更新時怎麼處理（線上遷移？） | 未確認 |
+| 更新前三台 `pve-firewall status`、備份狀況 | 沒有逐台記錄 |
+| 搬完後 Grafana `"database": "ok"`、LibreNMS 有新資料的功能檢查 | 結果沒有收到 |
+| 11/23 晚上三台備份（16 個 Guest；VM 104 running、新 QEMU 與備份客戶端） | 尚未看到 |
+
+## 17. 下次可以直接照做的檢查順序
 
 1. 確認 quorum、Ceph、HA 與工作負載容量
 2. 看套件來源的實際設定，區分出備份檔
@@ -931,8 +1145,12 @@ ceph -s
 17. 旗標沒清時：先確認三台版本、PG 沒有 `inactive`、HA 沒有節點在 `maintenance`，再依序 `ceph osd unset norecover` → 等全部 `active+clean` → `ceph osd unset norebalance`、`ceph osd unset noout`（第 15-6 節）
 18. 第 2 輪前記得先把 ProxCenter（ct:110）搬離要更新的節點；沒搬時它會被 HA 搬走又回來，旗標可能沒清（第 15-4 節，**推測**）
 19. 更新前看昨晚的備份與 PBS verify：備份失敗的 VM 要看 PBS 上那個 snapshot 是不是空的、最近幾晚有沒有備份，再決定要不要先處理（第 15-2 節與補充）
+20. 手動更新用 `apt full-upgrade`；更新後 `apt list --upgradable` 要是 0，才代表沒有被保留的套件（第 16-1 節）
+21. 核心沒變時，節點不一定要重開：`pve-qemu-kvm` 只要讓 VM 重啟或線上遷移就會用新版（第 16-1 節）
+22. 手動搬走 Guest 的更新，結束後要對照放置原則整理位置；用維護模式（`ha-manager crm-command node-maintenance enable／disable`）通常會自動搬回，但不保證（第 16-2 節）
+23. 整理位置時順便用 `grep -HE '^(onboot|startup):' /etc/pve/nodes/*/qemu-server/*.conf /etc/pve/nodes/*/lxc/*.conf` 看有沒有重複行（代表留著快照），再用 `pct listsnapshot`、`rbd du` 清掉用不到的舊快照（第 16-3 節）
 
-## 17. 常見問題
+## 18. 常見問題
 
 | 現象 | 原因與處理 |
 | --- | --- |
@@ -957,10 +1175,13 @@ ceph -s
 | PG 一直停在 `recovery_wait`、有 PG undersized | `norecover` 開著造成的，不是壞掉；先 `ceph osd unset norecover`，這段期間不要再動節點（第 15-5 節） |
 | `ps aux \| grep -c "[v]zdump"` 回非 0，但沒有備份在跑 | 計數會算到遠端指令列自己；改用 `pgrep -x vzdump`（第 15-2 節） |
 | 備份 stopped 的 VM 108 出現 `failed to reset PCI device`、`no efidisk configured` | 108 有 PCI 直通、沒有 EFI 磁碟造成，備份仍會完成，和更新無關（第 15-2 節） |
-| 備份 VM 104 出現 `query-pbs-bitmap-info failed - got timeout` | 11/18 單次失敗，最近 7 晚都有備份，根本原因未確認；失敗會留下一個空的 snapshot，見下一列（第 15-2 節與補充） |
+| 備份 VM 104 出現 `query-pbs-bitmap-info failed - got timeout` | 11/18～11/22 連續五晚（stopped 路徑），白天手動卻成功；已排除殘留狀態、Ceph、PBS 工作與更新、node10 記憶體與 IO，根本原因未確認；失敗會留下一個空的 snapshot，見下一列（第 15-2 節、補充與補充二） |
+| `pvenode task log … \| grep '^104:'` 什麼都找不到 | 原始 task log 的行首沒有 VMID，要 grep `Starting Backup of VM 104`；`104:` 前綴是備份通知信的格式（第 15-2 補充二） |
+| `rbd du` 的 `TOTAL` 比磁碟大小還大 | 快照留住了舊資料：CT 112 磁碟 80 GiB，快照 53 GiB 加目前 55 GiB 共 108 GiB，刪掉快照後 61 GiB（第 16-3 節） |
+| `grep onboot` 的輸出裡，同一個 CT 出現兩次 | 第二行是快照段落裡的舊設定，代表這個 CT 還留著快照；用 `pct listsnapshot <CT>` 確認（第 16-3 節） |
 | PBS verify 報 `manifest load error … index.json.blob - No such file or directory` | 那個 snapshot 是上一次失敗的備份留下的空目錄（`ls -la` 是 `total 0`）。在 PBS 網頁該 snapshot 那一列右鍵 **Remove**；不要按群組的垃圾桶（第 15-2 補充） |
 
-## 18. 待辦
+## 19. 待辦
 
 - [x] 三台都由 ProxCenter 完成一次更新的完整紀錄（2026-10-24，第 12 節；2026-10-29 再做一次，第 13 節）
 - [x] 2026-11-17 人不在現場、一次一台再更新三台（第 14 節）
@@ -968,10 +1189,15 @@ ceph -s
 - [x] 用 `pvesh get /cluster/resources --type vm` 確認 VM 115 的位置與 `running` 狀態（2026-11-19 查詢：VM 115 在 node11、running，第 15 節）
 - [ ] 確認 11/17 當晚（21:00、21:30、22:00）三台備份都 `OK`（沒有看到；11/18 當晚的結果見第 15-2 節）
 - [x] 2026-11-19 白天再更新三台（kernel -29 → -30），並手動解除更新後遺留的 Ceph 旗標（第 15 節）
-- [ ] 確認 11/19 當晚（21:00、21:30、22:00）三台備份，以及 22:45 的 PBS verify 是否乾淨，這是更新後的第一次排程備份
-- [x] 查 VM 104 近幾天的備份是否一直逾時（2026-11-19 查證：只有 11/18 一次失敗，最近 7 晚都有備份，空 snapshot 已用 PBS Remove 清掉，第 15-2 補充）
-- [ ] 看今晚 21:00 node10 的備份，VM 104 是否又 `query-pbs-bitmap-info` 逾時；若重複發生再查根本原因
-- [ ] 在 PBS 網頁確認 `vm/104` 群組已是 Count 9、`All OK`（11/19 只用檔案系統確認過）
+- [x] 11/19 當晚的備份與 22:45 PBS verify：node11、node12 全部 `ok`；node10 只有 VM 104 `err`；PBS verify 因為那個空 snapshot 失敗（第 15-2 補充二）
+- [x] 查 VM 104 近幾天的備份是否一直逾時：**連續失敗五晚（11/18～11/22），白天手動成功**，空 snapshot 已用 PBS Remove 清掉（第 15-2 補充、補充二）
+- [x] 看 11/19 晚上 VM 104 是否又逾時：**又失敗，之後 11/20～11/22 連續失敗**（第 15-2 補充二）
+- [ ] 在 PBS 網頁確認 `vm/104` 群組已是 Count 10、`All OK`（11/23 只用檔案系統確認過：10 個好的目錄）
+- [ ] 看 11/23 晚上起 VM 104（running）的排程備份是否成功；結果會受 `pve-qemu-kvm 11.1.3-4`、`proxmox-backup-client 4.2.14-1` 與 running 路徑影響，無法歸因
+- [ ] 若要追 VM 104 stopped 路徑的根本原因：先把 104 正常關機，白天手動跑 `vzdump 103 104 --storage PBS31 --prune-backups keep-all=1 --fleecing 0 --quiet 1 --mode snapshot`（驗證「CT 備份之後緊接 104」的排序效應）；失敗代表和排序有關，成功代表和夜間時段有關。只有需要 VM 104 保持關機時才值得做
+- [ ] 確認 PBS 會不會在下一次成功備份後自動清掉失敗留下的空目錄（11/19 那個在 11/20 上午手動備份成功後消失，是否手動 Remove 未確認）
+- [ ] 確認 node10、node12 備份工作的 `keep-monthly=3` 與 node11 的 `keep-monthly=6` 是否刻意（PBS 沒有 prune job，保留規則完全由 PVE 的備份工作決定）
+- [ ] 確認 11/23 搬移後的功能（Grafana `"database": "ok"`、LibreNMS 有新資料），以及 11/23 晚上三台備份涵蓋全部 Guest
 - [ ] 查清楚 `norebalance`、`norecover` 是 ProxCenter 設的還是手動設的，以及兩輪做完旗標為什麼沒被清除；若是 ProxCenter 新版行為，要更新第 12～14 節「只設 `noout`」的說法
 - [ ] 補記 11/19 兩輪實際時間、精靈實際設定、中場有沒有搬 ct:110、有哪些指令沒執行，與異常（VPN／Lab Ops／告警），使用者尚未提供
 - [ ] 用 `ha-manager config` 確認 VM 115 是否已加入 HA（11/17 時不在 HA）
@@ -980,7 +1206,7 @@ ceph -s
 - [ ] 評估縮小 proxcenter 帳號的 sudo 權限（目前清單最後有 `NOPASSWD: ALL`，前面的細項清單等於沒有作用）
 - [ ] 回報或追蹤 ProxCenter 把 Ceph 上的 LXC 判斷成 `has local storage` 的問題
 
-## 19. 延伸閱讀
+## 20. 延伸閱讀
 
 - [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-enterprise-update/)：同日更新 ProxCenter 本身與 CT110 擴容
 - [PVE 更新重開後 HA 服務卡在 error：原因與救回步驟](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/pve-ha-service-error-after-reboot/)

@@ -60,7 +60,7 @@
 - [把 ESXi 上的 Windows＋SQL Server 虛擬機搬到獨立 PVE（二）：踩雷與效能診斷](docs/pve/esxi-vm-to-pve-troubleshooting.md)：網卡協商成 100 Mbps、RAID 5 無寫入快取、PVE 掃描 VMDK、VirtIO SCSI 開機失敗、VMware Tools 移除失敗
 - [VMware 搬到 PVE 後，Windows VM 開機跳出 VMware Tools 錯誤：移除失敗（1603）的處理](docs/pve/pve-vm-remove-vmware-tools-after-migration.md)：`VM_LogStart` Custom Action 失敗、清 MSI 註冊／服務／Run／資料夾／`vmmouse.inf`、`qm pending` 要完整關機再開機才套用 Guest Agent
 - [兩台獨立 PVE 之間搬 VM：用 qm remote-migrate 線上搬移（PBS 虛擬機實測）](docs/pve/pve-standalone-vm-live-migration.md)：沒組叢集也能搬、ZFS 來源要用 `--online`、API token／指紋／`set +H`／pending CPU 的坑、332 GB 耗時 18 分 34 秒
-- [ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？](docs/pve/proxcenter-ceph-rolling-update.md)：含 11/17 人不在現場一次一台更新三台、非 HA VM 要先搬走，11/19 兩輪做完後 Ceph 旗標沒清的處理
+- [ProxCenter 逐台更新 PVE：三個卡關點怎麼排除？](docs/pve/proxcenter-ceph-rolling-update.md)：含 11/17 人不在現場一次一台更新三台、非 HA VM 要先搬走，11/19 兩輪做完後 Ceph 旗標沒清的處理，11/23 手動更新與 VM 104 備份連續失敗的調查
 - [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](docs/pve/proxcenter-enterprise-update.md)：重跑安裝腳本帶 token、`up -d` 的陷阱、CT110 擴容、Node 仍是 26.12.0
 - [PVE 9 登入一直跳「No valid subscription」：網路上的 sed 為什麼沒效？](docs/pve/pve9-subscription-nag-removal.md)
 - [一次檢查並統一所有 LXC 的時區](docs/pve/pve-lxc-timezone.md)：從 node10 查全部容器、先盤點排程、改成 Asia/Taipei、LibreNMS 的 PHP 與 MariaDB
