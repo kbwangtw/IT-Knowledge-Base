@@ -4,7 +4,7 @@ title: "在 PVE 用 LXC + Docker 架設 RustDesk Server（開源版）"
 date: 2026-11-04
 categories: [PVE, LXC, Docker, RustDesk]
 permalink: /docs/pve/rustdesk-server-oss-lxc-docker-sop/
-last_modified_at: 2026-11-06
+last_modified_at: 2026-11-23
 ---
 {% raw %}
 
@@ -16,8 +16,8 @@ last_modified_at: 2026-11-06
 | --- | --- |
 | 適合誰看 | 想在 PVE 自建遠端桌面中繼／註冊服務的人；第一次接觸 RustDesk 的人 |
 | 環境 | PVE 9.x；LXC（Ubuntu 22.04 範本，unprivileged）；Docker Compose；`rustdesk/rustdesk-server` 映像檔 |
-| 日期 | 2026-11-04（部署）；2026-11-06 結案 |
-| 結論 | ✅ CT 115 完成 RustDesk Server OSS 部署：Docker Compose 跑 hbbs／hbbr、ufw 只放行必要 Port、兩台 Client 互連正常、PBS 備份與還原後 Key 一致、已加入 HA 並驗證遷移；VPN 使用者從外部連入未實測（結案原因見第 6 節）。**已結案**，環境無外部使用者，僅作架設練習；CT 115 已於 2026-11-06 下線並刪除 |
+| 日期 | 2026-11-04（部署）；2026-11-06 結案；2026-11-23 從備份還原為 CT 116，重新啟用（第 7 節） |
+| 結論 | ✅ CT 115 完成 RustDesk Server OSS 部署：Docker Compose 跑 hbbs／hbbr、ufw 只放行必要 Port、兩台 Client 互連正常、PBS 備份與還原後 Key 一致、已加入 HA 並驗證遷移；VPN 使用者從外部連入未實測（結案原因見第 6 節）。**已結案**，環境無外部使用者，僅作架設練習；CT 115 已於 2026-11-06 下線並刪除。**2026-11-23 重新啟用**：從 11/04 的 protected 備份還原成 CT 116（VMID 115 已被 nextcloud 使用），沿用原 IP，公鑰雜湊 `42ce40056630` 與 11/04 記錄一致，現有 Client 互連成功；HA、備份確認、LibreNMS 等還沒做完（第 7 節） |
 | 官方文件 | [RustDesk Server OSS](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/)、[Docker 安裝](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/docker/)、[Client 設定](https://rustdesk.com/docs/en/self-host/client-configuration/) |
 
 > 文中 IP 都是文件示範位址（192.0.2.0/24），`<網域>` 請換成自己的網域，指令執行前請替換。
@@ -427,6 +427,10 @@ ha-manager status | grep ct:115
 | 重建容器後所有 Client 都要重設 Key | `data` 目錄沒掛載或被刪，Server 重新產生了新 Key；從備份還原 `data` 即可 |
 | 21118／21119 被掃描或濫用的疑慮 | 不用 Web Client 就不要開；要用就放在反向代理後面並以防火牆限制 |
 | 想要網頁管理介面 | OSS 沒有；需評估 RustDesk Server Pro |
+| 還原備份時，原本的 VMID 已經被別的 Guest 使用 | 不要還原成原 ID；用 `pvesh get /cluster/nextid` 找新 ID。`pvesm list <PBS 儲存名稱> --vmid <原 ID>` 會同時列出同一個 VMID 的 `ct/` 與 `vm/` 備份（本案 115 有 RustDesk 的 `pbs-ct` 和 nextcloud 的 `pbs-vm`），要選 `pbs-ct` 那一筆（第 7 節） |
+| `pvesh get /cluster/nextid` 回 117，但 116 其實是空的 | 還原成 116 成功（PVE 不會在沒有 `--force` 時覆蓋既有的 CT）；nextid 為什麼跳過 116，**未確認**（第 7 節） |
+| `docker compose pull` 之後兩個容器顯示 `Running`、沒有 `Recreated` | 拉到的映像和原本相同，沒有新版本，容器不會被重建；用 `docker exec hbbs hbbs --version` 與 `docker images --digests` 確認（第 7 節） |
+| LibreNMS `device:add --ping-only` 回 `Could not connect to … using ICMP`、`xmt/rcv/%loss = 0/0/0%` | 一個封包都沒送出，通常是名稱解析不到（**推測**是內網 DNS 沒有這筆記錄，11/23 只看到這個輸出，沒有再用 `getent hosts` 確認）；改用 IP 加，或到兩台內網 DNS 補記錄（第 7 節） |
 
 ## 6. 結案紀錄與未驗證項目
 
@@ -446,7 +450,7 @@ ha-manager status | grep ct:115
 | ufw 放行來源限制 | 未處理：目前不限來源，僅內網與 VPN 可達 |
 | 手動備份的 protected 保護 | 未取消：這份備份不會被保留策略自動刪除，不需要時到 PBS 取消保護 |
 
-**下線**（2026-11-06）：依下方「若要下線這台 Server」的順序處理，已從 HA 移除（`ha-manager remove ct:115`，狀態先顯示 `deleting`，等它消失才停機）、停機後以 `pct destroy 115 --purge` 刪除 CT（含 16G rootfs），其他 CT 不受影響。PBS 上的備份不會隨 `pct destroy` 一起刪除，手動備份仍為 protected，每日排程備份依保留策略逐漸清掉。
+**下線**（2026-11-06）：依下方「若要下線這台 Server」的順序處理，已從 HA 移除（`ha-manager remove ct:115`，狀態先顯示 `deleting`，等它消失才停機）、停機後以 `pct destroy 115 --purge` 刪除 CT（含 16G rootfs），其他 CT 不受影響。PBS 上的備份不會隨 `pct destroy` 一起刪除，手動備份仍為 protected，每日排程備份依保留策略逐漸清掉。（2026-11-23 這份 protected 備份被拿來還原成 CT 116，見第 7 節。）
 
 **日後若要真的對外提供使用**，至少補做：
 
@@ -457,7 +461,65 @@ ha-manager status | grep ct:115
 
 **若要下線這台 Server**：先確認沒有 Client 還在使用，再從 HA 移除（`ha-manager remove ct:115`），然後停機或刪除 CT；刪除前先確認備份是否還要保留。
 
-## 7. 延伸閱讀
+## 7. 2026-11-23：從備份還原成 CT 116，重新啟用
+
+**為什麼**：使用者要整台使用 RustDesk Server（不是只拿備份裡的某個檔案）。CT 115 已在 11/06 刪除，但 11/04 部署完成時手動做的備份是 **protected**，還在 PBS 上：`PBS31:backup/ct/115/2026-11-04T06:00:14Z`（備註「rustdesk RustDesk 部署完成」，約 1.44 GiB），所以從它還原。
+
+### 7-1 還原前要注意：VMID 115 已經是 nextcloud
+
+| 事實 | 影響 |
+| --- | --- |
+| VMID 115 現在是 nextcloud 的 VM（running、在 HA、`onboot=1`） | **不能還原成 115**；PVE 網頁的還原視窗預設會帶原本的 ID，一定要改 |
+| `pvesm list PBS31 --vmid 115` 同時列出 `ct/115`（RustDesk，`pbs-ct`，1,542,708,536 bytes）和 `vm/115`（nextcloud，`pbs-vm`，約 132 GiB，11/15～11/22 每晚都有） | 要選 `pbs-ct` 那一筆 |
+| 備份的設定檔帶著原本的 IP | 還原後先讓網卡斷線，確認 IP 沒人用再接上 |
+
+### 7-2 步驟與結果
+
+| 步驟 | 指令 | 結果 |
+| --- | --- | --- |
+| 1. 查新 ID 與備份清單 | `pvesh get /cluster/nextid`、`pvesm list PBS31 --vmid 115` | nextid 回 117；清單有 1 筆 `ct/115`（`2026-11-04T06:00:14Z`）與 9 筆 `vm/115` |
+| 2. 還原成新 CT（在 node11 執行） | `pct restore 116 PBS31:backup/ct/115/2026-11-04T06:00:14Z --storage VM_Pool --unique 1` | `restore complete (1.436 GiB processed in 11.9s)`；用 116 而不是 nextid 的 117（見下） |
+| 3. 網卡斷線、不隨開機啟動 | `pct set 116 --net0 "$(pct config 116 \| sed -n 's/^net0: //p'),link_down=1" --onboot 0` | `net0` 結尾 `link_down=1`、`onboot: 0` |
+| 4. 看設定 | `pct config 116 \| grep -E '^(net0\|hostname\|onboot\|memory\|cores\|rootfs)'` | `hostname: rustdesk`、`cores: 2`、`memory: 1024`、`rootfs: VM_Pool:vm-116-disk-0,size=16G`、新的 `hwaddr`（`--unique 1`）、原 IP |
+| 5. 確認原 IP 沒人用 | `ping -c 2 -W 1 <備份裡的 IP>` | 使用者確認 IP 沒人用（接網卡之前） |
+| 6. 開機並驗證 | `pct exec 116 -- sh -c "tr -d '\n' < /opt/rustdesk/data/id_ed25519.pub \| sha256sum \| cut -c1-12"`、`docker ps`、`ss -tulnp \| grep -E '2111[5-9]'`、`ufw status` | 見下表 |
+
+| 驗證項目 | 結果 |
+| --- | --- |
+| 公鑰雜湊（SHA256 前 12 碼） | **`42ce40056630`**，和 11/04 記錄的 Server 公鑰雜湊（4-5 節）**完全相同**，Key 與原機一致 |
+| 容器 | `hbbs`、`hbbr` 都是 `Up`，映像 `rustdesk/rustdesk-server:latest`，`CREATED` 約 2 週前 |
+| 埠 | 21115／tcp、21116／tcp＋udp、21117／tcp、21118／tcp、21119／tcp 都在監聽（21116／udp 顯示 `UNCONN` 是 UDP 的正常顯示） |
+| ufw | `active`，只放行 21115／21116（tcp＋udp）／21117（含 v6）；21118、21119 沒放行 |
+| IP 衝突檢查（接上網卡後） | `ping` 2 發 2 收；`ip neigh show` 的 `lladdr` 與 CT 的 `hwaddr` 相同，只有這台在用這個 IP。這個 ping 從 node11 發出、CT 就在 node11，只能證明沒有重複，不能證明別台連得到；Client 互連才是 |
+| Client | 現有 Client 互連成功，不用重設 Key（哪幾台、直連或中繼，沒有記錄） |
+
+實際順序和上面的建議略有不同：`pct start 116` 回 `CT 116 already running`，網卡的 `link_down` 在驗證前就已經拿掉。
+
+**nextid 117 與 116**：`pvesh get /cluster/nextid` 回 117，使用者仍用 116 還原且成功。PVE 不會在沒有 `--force` 時覆蓋既有的 CT，所以 116 是空的。nextid 為什麼跳過 116，**未確認**（11/04 的還原測試也用過 116，可能有關，沒有查證）。
+
+### 7-3 還沒做完的
+
+| 項目 | 指令與說明 |
+| --- | --- |
+| 備份一次作為還原點 | `vzdump 116 --storage PBS31 --mode snapshot --notes-template '{{guestname}} restored'`；node11 的 21:30 排程 `--all 1` 也會自動納入 |
+| 更新套件 | `pct exec 116 -- sh -c "apt-get update && apt-get -y full-upgrade"` |
+| 更新映像 | `pct exec 116 -- sh -c "cd /opt/rustdesk && docker compose pull && docker compose up -d"`。11/23 實測：映像 `Pulled`，兩個容器顯示 `Running`（沒有 `Recreated`），代表映像沒有新版；之後用 `docker exec hbbs hbbs --version`、`docker images --digests` 確認（11/04 是 hbbs 1.1.16）。升級前先備份 |
+| 加入 HA | `ha-manager add ct:116 --state started --max_restart 1 --max_relocate 1`；在 node11 會讓 HA 資源變成 5／5／5 |
+| 路由器的 DHCP | 把這個 IP 排除或保留，避免日後被別的設備取得（沿用原 IP 的前提） |
+| DNS 名稱 | 若要用名稱，兩台內網 DNS（AdGuard、Pi-hole）都要補記錄 |
+| 固定映像版本 tag | 同第 6 節未處理項目 |
+
+**加入 LibreNMS**（LibreNMS 是 CT 102，目前在 node12，指令在 node12 執行；只用 Ping，做法同 [Grafana 戰情室（LibreNMS）9-3](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/)）：
+
+```bash
+IP=$(ssh root@node11 "pct config 116" | sed -n 's/^net0:.*ip=\([0-9.]*\)\/.*/\1/p')
+pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device:add --ping-only $IP"
+pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device:poll $IP" | tail -3
+```
+
+11/23 用名稱（`rustdesk.<網域>`）加入失敗：`Could not connect to … using ICMP`、`xmt/rcv/%loss = 0/0/0%`，後續 `poll` 回 `No devices match the given device specification`。0/0/0% 表示一個封包都沒送出，**推測**是內網 DNS 沒有這筆記錄（沒有用 `getent hosts` 確認），改用 IP 加是否成功，**尚未回報**。不要加 `--force`，它會跳過檢查，LibreNMS 會一直顯示 Down。
+
+## 8. 延伸閱讀
 
 - [RustDesk Server OSS（官方總覽）](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/)
 - [RustDesk Server OSS：Docker 安裝](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/docker/)

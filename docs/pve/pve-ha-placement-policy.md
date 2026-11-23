@@ -4,7 +4,7 @@ title: "PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？"
 date: 2026-10-02
 categories: [PVE, HA, ProxCenter]
 permalink: /docs/pve/pve-ha-placement-policy/
-last_modified_at: 2026-11-02
+last_modified_at: 2026-11-23
 ---
 
 # PVE HA 放置策略：PVE HA rules 和 ProxCenter 怎麼分工？
@@ -15,8 +15,8 @@ last_modified_at: 2026-11-02
 | --- | --- |
 | 適合誰看 | 同時用 PVE 和 ProxCenter，不確定規則該設在哪邊的人 |
 | 環境 | Proxmox VE 9.2.20 → 9.2.21，三節點（node10、node11、node12，皆為 Win element M600：Ryzen 9 8945HS、64 GB），Ceph 共用儲存 |
-| 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案；10/19 再次分散；10/29 DRS 以 Manual 模式重新開啟；11/01 整叢集重開後再分散 |
-| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；✅ 10/19 HA 資源分散為 4／5／4；✅ 11/01 整叢集重開後分布跑掉，再分散回三套監控各在一台（第 13-1 節）；⏳ 10/29 DRS 以 Manual 模式重新開啟、VM＋LXC 都評估，觀察中（第 12-5 節）；⏳ 單節點故障演練 |
+| 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案；10/19 再次分散；10/29 DRS 以 Manual 模式重新開啟；11/01 整叢集重開後再分散；11/23 手動更新後再整理（第 13-2 節） |
+| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；✅ 10/19 HA 資源分散為 4／5／4；✅ 11/01 整叢集重開後分布跑掉，再分散回三套監控各在一台（第 13-1 節）；✅ 11/23 手動更新後整理回 5／4／5、三套監控各在一台，並用 `pvesh get /cluster/ha/rules` 確認 PVE HA 只有 DNS、DC 兩條互斥規則（第 13-2 節）；⏳ 10/29 DRS 以 Manual 模式重新開啟、VM＋LXC 都評估，觀察中（第 12-5 節）；⏳ 單節點故障演練 |
 
 ## 1. 先認識幾個名詞
 
@@ -724,6 +724,78 @@ ssh root@node12 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 
 > ⚠️ **整叢集重開後分布一定會跑掉**：10/23、11/01 兩次都是 `ha-rebalance-on-start=1` 依當下負載重新挑節點。每次整叢集開機後，都要用 `ha-manager status` 對照上表，必要時照本節再分散一次。
 
+### 13-2 2026-11-23：手動更新後再整理一次
+
+**為什麼**：11/23 上午手動更新（在 PVE 網頁對 Guest 右鍵 Migrate 搬走、更新、重開，順序 node11 → node12 → node10，**沒有用維護模式**，見 [ProxCenter 更新第 16 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/)），Guest 位置和更新前不同；CRS 是 static，不會自己搬回。
+
+**① 盤點**（node10，唯讀）：
+
+```bash
+ha-manager status | grep -E '^service' | sort -t'(' -k2
+pvesh get /cluster/ha/rules --output-format json
+grep -HE '^(onboot|startup):' /etc/pve/nodes/*/qemu-server/*.conf /etc/pve/nodes/*/lxc/*.conf
+```
+
+| 片段 | 意思 |
+| --- | --- |
+| `ha-manager status \| grep … \| sort -t'(' -k2` | 依所在節點排序，方便對照 |
+| `pvesh get /cluster/ha/rules` | 看 HA 規則有哪些、涵蓋哪些資源 |
+| `grep -HE '^(onboot\|startup):' …` | 一次看全部 Guest 的 `onboot` 與 `startup` |
+
+**看到的結果**（11/23 11:24）：
+
+| 節點 | Guest |
+| --- | --- |
+| node10（6） | AdGuard(100)、LibreNMS(102)、IPAM(103)、UBClient（vm 104，非 HA，running）、Graylog(105)、DC01(vm:106) |
+| node11（5） | WinClient（vm 108，非 HA，stopped）、WireGuard(109)、ProxCenter(110)、CA(vm:111)、Wazuh(112) |
+| node12（5） | Pihole(101)、DC02(vm:107)、ai(113)、Grafana(114)、nextcloud(vm:115) |
+
+**HA rules**：兩條，都是 `resource-affinity`、`affinity: negative`：
+
+| 順序 | 備註（comment） | 資源 |
+| --- | --- | --- |
+| 1 | AdGuard and Pi-hole must run on different nodes | `ct:100`、`ct:101` |
+| 2 | DC01 and DC02 must run on different nodes | `vm:106`、`vm:107` |
+
+三套監控的「分開」**沒有** PVE 規則，靠人工分散。⚠️ 不建議為 Graylog、Wazuh、LibreNMS 加 Keep Separate 規則：三個服務放三台，任一台維護或故障時剩兩台，規則無法滿足；HA 遇到無法滿足的規則會怎麼處理，我的理解是可能不啟動其中一個（**推測，沒有在這個叢集驗證**，見[官方 HA 文件](https://pve.proxmox.com/pve-docs/chapter-ha-manager.html)）。
+
+**② 對照原則**：
+
+| 原則 | 11:24 | 結果 |
+| --- | --- | --- |
+| DNS 成對分開（AdGuard／Pihole） | node10／node12 | ✅（PVE 規則） |
+| DC 成對分開（DC01／DC02） | node10／node12 | ✅（PVE 規則） |
+| 三套監控各在一台 | Graylog **node10**、Wazuh node11、LibreNMS **node10** | ❌ Graylog 與 LibreNMS 同在 node10 |
+| Grafana 放第三台（讀 LibreNMS 與 Wazuh） | node12 | LibreNMS 搬走後要跟著動 |
+| WireGuard 不跟服務最多的節點放一起 | node11（4 個 HA） | ✅ |
+| ai（Lab Ops）不動 | node12 | 維持 |
+
+**③ 搬移**：LibreNMS（ct:102）node10 → node12、Grafana（ct:114）node12 → node10，用第 13-1 節的 `mig` 函式：
+
+```bash
+mig 114 node10     # Grafana：node12 → node10
+mig 102 node12     # LibreNMS：node10 → node12
+```
+
+> `mig` 是函式，只存在貼過它的那個 shell；在新開的 shell 下 `mig 114 node10` 會得到 `command not found`（11/23 發生過，當時 ct:114 已經在 node10，沒有影響）。新 shell 要先貼第 13-1 節的函式定義，或直接 `ha-manager migrate ct:<編號> <節點>`。
+
+**搬完的分布（5／4／5）**（13:24 的 `ha-manager status`）：
+
+| 節點 | HA 資源 | 非 HA |
+| --- | --- | --- |
+| node10 | AdGuard(100)、IPAM(103)、Graylog(105)、Grafana(114)、DC01(vm:106) | UBClient（vm 104，running） |
+| node11 | WireGuard(109)、ProxCenter(110)、Wazuh(112)、CA(vm:111) | WinClient（vm 108，stopped） |
+| node12 | Pihole(101)、LibreNMS(102)、ai(113)、DC02(vm:107)、nextcloud(vm:115) | — |
+
+14 個都 `started`；三套監控各在一台（Graylog node10、Wazuh node11、LibreNMS node12），Grafana 在第三台 node10。
+
+**其他觀察**：
+
+- **沒有任何 Guest 設 `startup` 順序**：`grep` 的輸出只有 `onboot`。`onboot=1` 的是 100、101、102、110、112、113、114、115，其餘是 0 或未設。HA 管理的 Guest 由 HA 啟動，`onboot`／`startup` 順序是否套用，我的理解是不套用（**沒有在這個叢集驗證**，見[官方文件](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_startup_and_shutdown)）。
+- **備份是各節點各跑各的**（`--all 1 --node <節點>`）：Guest 換節點，備份就落在新節點的工作，例如 LibreNMS 從 node10 的 21:00 改到 node12 的 22:00。**推論**（沒有實測）：在 21:00～22:10 之間搬移，可能讓某個 Guest 當晚漏掉或重複備份，所以搬移要在白天。
+- 搬完的功能檢查（Grafana `"database": "ok"`、LibreNMS 有新資料）結果**沒有收到**。
+- 同一天還清掉 CT 102、112 的舊快照，見 [ProxCenter 更新第 16-3 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/proxcenter-ceph-rolling-update/)。
+
 ## 14. 常見問題
 
 | 現象 | 怎麼辦 |
@@ -736,6 +808,8 @@ ssh root@node12 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | 在錯的節點對 CT 下 `pct` 指令，收到【PVE 任務告警】`Configuration file 'nodes/<節點>/lxc/<ID>.conf' does not exist` | 服務已被 HA 搬到別台；11/01 15:40 在 node11 對 CT113 做 `vzdelsnapshot` 就是這樣（CT113 在 node10），到正確的節點重做即可。先用 `ha-manager status` 或 `pvesh get /cluster/resources --type vm` 找出它在哪台 |
 | 整叢集關機再開機後，服務換了一堆節點 | `ha-rebalance-on-start=1` 依開機當下的負載重新挑節點；照第 13-1 節再分散 |
 | Rolling Update 中途中斷 | 可能是 ProxCenter 自己被搬走；先更新沒有 ProxCenter 的節點 |
+| 手動搬走 Guest 做更新，之後位置跑掉 | 沒用維護模式，Guest 不會自動搬回（CRS static）；更新後對照第 13-2 節的原則整理，用 `ha-manager migrate` 搬回（第 13-2 節） |
+| 新開的 shell 下 `mig 114 node10` 出現 `command not found` | `mig` 是函式，只存在貼過它的那個 shell；新 shell 要先貼函式定義（第 13-1 節），或直接 `ha-manager migrate ct:<編號> <節點>` |
 | 叢集使用率很平均，但某台服務特別多 | DRS 只看使用率；可用性風險要人工分散 |
 | DRS 顯示分數 80「To optimize」，Recommendations 卻是 balanced | 分數反映目前的不平衡度，建議要超過觸發門檻才會出現；10/29 實測不平衡度 18% 仍沒有建議（第 12-5 節） |
 
@@ -754,6 +828,8 @@ ssh root@node12 "pct exec 109 -- wg show | grep -E 'interface|listening|peer|lat
 | 2026-10-29 Wazuh 搬到 node10 後的驗收（服務、agent 數、dashboard） | ✅ 三個服務 active、dashboard 正常、Active 16／Disconnected 2（第 13 節） |
 | HA 資源集中在 node10，是否再分散 | ✅ 2026-10-19 由 8／1／4 分散為 4／5／4（第 13 節） |
 | 11/01 整叢集重開後分布跑掉（兩套監控與 WireGuard 同在 node10） | ✅ 2026-11-01 16:18～16:22 搬 4 個服務，回到三套監控各在一台；VPN 從 4G 連得上、LibreNMS 與 IPAM 正常（第 13-1 節） |
+| 11/23 手動更新後位置跑掉（Graylog 與 LibreNMS 同在 node10） | ✅ 整理回 5／4／5、三套監控各在一台（第 13-2 節）；搬完的功能檢查（Grafana、LibreNMS）結果未收到 |
+| 為三套監控建立 Keep Separate 規則是否可行 | ⏳ 不建議（三個服務放三台，一台維護或故障時規則無法滿足）；HA 遇到無法滿足的規則的實際行為**沒有在這個叢集驗證** |
 
 **單節點故障的預期行為**（依 Ceph 預設值推估，未實測）：節點剛失聯的十幾到數十秒，主副本在該節點上的資料讀寫會短暫卡住；確認 OSD 下線後恢復讀寫，但剩下兩台承擔全部負載，而且在節點回來前沒有再壞一顆硬碟的餘裕。
 

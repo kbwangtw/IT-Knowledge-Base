@@ -79,14 +79,14 @@ last_modified_at: 2026-11-22
 | [把 ESXi 上的 Windows＋SQL Server 虛擬機搬到獨立 PVE（二）：踩雷與效能診斷](docs/pve/esxi-vm-to-pve-troubleshooting/) | 搬 VM 時速度只有 10 MiB/s（網卡協商成 100 Mbps）、寫入 local-lvm 慢到停擺（RAID 5 沒有寫入快取）、PVE 把 VMDK 資料檔當磁碟、VirtIO SCSI 開機失敗、VMware Tools 移除失敗 |
 | [VMware 搬到 PVE 後，Windows VM 開機跳出 VMware Tools 錯誤：移除失敗（1603）的處理](docs/pve/pve-vm-remove-vmware-tools-after-migration/) | VM 從 VMware 搬到 PVE 後，登入就跳 `0xc0000096`；`msiexec` 移除回 1603（卡在 `VM_LogStart`）；手動清服務、Run、資料夾、驅動；`qm pending` 讓 Guest Agent 生效 |
 | [兩台獨立 PVE 之間搬 VM：用 qm remote-migrate 線上搬移（PBS 虛擬機實測）](docs/pve/pve-standalone-vm-live-migration/) | 兩台沒組叢集的 PVE 要搬 VM；來源是 ZFS 時停機搬移為什麼失敗；API token、指紋、CPU 世代與 pending 的坑 |
-| [ProxCenter 逐台更新 PVE：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 想用工具一次一台安全地更新叢集（含人不在現場、非 HA VM 的處理，11/17；更新後 Ceph 旗標沒清的處理，11/19） |
+| [ProxCenter 逐台更新 PVE：三個卡關點](docs/pve/proxcenter-ceph-rolling-update/) | 想用工具一次一台安全地更新叢集（含人不在現場、非 HA VM 的處理，11/17；更新後 Ceph 旗標沒清的處理，11/19；手動更新、舊快照清除與 VM 104 備份連續失敗的調查，11/23） |
 | [ProxCenter 企業版更新與擴容：1.4.11 → 1.4.12](docs/pve/proxcenter-enterprise-update/) | 企業版 ProxCenter 自己要怎麼更新；`docker compose up -d` 的陷阱；CT110 擴容 |
 | [PVE 更新重開後 HA 服務卡在 error](docs/pve/pve-ha-service-error-after-reboot/) | HA 服務顯示 error；要手動重開節點 |
 | [PVE 更新後逐台重開（人不在現場）：維護模式加 noout，一次一台](docs/pve/pve-rolling-reboot-after-update/) | 套件更新完裝了新核心要重開，又不在現場、沒有主控台 |
 | [整個 PVE 叢集安全關機與開機：一鍵腳本](docs/pve/pve-cluster-full-shutdown/) | 搬機房、停電維護，要把三台全關再開回來 |
 | [啟用 PVE 防火牆（階段 1a）：只收緊 Ceph 與沒用的埠](docs/pve/pve-firewall-stage1a-ceph-hardening/) | 想擋 VM／CT 被入侵後打節點，又怕鎖死自己或擋到 Ceph；遠端操作要排自動保險 |
 | [Corosync 加第二條 link（備援）：熱載入、不用重啟](docs/pve/corosync-second-link/) | 叢集心跳只有一條線，想消除單點故障 |
-| [PVE HA 放置策略：PVE 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy/) | 兩台 DNS 不能放同一台，規則要設在哪裡 |
+| [PVE HA 放置策略：PVE 和 ProxCenter 怎麼分工？](docs/pve/pve-ha-placement-policy/) | 兩台 DNS 不能放同一台，規則要設在哪裡；手動更新後怎麼把 Guest 位置整理回原則（11/23） |
 | [PVE 單節點故障演練：拔掉一台的電源](docs/pve/pve-single-node-failure-drill/) | 一台突然掛掉時，Ceph 卡多久、HA 多久恢復、告警信收不收得到（演練計畫） |
 | [PBS 更新後，怎麼確認備份還能用？](docs/pve/ProxCenter-PBS-Update-and-DR-Validation-SOP/) | 更新 PBS 前後要查什麼；怎麼安全清理舊 kernel |
 | [PVE 9 登入一直跳「No valid subscription」](docs/pve/pve9-subscription-nag-removal/) | 沒買訂閱，想取消登入提示 |
