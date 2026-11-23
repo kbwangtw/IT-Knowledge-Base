@@ -16,7 +16,7 @@ last_modified_at: 2026-11-23
 | 適合誰看 | 同時用 PVE 和 ProxCenter，不確定規則該設在哪邊的人 |
 | 環境 | Proxmox VE 9.2.20 → 9.2.21，三節點（node10、node11、node12，皆為 Win element M600：Ryzen 9 8945HS、64 GB），Ceph 共用儲存 |
 | 日期 | 2026-10-02 首次整理；10/03、10/08 逐台更新驗證；10/13 定案；10/19 再次分散；10/29 DRS 以 Manual 模式重新開啟；11/01 整叢集重開後再分散；11/23 手動更新後再整理（第 13-2 節） |
-| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；✅ 10/19 HA 資源分散為 4／5／4；✅ 11/01 整叢集重開後分布跑掉，再分散回三套監控各在一台（第 13-1 節）；✅ 11/23 手動更新後整理回 5／4／5、三套監控各在一台，並用 `pvesh get /cluster/ha/rules` 確認 PVE HA 只有 DNS、DC 兩條互斥規則（第 13-2 節）；⏳ 10/29 DRS 以 Manual 模式重新開啟、VM＋LXC 都評估，觀察中（第 12-5 節）；⏳ 單節點故障演練 |
+| 結論 | ✅ DNS、DC 互斥規則在 PVE 生效（兩次逐台更新全程分開）；✅ CRS 改為 Static Load；✅ ProxCenter DRS 停用、規則刪除，Operation mode 改為 Manual；✅ 10/19 HA 資源分散為 4／5／4；✅ 11/01 整叢集重開後分布跑掉，再分散回三套監控各在一台（第 13-1 節）；✅ 11/23 手動更新後整理回 5／4／5、三套監控各在一台（當天 RustDesk 還原為 ct:116 加入 HA 後變 5／5／5，共 15 個資源），並用 `pvesh get /cluster/ha/rules` 確認 PVE HA 只有 DNS、DC 兩條互斥規則（第 13-2 節）；⏳ 10/29 DRS 以 Manual 模式重新開啟、VM＋LXC 都評估，觀察中（第 12-5 節）；⏳ 單節點故障演練 |
 
 ## 1. 先認識幾個名詞
 
@@ -788,6 +788,8 @@ mig 102 node12     # LibreNMS：node10 → node12
 | node12 | Pihole(101)、LibreNMS(102)、ai(113)、DC02(vm:107)、nextcloud(vm:115) | — |
 
 14 個都 `started`；三套監控各在一台（Graylog node10、Wazuh node11、LibreNMS node12），Grafana 在第三台 node10。
+
+**同日稍晚（5／5／5）**：RustDesk 從備份還原為 ct:116（見 [RustDesk Server SOP 第 7 節](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/rustdesk-server-oss-lxc-docker-sop/)），用 `ha-manager add ct:116 --state started --max_restart 1 --max_relocate 1` 加入 HA，放在 node11（`started`）。node11 變成 5 個（WireGuard、ProxCenter、Wazuh、RustDesk、CA），**HA 資源總數 15、分布 5／5／5**（使用者的 HA Resources 畫面確認 15 個）。`grep crs /etc/pve/datacenter.cfg` 仍為 `crs: ha=static,ha-rebalance-on-start=1`，沒有開自動平衡，所以手動整理的位置不會被自動搬動。
 
 **其他觀察**：
 

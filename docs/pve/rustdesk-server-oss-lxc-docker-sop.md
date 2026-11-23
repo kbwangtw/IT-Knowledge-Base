@@ -17,7 +17,7 @@ last_modified_at: 2026-11-23
 | 適合誰看 | 想在 PVE 自建遠端桌面中繼／註冊服務的人；第一次接觸 RustDesk 的人 |
 | 環境 | PVE 9.x；LXC（Ubuntu 22.04 範本，unprivileged）；Docker Compose；`rustdesk/rustdesk-server` 映像檔 |
 | 日期 | 2026-11-04（部署）；2026-11-06 結案；2026-11-23 從備份還原為 CT 116，重新啟用（第 7 節） |
-| 結論 | ✅ CT 115 完成 RustDesk Server OSS 部署：Docker Compose 跑 hbbs／hbbr、ufw 只放行必要 Port、兩台 Client 互連正常、PBS 備份與還原後 Key 一致、已加入 HA 並驗證遷移；VPN 使用者從外部連入未實測（結案原因見第 6 節）。**已結案**，環境無外部使用者，僅作架設練習；CT 115 已於 2026-11-06 下線並刪除。**2026-11-23 重新啟用**：從 11/04 的 protected 備份還原成 CT 116（VMID 115 已被 nextcloud 使用），沿用原 IP，公鑰雜湊 `42ce40056630` 與 11/04 記錄一致，現有 Client 互連成功；HA、備份確認、LibreNMS 等還沒做完（第 7 節） |
+| 結論 | ✅ CT 115 完成 RustDesk Server OSS 部署：Docker Compose 跑 hbbs／hbbr、ufw 只放行必要 Port、兩台 Client 互連正常、PBS 備份與還原後 Key 一致、已加入 HA 並驗證遷移；VPN 使用者從外部連入未實測（結案原因見第 6 節）。**已結案**，環境無外部使用者，僅作架設練習；CT 115 已於 2026-11-06 下線並刪除。**2026-11-23 重新啟用**：從 11/04 的 protected 備份還原成 CT 116（VMID 115 已被 nextcloud 使用），沿用原 IP，公鑰雜湊 `42ce40056630` 與 11/04 記錄一致，現有 Client 互連成功；當天又完成映像確認（無新版）、LibreNMS（SNMPv3，關閉 sensors 模組）、HA（ct:116，5／5／5）、DHCP 保留、兩台內網 DNS 記錄，之後再把 IP 調整為同網段另一個位址（第 7-4 節）；套件更新、還原點備份、排程備份結果尚未回報（第 7-3 節） |
 | 官方文件 | [RustDesk Server OSS](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/)、[Docker 安裝](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/docker/)、[Client 設定](https://rustdesk.com/docs/en/self-host/client-configuration/) |
 
 > 文中 IP 都是文件示範位址（192.0.2.0/24），`<網域>` 請換成自己的網域，指令執行前請替換。
@@ -430,7 +430,11 @@ ha-manager status | grep ct:115
 | 還原備份時，原本的 VMID 已經被別的 Guest 使用 | 不要還原成原 ID；用 `pvesh get /cluster/nextid` 找新 ID。`pvesm list <PBS 儲存名稱> --vmid <原 ID>` 會同時列出同一個 VMID 的 `ct/` 與 `vm/` 備份（本案 115 有 RustDesk 的 `pbs-ct` 和 nextcloud 的 `pbs-vm`），要選 `pbs-ct` 那一筆（第 7 節） |
 | `pvesh get /cluster/nextid` 回 117，但 116 其實是空的 | 還原成 116 成功（PVE 不會在沒有 `--force` 時覆蓋既有的 CT）；nextid 為什麼跳過 116，**未確認**（第 7 節） |
 | `docker compose pull` 之後兩個容器顯示 `Running`、沒有 `Recreated` | 拉到的映像和原本相同，沒有新版本，容器不會被重建；用 `docker exec hbbs hbbs --version` 與 `docker images --digests` 確認（第 7 節） |
-| LibreNMS `device:add --ping-only` 回 `Could not connect to … using ICMP`、`xmt/rcv/%loss = 0/0/0%` | 一個封包都沒送出，通常是名稱解析不到（**推測**是內網 DNS 沒有這筆記錄，11/23 只看到這個輸出，沒有再用 `getent hosts` 確認）；改用 IP 加，或到兩台內網 DNS 補記錄（第 7 節） |
+| LibreNMS `device:add --ping-only` 回 `Could not connect to … using ICMP`、`xmt/rcv/%loss = 0/0/0%` | 一個封包都沒送出，是名稱解析不到：11/23 用名稱加入失敗，改用 IP 加入成功；原因是內網 DNS 還沒有這筆記錄，補上之後兩台 DNS 都解析得到（第 7 節） |
+| LibreNMS 加了 CT 之後，OS 顯示 `proxmox`、有一堆溫度 sensors | LXC 與 PVE host 共用 kernel，SNMP 看到的是 host 的資訊。只要監控這台 CT 本身，就關掉 sensors 模組（第 7-3 節） |
+| 腳本最後一行 `select … snmpver …` 回 `ERROR 1054 Unknown column` | LibreNMS 26.10 的 `devices` 資料表已沒有 SNMP 設定欄位，裝置其實已加入；查詢只選 `device_id, hostname` 即可（見 [Wazuh 維運](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-operations/) 的 26.10 說明） |
+| 想看 RustDesk 的 `docker-compose.yml`，結果 `No such file or directory` | 實際檔名是 `/opt/rustdesk/compose.yml`；不確定檔名時用 `cd /opt/rustdesk && docker compose config` 印出實際生效的設定 |
+| CT 換了 IP，Server 要不要改 | 本案 `compose.yml` 沒有 `-r`、也沒寫死 IP，兩個容器用 `network_mode: host`，**不用改也不用重啟**；Client 只要把 ID Server 改成新位址，Relay Server 欄位可留空（第 7-4 節） |
 
 ## 6. 結案紀錄與未驗證項目
 
@@ -497,19 +501,22 @@ ha-manager status | grep ct:115
 
 **nextid 117 與 116**：`pvesh get /cluster/nextid` 回 117，使用者仍用 116 還原且成功。PVE 不會在沒有 `--force` 時覆蓋既有的 CT，所以 116 是空的。nextid 為什麼跳過 116，**未確認**（11/04 的還原測試也用過 116，可能有關，沒有查證）。
 
-### 7-3 還沒做完的
+### 7-3 後續處理與結果
 
-| 項目 | 指令與說明 |
-| --- | --- |
-| 備份一次作為還原點 | `vzdump 116 --storage PBS31 --mode snapshot --notes-template '{{guestname}} restored'`；node11 的 21:30 排程 `--all 1` 也會自動納入 |
-| 更新套件 | `pct exec 116 -- sh -c "apt-get update && apt-get -y full-upgrade"` |
-| 更新映像 | `pct exec 116 -- sh -c "cd /opt/rustdesk && docker compose pull && docker compose up -d"`。11/23 實測：映像 `Pulled`，兩個容器顯示 `Running`（沒有 `Recreated`），代表映像沒有新版；之後用 `docker exec hbbs hbbs --version`、`docker images --digests` 確認（11/04 是 hbbs 1.1.16）。升級前先備份 |
-| 加入 HA | `ha-manager add ct:116 --state started --max_restart 1 --max_relocate 1`；在 node11 會讓 HA 資源變成 5／5／5 |
-| 路由器的 DHCP | 把這個 IP 排除或保留，避免日後被別的設備取得（沿用原 IP 的前提） |
-| DNS 名稱 | 若要用名稱，兩台內網 DNS（AdGuard、Pi-hole）都要補記錄 |
-| 固定映像版本 tag | 同第 6 節未處理項目 |
+| 項目 | 狀態 | 說明 |
+| --- | --- | --- |
+| 更新映像 | ✅ 無新版 | `pct exec 116 -- sh -c "cd /opt/rustdesk && docker compose pull && docker compose up -d"`：兩個容器顯示 `Running`（沒有 `Recreated`），映像沒有新版；hbbs 仍是 1.1.16，IMAGE ID 開頭 `8ecdab65deb7`。升級前先備份 |
+| 加入 HA | ✅ | `ha-manager add ct:116 --state started --max_restart 1 --max_relocate 1`；ct:116 在 node11、`started`，HA 資源變成 5／5／5（共 15 個） |
+| 路由器 DHCP | ✅ | 已保留這個 IP |
+| DNS 名稱 | ✅ | 兩台內網 DNS 都補了 `rustdesk` 記錄，各用 `nslookup` 查一次都回同一個 IP（其中一台標 `Non-authoritative answer`，兩台角色不同，答案一致即可） |
+| LibreNMS | ✅ | 先用 `--ping-only` 加入，再改成 SNMPv3（見下），device 29 |
+| 密碼暫存檔 | ✅ | 腳本產生的暫存檔已清除：node11 的 `/root/.snmp-add-116` 與 CT 116 的 `/root/.snmp-cu` 都是 `No such file or directory` |
+| CRS 設定 | ✅ | `grep crs /etc/pve/datacenter.cfg` 為 `crs: ha=static,ha-rebalance-on-start=1`，沒有開自動平衡 |
+| 更新 CT 內的套件 | 未回報 | `pct exec 116 -- sh -c "apt-get update && apt-get -y full-upgrade"` |
+| 備份一次作為還原點 | 未回報 | `vzdump 116 --storage PBS31 --mode snapshot --notes-template '{{guestname}} restored'`；node11 的 21:30 排程 `--all 1` 也會納入。CT 116 第一次排程備份與 22:45 verify 的結果**尚未回報** |
+| 固定映像版本 tag | 未處理 | 同第 6 節 |
 
-**加入 LibreNMS**（LibreNMS 是 CT 102，目前在 node12，指令在 node12 執行；只用 Ping，做法同 [Grafana 戰情室（LibreNMS）9-3](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/)）：
+**加入 LibreNMS**（LibreNMS 是 CT 102，當時在 node12，指令在 node12 執行；做法同 [Grafana 戰情室（LibreNMS）9-3](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/grafana-war-room-librenms/)）：
 
 ```bash
 IP=$(ssh root@node11 "pct config 116" | sed -n 's/^net0:.*ip=\([0-9.]*\)\/.*/\1/p')
@@ -517,7 +524,47 @@ pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device
 pct exec 102 -- su - librenms -s /bin/bash -c "cd /opt/librenms && ./lnms device:poll $IP" | tail -3
 ```
 
-11/23 用名稱（`rustdesk.<網域>`）加入失敗：`Could not connect to … using ICMP`、`xmt/rcv/%loss = 0/0/0%`，後續 `poll` 回 `No devices match the given device specification`。0/0/0% 表示一個封包都沒送出，**推測**是內網 DNS 沒有這筆記錄（沒有用 `getent hosts` 確認），改用 IP 加是否成功，**尚未回報**。不要加 `--force`，它會跳過檢查，LibreNMS 會一直顯示 Down。
+用名稱（`rustdesk.<網域>`）加入失敗，改用 IP 才成功，原因是當時內網 DNS 沒有這筆記錄。不要加 `--force`，它會跳過檢查，LibreNMS 會一直顯示 Down。`--ping-only` 加成功後是 device 28。
+
+**改成 SNMPv3**（不想只看 Ping 時）：這個環境另有一支跨節點的 SNMPv3 腳本（原理同 [Wazuh 維運](https://kbwangtw.github.io/IT-Knowledge-Base/docs/pve/wazuh-lxc-ubuntu2204-operations/) 的 SNMPv3 小節），流程如下，密碼由腳本隨機產生，不要貼到聊天或文件：
+
+| 步驟 | 做什麼 |
+| --- | --- |
+| 1 | 在 CT 內安裝並設定 `snmpd`，用暫存檔建立 SNMPv3 使用者（`createUser`，之後會轉成 `usmUser`）；認證 SHA、加密 AES |
+| 2 | ufw 只放行 LibreNMS 來源：`ufw allow from <LibreNMS IP> to any port 161 proto udp` |
+| 3 | 刪除舊的 ping-only 裝置，再用 `lnms device:add -3 -u <使用者> -a SHA -A <密碼> -x AES -X <密碼> <IP>` 重新加入（device 28 → 29） |
+| 4 | 清除兩邊的暫存檔（見上表的驗證） |
+
+腳本最後一行原本想用 `select … snmpver …` 確認，在 LibreNMS 26.10 回 `ERROR 1054`（欄位已移除），裝置其實已加入，只查 `device_id, hostname` 即可。
+
+**關閉 sensors 模組**：LXC 與 PVE host 共用 kernel，SNMP 看到的是 host 的溫度 sensors（10 個），OS 也顯示 `proxmox`，對這台 CT 沒有意義。關法是用資料庫把這台的 sensors 輪詢與探索都設為 0，並刪掉已建立的 temperature sensors：
+
+```sql
+DELETE FROM devices_attribs WHERE device_id=29 AND attrib_type IN ('poll_sensors','discover_sensors');
+INSERT INTO devices_attribs (device_id, attrib_type, attrib_value) VALUES (29,'poll_sensors','0'),(29,'discover_sensors','0');
+DELETE FROM sensors WHERE device_id=29 AND sensor_class='temperature';
+```
+
+執行後該裝置的 temperature sensors 剩 0 筆（實測）。`device_id` 要換成自己的值。
+
+### 7-4 之後又調整了 IP
+
+11/23 當天，使用者又把 CT 116 的 IP 從 192.0.2.52 改成 192.0.2.35（文件示範位址，非實際值）。Server 的 Key 與 IP 無關，仍是 `42ce40056630`。
+
+| # | 項目 | 做法與結果 |
+| --- | --- | --- |
+| 1 | CT 116 | `pct config 116 \| grep ^net0`、`pct exec 116 -- ip -4 addr show eth0`：`net0` 與 `eth0` 都是新 IP（`/24`），MAC 與先前一致 ✅ |
+| 2 | RustDesk 設定 | `cat /opt/rustdesk/docker-compose.yml` 回 `No such file or directory`，因為檔名是 `compose.yml`；`cd /opt/rustdesk && docker compose config` 顯示 hbbs 與 hbbr 的 `command:` 只有 `hbbs`／`hbbr`，沒有 `-r <IP>`，且兩個容器都是 `network_mode: host` ✅ 不用改、不用重啟 |
+| 3 | LibreNMS | `lnms device:rename <舊 IP> <新 IP>` 回 `Renamed … to …`，device 29 的 SNMPv3 設定與 sensors 關閉設定都保留 ✅（改名後 SNMP 是否有資料，**未回報**） |
+| 4 | DHCP 保留 | 舊 IP 的保留是否已移除，**未回報**（若還在，建議刪除，避免日後被別的設備取得） |
+| 5 | 兩台內網 DNS | 都改成新 IP ✅ |
+| 6 | Client | 改 ID Server 後連線成功 ✅ |
+
+**Client 怎麼改**：沒有設 `-r`，Relay Server 欄位留空時 Client 會用 ID Server 的位址去連 relay，所以只改 ID Server（填 IP 或 DNS 名稱），Key 不變。建議統一填 DNS 名稱，之後再換 IP 就不用逐台改 Client。
+
+**踩雷**：在 node11 執行 `lnms device:rename` 回 `Configuration file 'nodes/node11/lxc/102.conf' does not exist`，因為 CT 102 不在 node11，指令沒有改到任何東西；`pct exec` 要在 CT 所在的節點執行。
+
+**這次沒有確認的事**：IP 為什麼要改（使用者沒有說明）。
 
 ## 8. 延伸閱讀
 
