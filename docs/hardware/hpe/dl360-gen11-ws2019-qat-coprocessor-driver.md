@@ -18,7 +18,7 @@ last_modified_at: 2026-11-27
 | 日期 | 2026-11-27 |
 | 需要準備 | 能上網下載 Intel driver 的電腦、主機的系統管理員帳號 |
 | 風險 | 低：只是安裝 driver；但 Intel 官網目前沒有把 Windows Server 2019 列在 HW 2.0 driver 的支援清單（見「注意事項」） |
-| 結論 | ✅ 已確認驚嘆號裝置是 Intel QAT（`DEV_4942`，Intel 401xx Accelerator）<br>⏳ 到 Intel 官網下載 QAT driver 安裝，安裝結果待回報 |
+| 結論 | ✅ 已確認驚嘆號裝置是 Intel QAT（`DEV_4942`，Intel 401xx Accelerator）<br>✅ 從 Intel 官網下載 QAT driver 安裝後，裝置恢復正常（2026-11-27 回報；driver 版本號未記錄） |
 
 ## 1. 先認識幾個名詞
 
@@ -112,11 +112,13 @@ Get-FileHash .\<下載的檔名>.zip -Algorithm SHA256
 
 **應該看到什麼**：Coprocessor 的驚嘆號消失，裝置改顯示在 Intel QAT 相關類別底下。
 
+**這次看到的結果**：安裝 Intel 官網下載的 QAT driver 後，裝置恢復正常（2026-11-27 回報）。
+
 ## 注意事項
 
 | 項目 | 說明 |
 | --- | --- |
-| OS 支援範圍 | Intel 官網目前的 HW 2.0 driver 只列出 Windows Server 2022、2025，**沒有列出 2019**。裝在 2019 上屬於非官方驗證組合，交付前要確認裝置運作正常 |
+| OS 支援範圍 | Intel 官網目前的 HW 2.0 driver 只列出 Windows Server 2022、2025，**沒有列出 2019**。這次在 2019 上安裝成功，但仍屬非官方驗證組合，交付前要確認裝置運作正常 |
 | 先看 HPE 有沒有 | 如果 HPE 支援網站的 DL360 Gen11、Windows Server 2019 頁面有 QAT 元件，優先使用 HPE 打包的版本 |
 | SUM 遠端更新抓不到 | 透過 iLO 遠端執行 SUM 只會盤點韌體，偵測不到 QAT driver；要在主機的 Windows 上執行 SUM |
 | 不裝會怎樣 | 沒有應用程式使用 QAT 加速時，不影響系統運作；驚嘆號只是外觀問題 |
@@ -131,11 +133,6 @@ Get-FileHash .\<下載的檔名>.zip -Algorithm SHA256
 | 下載到 HW 1.x 或 CE Release 的 driver | 裝不上或不對應；重新下載 HW Version 2.0 |
 | 用 iLO 遠端跑 SUM，清單裡沒有 QAT | 正常現象；改在主機 OS 上執行 SUM，或手動下載安裝 |
 | Hardware ID 不是 `DEV_4942` | 是別的加速器（DSA、IAA、DLB 等），不要裝 QAT driver，另外查對應的 driver |
-
-## 待辦
-
-- [ ] 回報 Intel QAT driver 在 Windows Server 2019 上的安裝結果（版本號、是否成功、驚嘆號是否消失）
-- [ ] 查證 HPE 支援網站是否有 DL360 Gen11、Windows Server 2019 專用的 QAT 元件
 
 ## 延伸閱讀
 
